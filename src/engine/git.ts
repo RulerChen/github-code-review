@@ -28,6 +28,9 @@ export function git(cwd: string, args: string[], okCodes: readonly number[] = [0
         reject(new GitError(`git ${args[0]} failed: ${detail}`, code));
       },
     );
+    // git can exit before reading all of the input, as on an option it does not know. Its exit status reports
+    // that, and the write error would otherwise crash the server.
+    child.stdin?.on("error", () => {});
     child.stdin?.end(input);
   });
 }

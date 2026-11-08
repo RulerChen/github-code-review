@@ -49,15 +49,18 @@ export function formatChanges(diff: DiffResult): string {
 }
 
 /**
- * The reviews numbered above `after`, or the latest one without it, and any draft comments not
- * submitted yet. Null when there are neither.
+ * The reviews numbered above `after`, or the latest one without it. Only without `after`, when the user asks
+ * directly, does it add the draft comments not submitted yet and the @claude questions, which never go into a
+ * review: the wait flow must not act on drafts before the user submits. Null when there is nothing to show.
  */
 export function formatReviewComments(threads: Thread[], submissions: Submission[], after: number | null): string | null {
+  const withDrafts = after === null;
   const reviews = after === null ? submissions.slice(-1) : submissions.filter((s) => s.n > after);
   const numbers = new Set(reviews.map((s) => s.n));
   const submitted = threads.filter((t) => t.comments.some((c) => c.review !== null && numbers.has(c.review)));
-  const drafts = threads.filter((t) => t.comments.some((c) => c.draft));
-  if (!reviews.length && !drafts.length) return null;
+  const drafts = withDrafts ? threads.filter((t) => !submitted.includes(t) && t.comments.some((c) => c.draft)) : [];
+  const asked = withDrafts ? threads.filter((t) => t.comments.every((c) => c.author !== "user" || (!c.draft && c.review === null))) : [];
+  if (!reviews.length && !drafts.length && !asked.length) return null;
 
   const out: string[] = [];
   for (const s of reviews) {
@@ -66,16 +69,20 @@ export function formatReviewComments(threads: Thread[], submissions: Submission[
   }
   if (reviews.length) {
     out.push(`Comments in ${submitted.length} thread${submitted.length === 1 ? "" : "s"}:`);
-    for (const t of submitted) out.push("", formatThread(t));
+    for (const t of submitted) out.push("", formatThread(t, withDrafts));
   }
   if (drafts.length) {
     out.push("", `Draft comments the user has not submitted yet, in ${drafts.length} thread${drafts.length === 1 ? "" : "s"}:`);
-    for (const t of drafts) out.push("", formatThread(t));
+    for (const t of drafts) out.push("", formatThread(t, true));
+  }
+  if (asked.length) {
+    out.push("", `Questions the user asked @claude, answered in the page, in ${asked.length} thread${asked.length === 1 ? "" : "s"}:`);
+    for (const t of asked) out.push("", formatThread(t, true));
   }
   return out.join("\n");
 }
 
-function formatThread(t: Thread): string {
+function formatThread(t: Thread, withDrafts: boolean): string {
   const { anchor } = t;
   const version = anchor.commit ? ` at commit ${anchor.commit}` : anchor.side !== "old" ? " in the working tree" : "";
   const where =
@@ -84,7 +91,7 @@ function formatThread(t: Thread): string {
       : `${anchor.side} ${anchor.start === anchor.end ? `line ${anchor.start}` : `lines ${anchor.start}-${anchor.end}`}`;
   const snippet = anchor.side === null ? [] : t.snippet.split("\n").slice(0, 8).map((l) => `  > ${l}`);
   const comments = t.comments
-    .filter((c) => c.status === "done")
+    .filter((c) => c.status === "done" && (withDrafts || !c.draft))
     .map((c) => {
       const who = c.author === "claude" ? "Claude" : c.draft ? "User (draft)" : c.review ? `User (review ${c.review})` : "User";
       return `  ${who}: ${indent(c.body, "    ").trimStart()}`;

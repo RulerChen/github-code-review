@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { changeIds } from "../shared/hunks";
-import type { Block, DisplayHunk, FileDiff, Review, Thread } from "../shared/types";
+import type { Block, FileDiff, Review, Thread } from "../shared/types";
 import { type CommentsApi, onShownVersion, useComments } from "./comments";
 import { hasLine } from "./DiffTable";
-import { ChevronIcon, FileCard, hunksOf } from "./FileCard";
+import { baseHunksOf, ChevronIcon, FileCard } from "./FileCard";
 import { keepHeaderInPlace } from "./keyboard";
 import { Markdown } from "./Markdown";
 
@@ -73,8 +73,6 @@ export function buildTopics(review: Review, files: FileDiff[]): TopicView[] {
   return ordered;
 }
 
-const partHunks = new WeakMap<TopicPart, DisplayHunk[]>();
-
 /**
  * Whether a thread belongs to the topic: its line is in the topic's diff before any expanding, or it is a comment on
  * a whole file and the topic is the first with the file.
@@ -83,15 +81,7 @@ export function topicShows(topic: TopicView, thread: Thread, versions: CommentsA
   const { anchor } = thread;
   if (anchor.side === null) return topic.firstFor.has(anchor.path);
   if (!onShownVersion(thread, versions)) return false;
-  return topic.parts.some((p) => {
-    if (p.file.path !== anchor.path) return false;
-    let hunks = partHunks.get(p);
-    if (!hunks) {
-      hunks = hunksOf(p.file, p.blocks, null);
-      partHunks.set(p, hunks);
-    }
-    return hasLine(hunks, anchor.side, anchor.end);
-  });
+  return topic.parts.some((p) => p.file.path === anchor.path && hasLine(baseHunksOf(p.file, p.blocks), anchor.side, anchor.end));
 }
 
 interface SectionProps {

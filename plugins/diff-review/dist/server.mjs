@@ -36771,6 +36771,8 @@ function git(cwd, args, okCodes = [0], input2) {
         reject(new GitError(`git ${args[0]} failed: ${detail}`, code));
       }
     );
+    child.stdin?.on("error", () => {
+    });
     child.stdin?.end(input2);
   });
 }
@@ -36780,6 +36782,7 @@ var MAX_CONTENT_BYTES = 1024 * 1024;
 var MAX_DIFF_LINES = 2e4;
 var MAX_DIFF_CHARS = 500 * 1024;
 var MAX_COMMITS = 250;
+var BATCH_BYTES = 64 * 1024 * 1024;
 var EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 async function computeDiff(repo, compare = {}) {
   const base = compare.base ?? "HEAD";
@@ -36948,29 +36951,45 @@ async function readBlobs(repoRoot, ids) {
   if (unique.length === 0) return out;
   const checks = (await git(repoRoot, ["cat-file", "--batch-check"], [0], `${unique.join("\n")}
 `)).toString("utf8").split("\n");
-  const wanted = [];
-  unique.forEach((id, i) => {
-    const [, type, size] = checks[i].split(" ");
-    if (type !== "blob") out.set(id, { kind: "absent" });
-    else if (Number(size) > MAX_CONTENT_BYTES) out.set(id, { kind: "tooLarge" });
-    else wanted.push(id);
-  });
-  if (wanted.length === 0) return out;
-  const buf = await git(repoRoot, ["cat-file", "--batch"], [0], `${wanted.join("\n")}
+  const batches = [[]];
+  let bytes = 0;
+  for (const [i, id] of unique.entries()) {
+    const [, type, sizeText] = checks[i].split(" ");
+    const size = Number(sizeText);
+    if (type !== "blob") {
+      out.set(id, { kind: "absent" });
+      continue;
+    }
+    if (size > MAX_CONTENT_BYTES) {
+      out.set(id, { kind: "tooLarge" });
+      continue;
+    }
+    if (bytes + size > BATCH_BYTES) {
+      batches.push([]);
+      bytes = 0;
+    }
+    batches.at(-1).push(id);
+    bytes += size;
+  }
+  for (const wanted of batches) {
+    if (wanted.length === 0) continue;
+    const buf = await git(repoRoot, ["cat-file", "--batch"], [0], `${wanted.join("\n")}
 `);
-  let pos = 0;
-  for (const id of wanted) {
-    const eol = buf.indexOf(10, pos);
-    const size = Number(buf.subarray(pos, eol).toString("latin1").split(" ")[2]);
-    out.set(id, classify(buf.subarray(eol + 1, eol + 1 + size)));
-    pos = eol + 1 + size + 1;
+    let pos = 0;
+    for (const id of wanted) {
+      const eol = buf.indexOf(10, pos);
+      const size = Number(buf.subarray(pos, eol).toString("latin1").split(" ")[2]);
+      out.set(id, classify(buf.subarray(eol + 1, eol + 1 + size)));
+      pos = eol + 1 + size + 1;
+    }
   }
   return out;
 }
 async function generatedPaths(repoRoot, paths, source) {
   if (paths.length === 0) return /* @__PURE__ */ new Set();
-  const args = ["check-attr", "-z", "--stdin", ...source ? ["--source", source] : [], "linguist-generated"];
-  const parts = (await git(repoRoot, args, [0], `${paths.join("\0")}\0`)).toString("utf8").split("\0");
+  const input2 = `${paths.join("\0")}\0`;
+  const read = (from) => git(repoRoot, ["check-attr", "-z", "--stdin", ...from ? ["--source", from] : [], "linguist-generated"], [0], input2);
+  const parts = (await read(source).catch((err) => source ? read(null) : Promise.reject(err))).toString("utf8").split("\0");
   const out = /* @__PURE__ */ new Set();
   for (let i = 0; i + 2 < parts.length; i += 3) {
     if (parts[i + 2] === "set" || parts[i + 2] === "true") out.add(parts[i]);
@@ -37277,6 +37296,12 @@ import { readFile as readFile2 } from "node:fs/promises";
 import { createServer } from "node:http";
 import path3 from "node:path";
 
+// src/shared/comparison.ts
+function comparisonFromQuery(params) {
+  const base = params.get("base");
+  return base ? { base, head: params.get("head") || null, threeDot: params.get("dots") !== "2" } : null;
+}
+
 // src/server/threads.ts
 import { randomBytes } from "node:crypto";
 
@@ -37389,18 +37414,19 @@ var RepoThreads = class {
     };
     try {
       const parent = this.parentSession;
-      const resume = this.fork?.parent === parent ? this.fork.session : null;
-      const forking = resume === null && parent !== null;
+      const known = this.fork?.parent === parent ? this.fork : null;
+      const forking = known === null && parent !== null;
       let note = "";
       let res;
       try {
-        res = await ask({ cwd: this.cwd, resume: resume ?? parent, fork: forking, prompt, onText, onActivity });
+        res = await ask({ cwd: this.cwd, resume: known ? known.session : parent, fork: forking, prompt, onText, onActivity });
       } catch (err) {
         if (!forking) throw err;
         note = `_Answered without the original conversation, because it could not be resumed: ${errorText(err)}_
 
 `;
         res = await ask({ cwd: this.cwd, resume: null, fork: false, prompt, onText, onActivity });
+        this.fork = { parent, session: res.sessionId };
       }
       if (res.sessionId) this.fork = { parent, session: res.sessionId };
       reply.body = note + res.text;
@@ -37489,7 +37515,7 @@ var ReviewServer = class {
   addView(repo, compare, review, cwd, session) {
     let id;
     do
-      id = Array.from({ length: 5 }, () => String.fromCharCode(97 + randomInt(26))).join("");
+      id = Array.from({ length: 8 }, () => String.fromCharCode(97 + randomInt(26))).join("");
     while (this.views.has(id));
     const view = { id, repo, compare, review };
     this.views.set(view.id, view);
@@ -37531,7 +37557,7 @@ var ReviewServer = class {
       const threadId = api[3];
       if (req.method === "GET" && route === "diff" && !threadId) {
         try {
-          const compare = comparisonFrom(searchParams) ?? view.compare;
+          const compare = comparisonFromQuery(searchParams) ?? view.compare;
           const version2 = await diffVersion(view.repo, compare);
           const diff = await computeDiff(view.repo, compare);
           const data = { diff, version: version2, opened: view.compare, review: view.review, threads: threads.threads };
@@ -37542,7 +37568,7 @@ var ReviewServer = class {
       }
       if (req.method === "GET" && route === "version" && !threadId) {
         try {
-          return sendJson(res, 200, { version: await diffVersion(view.repo, comparisonFrom(searchParams) ?? view.compare) });
+          return sendJson(res, 200, { version: await diffVersion(view.repo, comparisonFromQuery(searchParams) ?? view.compare) });
         } catch (err) {
           return sendJson(res, 500, { error: errorMessage(err) });
         }
@@ -37580,8 +37606,12 @@ var ReviewServer = class {
         if (!Number.isInteger(after) || after < 0) return sendText(res, 400, "Invalid after");
         const stop = threads.waitForReview(
           after,
-          (s) => sendText(res, 200, `The user submitted review ${s.n}. Call get_review_comments from the diff-review MCP server with after set to ${after}.
-`)
+          (s) => sendText(
+            res,
+            200,
+            `The user submitted review ${s.n} in ${view.repo}. Call get_review_comments from the diff-review MCP server with repo set to ${JSON.stringify(view.repo)} and after set to ${after}.
+`
+          )
         );
         res.on("close", stop);
         return;
@@ -37650,11 +37680,6 @@ async function readJson(req, limit = 256 * 1024) {
   } catch {
     return null;
   }
-}
-function comparisonFrom(params) {
-  const base = params.get("base");
-  if (!base) return null;
-  return { base, head: params.get("head") || null, threeDot: params.get("dots") !== "2" };
 }
 function isText(value, max, nonEmpty = false) {
   return typeof value === "string" && value.length <= max && (!nonEmpty || value.trim() !== "");
@@ -37725,11 +37750,13 @@ function formatChanges(diff) {
   return out.join("\n");
 }
 function formatReviewComments(threads, submissions, after) {
+  const withDrafts = after === null;
   const reviews = after === null ? submissions.slice(-1) : submissions.filter((s) => s.n > after);
   const numbers = new Set(reviews.map((s) => s.n));
   const submitted = threads.filter((t) => t.comments.some((c) => c.review !== null && numbers.has(c.review)));
-  const drafts = threads.filter((t) => t.comments.some((c) => c.draft));
-  if (!reviews.length && !drafts.length) return null;
+  const drafts = withDrafts ? threads.filter((t) => !submitted.includes(t) && t.comments.some((c) => c.draft)) : [];
+  const asked = withDrafts ? threads.filter((t) => t.comments.every((c) => c.author !== "user" || !c.draft && c.review === null)) : [];
+  if (!reviews.length && !drafts.length && !asked.length) return null;
   const out = [];
   for (const s of reviews) {
     out.push(`Review ${s.n}, submitted at ${new Date(s.submittedAt).toLocaleTimeString("en-GB")}.`);
@@ -37737,20 +37764,24 @@ function formatReviewComments(threads, submissions, after) {
   }
   if (reviews.length) {
     out.push(`Comments in ${submitted.length} thread${submitted.length === 1 ? "" : "s"}:`);
-    for (const t of submitted) out.push("", formatThread(t));
+    for (const t of submitted) out.push("", formatThread(t, withDrafts));
   }
   if (drafts.length) {
     out.push("", `Draft comments the user has not submitted yet, in ${drafts.length} thread${drafts.length === 1 ? "" : "s"}:`);
-    for (const t of drafts) out.push("", formatThread(t));
+    for (const t of drafts) out.push("", formatThread(t, true));
+  }
+  if (asked.length) {
+    out.push("", `Questions the user asked @claude, answered in the page, in ${asked.length} thread${asked.length === 1 ? "" : "s"}:`);
+    for (const t of asked) out.push("", formatThread(t, true));
   }
   return out.join("\n");
 }
-function formatThread(t) {
+function formatThread(t, withDrafts) {
   const { anchor: anchor2 } = t;
   const version2 = anchor2.commit ? ` at commit ${anchor2.commit}` : anchor2.side !== "old" ? " in the working tree" : "";
   const where = anchor2.side === null ? "the whole file" : `${anchor2.side} ${anchor2.start === anchor2.end ? `line ${anchor2.start}` : `lines ${anchor2.start}-${anchor2.end}`}`;
   const snippet = anchor2.side === null ? [] : t.snippet.split("\n").slice(0, 8).map((l) => `  > ${l}`);
-  const comments = t.comments.filter((c) => c.status === "done").map((c) => {
+  const comments = t.comments.filter((c) => c.status === "done" && (withDrafts || !c.draft)).map((c) => {
     const who = c.author === "claude" ? "Claude" : c.draft ? "User (draft)" : c.review ? `User (review ${c.review})` : "User";
     return `  ${who}: ${indent(c.body, "    ").trimStart()}`;
   });
@@ -37877,15 +37908,25 @@ async function runMcp() {
     "get_review_comments",
     {
       title: "Get review comments",
-      description: "Read the review the user submitted in the diff viewer: their comment on the whole review and each comment thread with its id, the selected lines (or the whole file) and the earlier comments, plus draft comments they have not submitted yet. Use it when the wait command from open_diff_viewer finishes, or when the user asks you to address their review comments.",
+      description: "Read the review the user submitted in the diff viewer: their comment on the whole review and each comment thread with its id, the selected lines (or the whole file) and the earlier comments. Without after it also lists draft comments they have not submitted yet and their @claude questions. Use it when the wait command from open_diff_viewer finishes, or when the user asks you to address their review comments.",
       inputSchema: {
-        after: external_exports.number().int().min(0).optional().describe("Read every review numbered above this one, as the wait command says. Omit it for the latest review.")
+        repo: external_exports.string().optional().describe("The repository the wait command names. Omit it to read every repository with a viewer open."),
+        after: external_exports.number().int().min(0).optional().describe(
+          "Read every review of that repository numbered above this one, as the wait command says. Omit it for the latest review and the drafts."
+        )
       },
       annotations: { readOnlyHint: true, openWorldHint: false }
     },
     async (args) => {
       const server = serverPromise ? await serverPromise : null;
-      const parts = (server?.repoThreads() ?? []).flatMap(({ repo: repo2, threads, view }) => {
+      const all = server?.repoThreads() ?? [];
+      const wanted = args.repo ? path4.resolve(args.repo) : null;
+      const repos = wanted ? all.filter((r) => wanted === r.repo || wanted.startsWith(r.repo + path4.sep)) : all;
+      if (args.after !== void 0 && !wanted && repos.filter((r) => r.threads.submissions.length).length > 1) {
+        const text = "Several repositories have reviews, numbered separately. Set repo to the one the wait command named.";
+        return { content: [{ type: "text", text }], isError: true };
+      }
+      const parts = repos.flatMap(({ repo: repo2, threads, view }) => {
         const text = formatReviewComments(threads.threads, threads.submissions, args.after ?? null);
         if (!text) return [];
         return [

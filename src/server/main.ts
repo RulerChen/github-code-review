@@ -158,22 +158,37 @@ async function runMcp(): Promise<void> {
       title: "Get review comments",
       description:
         "Read the review the user submitted in the diff viewer: their comment on the whole review and each comment " +
-        "thread with its id, the selected lines (or the whole file) and the earlier comments, plus draft comments they have not submitted " +
-        "yet. Use it when the wait command from open_diff_viewer finishes, or when the user asks you to address their " +
-        "review comments.",
+        "thread with its id, the selected lines (or the whole file) and the earlier comments. Without after it also " +
+        "lists draft comments they have not submitted yet and their @claude questions. Use it when the wait command from open_diff_viewer " +
+        "finishes, or when the user asks you to address their review comments.",
       inputSchema: {
+        repo: z
+          .string()
+          .optional()
+          .describe("The repository the wait command names. Omit it to read every repository with a viewer open."),
         after: z
           .number()
           .int()
           .min(0)
           .optional()
-          .describe("Read every review numbered above this one, as the wait command says. Omit it for the latest review."),
+          .describe(
+            "Read every review of that repository numbered above this one, as the wait command says. Omit it for the " +
+              "latest review and the drafts.",
+          ),
       },
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
     async (args) => {
       const server = serverPromise ? await serverPromise : null;
-      const parts = (server?.repoThreads() ?? []).flatMap(({ repo, threads, view }) => {
+      const all = server?.repoThreads() ?? [];
+      const wanted = args.repo ? path.resolve(args.repo) : null;
+      const repos = wanted ? all.filter((r) => wanted === r.repo || wanted.startsWith(r.repo + path.sep)) : all;
+      // Each repository numbers its reviews from 1, so one after number cannot serve several.
+      if (args.after !== undefined && !wanted && repos.filter((r) => r.threads.submissions.length).length > 1) {
+        const text = "Several repositories have reviews, numbered separately. Set repo to the one the wait command named.";
+        return { content: [{ type: "text", text }], isError: true };
+      }
+      const parts = repos.flatMap(({ repo, threads, view }) => {
         const text = formatReviewComments(threads.threads, threads.submissions, args.after ?? null);
         if (!text) return [];
         return [

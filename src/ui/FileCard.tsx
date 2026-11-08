@@ -102,8 +102,8 @@ export function FileCard({ file: next, blocks: nextBlocks = next.blocks, anchor,
   const unplaced = partial
     ? []
     : threads.filter((t) => t.anchor.side !== null && (!onShownVersion(t, versions) || !hasLine(hunks, t.anchor.side, t.anchor.end)));
-  const additions = partial ? countLines(hunks, "add") : file.additions;
-  const deletions = partial ? countLines(hunks, "del") : file.deletions;
+  const additions = partial ? blocks.reduce((n, b) => n + b.newCount, 0) : file.additions;
+  const deletions = partial ? blocks.reduce((n, b) => n + b.oldCount, 0) : file.deletions;
 
   return (
     <section className={`file${viewed ? " is-viewed" : ""}`} id={anchor} ref={ref}>
@@ -267,7 +267,7 @@ export function hunksOf(file: FileDiff, blocks: Block[], expansion: Expansion | 
 // Hunks of a topic's part of a file, by the part's blocks, so each card works them out once.
 const partHunks = new WeakMap<Block[], DisplayHunk[]>();
 
-function baseHunksOf(file: FileDiff, blocks: Block[]): DisplayHunk[] {
+export function baseHunksOf(file: FileDiff, blocks: Block[]): DisplayHunk[] {
   if (blocks === file.blocks) return file.hunks;
   let hunks = partHunks.get(blocks);
   if (!hunks) {
@@ -292,10 +292,6 @@ function sizeOf(hunks: DisplayHunk[]): { lineCount: number; charCount: number } 
 // Height of a body that has not mounted yet, so the page keeps its length and anchors land close.
 function estimateHeight(hunks: DisplayHunk[]): number {
   return Math.max(2 * HUNK_PX, hunks.reduce((px, h) => px + HUNK_PX + splitRowCount(h.lines) * ROW_PX, 0));
-}
-
-function countLines(hunks: DisplayHunk[], kind: "add" | "del"): number {
-  return hunks.reduce((n, h) => n + h.lines.filter((l) => l.kind === kind).length, 0);
 }
 
 interface Tokens {

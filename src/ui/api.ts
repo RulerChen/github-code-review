@@ -1,3 +1,4 @@
+import { comparisonQuery } from "../shared/comparison";
 import type { Comparison, RefList, Thread, ThreadAnchor, ViewData } from "../shared/types";
 
 export class ApiError extends Error {
@@ -7,19 +8,6 @@ export class ApiError extends Error {
   ) {
     super(message);
   }
-}
-
-export function comparisonQuery(c: Comparison): string {
-  const params = new URLSearchParams({ base: c.base });
-  if (c.head !== null) params.set("head", c.head);
-  if (!c.threeDot) params.set("dots", "2");
-  return params.toString();
-}
-
-export function comparisonFromQuery(search: string): Comparison | null {
-  const params = new URLSearchParams(search);
-  const base = params.get("base");
-  return base ? { base, head: params.get("head") || null, threeDot: params.get("dots") !== "2" } : null;
 }
 
 /** Loads the view's diff, or another comparison in the same repository when one is given. */

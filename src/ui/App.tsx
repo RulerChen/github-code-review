@@ -1,6 +1,7 @@
 import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { comparisonFromQuery, comparisonQuery } from "../shared/comparison";
 import type { CommitInfo, Comparison, DiffResult, FileDiff, Thread, ViewData } from "../shared/types";
-import { ApiError, comparisonFromQuery, comparisonQuery, createThread, fetchRefs, fetchVersion, fetchView, replyToThread, submitReview } from "./api";
+import { ApiError, createThread, fetchRefs, fetchVersion, fetchView, replyToThread, submitReview } from "./api";
 import { type CommentsApi, CommentsContext } from "./comments";
 import { CommitList, CompareControls, refLabel, sameComparison } from "./Compare";
 import { ConversationsButton, ConversationsPanel, type Place, useConversations } from "./Conversations";
@@ -41,7 +42,7 @@ export function App({ viewId }: Props) {
   const [viewedTopics, setViewedTopics] = useState<Record<string, string>>({});
   const [threads, setThreads] = useState<Thread[]>([]);
   // The comparison in the page URL, or null for the one Claude opened the viewer with.
-  const requested = useRef<Comparison | null>(comparisonFromQuery(location.search));
+  const requested = useRef<Comparison | null>(comparisonFromQuery(new URLSearchParams(location.search)));
   const seq = useRef(0);
   // The version of the diff on screen.
   const version = useRef<string | null>(null);
@@ -73,7 +74,7 @@ export function App({ viewId }: Props) {
 
   useEffect(() => {
     void load(requested.current);
-    const onPop = () => void load(comparisonFromQuery(location.search));
+    const onPop = () => void load(comparisonFromQuery(new URLSearchParams(location.search)));
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
   }, [load]);
@@ -87,6 +88,7 @@ export function App({ viewId }: Props) {
     const check = async () => {
       const target = requested.current;
       const loaded = version.current;
+      const started = performance.now();
       try {
         if (loaded !== null && !document.hidden) {
           const v = await fetchVersion(viewId, target);
@@ -95,7 +97,9 @@ export function App({ viewId }: Props) {
       } catch {
         // The next check tries again.
       }
-      if (!stopped) timer = window.setTimeout(check, POLL_MS);
+      // A check runs git status and reads changed files. In a large working tree that takes a while, so wait ten
+      // times as long as it took and polling stays a small part of the load.
+      if (!stopped) timer = window.setTimeout(check, Math.max(POLL_MS, 10 * (performance.now() - started)));
     };
     timer = window.setTimeout(check, POLL_MS);
     return () => {

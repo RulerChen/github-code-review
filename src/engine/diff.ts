@@ -12,6 +12,7 @@ export const MAX_CONTENT_BYTES = 1024 * 1024;
 export const MAX_DIFF_LINES = 20_000;
 export const MAX_DIFF_CHARS = 500 * 1024;
 export const MAX_COMMITS = 250;
+const BATCH_BYTES = 64 * 1024 * 1024;
 const EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 
 export async function computeDiff(repo: string, compare: Partial<Comparison> = {}): Promise<DiffResult> {
@@ -237,29 +238,48 @@ async function readBlobs(repoRoot: string, ids: string[]): Promise<Map<string, C
   const unique = [...new Set(ids)];
   if (unique.length === 0) return out;
   const checks = (await git(repoRoot, ["cat-file", "--batch-check"], [0], `${unique.join("\n")}\n`)).toString("utf8").split("\n");
-  const wanted: string[] = [];
-  unique.forEach((id, i) => {
-    const [, type, size] = checks[i]!.split(" ");
-    if (type !== "blob") out.set(id, { kind: "absent" });
-    else if (Number(size) > MAX_CONTENT_BYTES) out.set(id, { kind: "tooLarge" });
-    else wanted.push(id);
-  });
-  if (wanted.length === 0) return out;
-  const buf = await git(repoRoot, ["cat-file", "--batch"], [0], `${wanted.join("\n")}\n`);
-  let pos = 0;
-  for (const id of wanted) {
-    const eol = buf.indexOf(10, pos);
-    const size = Number(buf.subarray(pos, eol).toString("latin1").split(" ")[2]);
-    out.set(id, classify(buf.subarray(eol + 1, eol + 1 + size)));
-    pos = eol + 1 + size + 1;
+  // execFile holds all of git's output in memory up to maxBuffer, so read the blobs in batches of limited size.
+  const batches: string[][] = [[]];
+  let bytes = 0;
+  for (const [i, id] of unique.entries()) {
+    const [, type, sizeText] = checks[i]!.split(" ");
+    const size = Number(sizeText);
+    if (type !== "blob") {
+      out.set(id, { kind: "absent" });
+      continue;
+    }
+    if (size > MAX_CONTENT_BYTES) {
+      out.set(id, { kind: "tooLarge" });
+      continue;
+    }
+    if (bytes + size > BATCH_BYTES) {
+      batches.push([]);
+      bytes = 0;
+    }
+    batches.at(-1)!.push(id);
+    bytes += size;
+  }
+  for (const wanted of batches) {
+    if (wanted.length === 0) continue;
+    const buf = await git(repoRoot, ["cat-file", "--batch"], [0], `${wanted.join("\n")}\n`);
+    let pos = 0;
+    for (const id of wanted) {
+      const eol = buf.indexOf(10, pos);
+      const size = Number(buf.subarray(pos, eol).toString("latin1").split(" ")[2]);
+      out.set(id, classify(buf.subarray(eol + 1, eol + 1 + size)));
+      pos = eol + 1 + size + 1;
+    }
   }
   return out;
 }
 
 async function generatedPaths(repoRoot: string, paths: string[], source: string | null): Promise<Set<string>> {
   if (paths.length === 0) return new Set();
-  const args = ["check-attr", "-z", "--stdin", ...(source ? ["--source", source] : []), "linguist-generated"];
-  const parts = (await git(repoRoot, args, [0], `${paths.join("\0")}\0`)).toString("utf8").split("\0");
+  const input = `${paths.join("\0")}\0`;
+  const read = (from: string | null) =>
+    git(repoRoot, ["check-attr", "-z", "--stdin", ...(from ? ["--source", from] : []), "linguist-generated"], [0], input);
+  // --source needs Git 2.40. Older ones read the working tree's .gitattributes, which is usually the same.
+  const parts = (await read(source).catch((err) => (source ? read(null) : Promise.reject(err)))).toString("utf8").split("\0");
   const out = new Set<string>();
   for (let i = 0; i + 2 < parts.length; i += 3) {
     if (parts[i + 2] === "set" || parts[i + 2] === "true") out.add(parts[i]!);

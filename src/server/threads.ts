@@ -19,7 +19,7 @@ export class RepoThreads {
   readonly submissions: Submission[] = [];
   cwd: string;
   parentSession: string | null = null;
-  private fork: { parent: string | null; session: string } | null = null;
+  private fork: { parent: string | null; session: string | null } | null = null;
   private queue: Promise<void> = Promise.resolve();
   private readonly listeners = new Set<(thread: Thread) => void>();
   private readonly waiters = new Set<(s: Submission) => void>();
@@ -131,16 +131,18 @@ export class RepoThreads {
       // A fork belongs to the parent session it came from. When a viewer is opened from another
       // session, the old fork no longer matches and the next question forks the new parent.
       const parent = this.parentSession;
-      const resume = this.fork?.parent === parent ? this.fork.session : null;
-      const forking = resume === null && parent !== null;
+      const known = this.fork?.parent === parent ? this.fork : null;
+      const forking = known === null && parent !== null;
       let note = "";
       let res;
       try {
-        res = await ask({ cwd: this.cwd, resume: resume ?? parent, fork: forking, prompt, onText, onActivity });
+        res = await ask({ cwd: this.cwd, resume: known ? known.session : parent, fork: forking, prompt, onText, onActivity });
       } catch (err) {
         if (!forking) throw err;
         note = `_Answered without the original conversation, because it could not be resumed: ${errorText(err)}_\n\n`;
         res = await ask({ cwd: this.cwd, resume: null, fork: false, prompt, onText, onActivity });
+        // Even without a session to resume, remember that this parent cannot be forked, so later questions do not retry it.
+        this.fork = { parent, session: res.sessionId };
       }
       if (res.sessionId) this.fork = { parent, session: res.sessionId };
       reply.body = note + res.text;

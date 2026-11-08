@@ -4,6 +4,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { AddressInfo } from "node:net";
 import path from "node:path";
 import { computeDiff, diffVersion, listRefs } from "../engine/diff.js";
+import { comparisonFromQuery } from "../shared/comparison.js";
 import type { Comparison, Review, Thread, ThreadAnchor, ViewData } from "../shared/types.js";
 import { RepoThreads } from "./threads.js";
 
@@ -61,7 +62,7 @@ export class ReviewServer {
 
   addView(repo: string, compare: Comparison, review: Review | null, cwd: string, session: string | null): View {
     let id: string;
-    do id = Array.from({ length: 5 }, () => String.fromCharCode(97 + randomInt(26))).join("");
+    do id = Array.from({ length: 8 }, () => String.fromCharCode(97 + randomInt(26))).join("");
     while (this.views.has(id));
     const view = { id, repo, compare, review };
     this.views.set(view.id, view);
@@ -109,7 +110,7 @@ export class ReviewServer {
 
       if (req.method === "GET" && route === "diff" && !threadId) {
         try {
-          const compare = comparisonFrom(searchParams) ?? view.compare;
+          const compare = comparisonFromQuery(searchParams) ?? view.compare;
           const version = await diffVersion(view.repo, compare);
           const diff = await computeDiff(view.repo, compare);
           const data: ViewData = { diff, version, opened: view.compare, review: view.review, threads: threads.threads };
@@ -120,7 +121,7 @@ export class ReviewServer {
       }
       if (req.method === "GET" && route === "version" && !threadId) {
         try {
-          return sendJson(res, 200, { version: await diffVersion(view.repo, comparisonFrom(searchParams) ?? view.compare) });
+          return sendJson(res, 200, { version: await diffVersion(view.repo, comparisonFromQuery(searchParams) ?? view.compare) });
         } catch (err) {
           return sendJson(res, 500, { error: errorMessage(err) });
         }
@@ -158,7 +159,12 @@ export class ReviewServer {
         const after = Number(searchParams.get("after") ?? 0);
         if (!Number.isInteger(after) || after < 0) return sendText(res, 400, "Invalid after");
         const stop = threads.waitForReview(after, (s) =>
-          sendText(res, 200, `The user submitted review ${s.n}. Call get_review_comments from the diff-review MCP server with after set to ${after}.\n`),
+          sendText(
+            res,
+            200,
+            `The user submitted review ${s.n} in ${view.repo}. Call get_review_comments from the diff-review MCP server ` +
+              `with repo set to ${JSON.stringify(view.repo)} and after set to ${after}.\n`,
+          ),
         );
         res.on("close", stop);
         return;
@@ -229,13 +235,6 @@ async function readJson(req: IncomingMessage, limit = 256 * 1024): Promise<Recor
   } catch {
     return null;
   }
-}
-
-/** A comparison the page asks for in place of the view's own: ?base=main&head=feature, with dots=2 for a direct one. */
-function comparisonFrom(params: URLSearchParams): Comparison | null {
-  const base = params.get("base");
-  if (!base) return null;
-  return { base, head: params.get("head") || null, threeDot: params.get("dots") !== "2" };
 }
 
 function isText(value: unknown, max: number, nonEmpty = false): value is string {
