@@ -18,7 +18,6 @@ In a git repository, run `/diff-review:review` to compare the working tree with 
 ## Update
 
 ```sh
-claude plugin marketplace update github-code-review
 claude plugin update diff-review@github-code-review
 ```
 
