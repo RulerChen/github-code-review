@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import { changeIds } from "../shared/hunks";
-import type { Block, FileDiff, Review } from "../shared/types";
-import { ChevronIcon, FileCard } from "./FileCard";
+import type { Block, DisplayHunk, FileDiff, Review, Thread } from "../shared/types";
+import { type CommentsApi, onShownVersion, useComments } from "./comments";
+import { hasLine } from "./DiffTable";
+import { ChevronIcon, FileCard, hunksOf } from "./FileCard";
 import { Markdown } from "./Markdown";
 
 export interface TopicPart {
@@ -59,6 +61,23 @@ export function buildTopics(review: Review, files: FileDiff[]): TopicView[] {
   return [...views.filter((v) => v.related), ...other, ...views.filter((v) => !v.related)];
 }
 
+const partHunks = new WeakMap<TopicPart, DisplayHunk[]>();
+
+/** Whether a thread's line is in the topic's diff before any expanding. */
+export function topicShows(topic: TopicView, thread: Thread, versions: CommentsApi["versions"]): boolean {
+  if (!onShownVersion(thread, versions)) return false;
+  const { path, side, end } = thread.anchor;
+  return topic.parts.some((p) => {
+    if (p.file.path !== path) return false;
+    let hunks = partHunks.get(p);
+    if (!hunks) {
+      hunks = hunksOf(p.file, p.blocks, null);
+      partHunks.set(p, hunks);
+    }
+    return hasLine(hunks, side, end);
+  });
+}
+
 interface SectionProps {
   topic: TopicView;
   viewed: boolean;
@@ -70,6 +89,11 @@ export function TopicSection({ topic, viewed, onToggleViewed }: SectionProps) {
   useEffect(() => {
     if (viewed) setCollapsed(true);
   }, [viewed]);
+  const { revealSeq, peekReveal, versions } = useComments();
+  useEffect(() => {
+    const thread = peekReveal()?.thread;
+    if (thread && topicShows(topic, thread, versions)) setCollapsed(false);
+  }, [revealSeq]);
 
   const files = topic.parts.length;
   return (

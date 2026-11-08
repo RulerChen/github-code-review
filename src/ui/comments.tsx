@@ -1,6 +1,11 @@
-import { createContext, type FormEvent, useContext, useState } from "react";
+import { createContext, type FormEvent, useContext, useEffect, useRef, useState } from "react";
 import type { Thread, ThreadAnchor } from "../shared/types";
 import { Markdown } from "./Markdown";
+
+export interface RevealRequest {
+  thread: Thread;
+  reply: boolean;
+}
 
 export interface CommentsApi {
   /** The commit each side of the diff comes from, or null for the working tree. */
@@ -8,6 +13,13 @@ export interface CommentsApi {
   threadsFor: (path: string) => Thread[];
   create: (anchor: Omit<ThreadAnchor, "commit">, snippet: string, body: string) => Promise<void>;
   reply: (threadId: string, body: string) => Promise<void>;
+  unread: (thread: Thread) => number;
+  markRead: (thread: Thread) => void;
+  current: string | null;
+  /** Bumped on every reveal, so collapsed files and topics can open and the thread can scroll into view. */
+  revealSeq: number;
+  peekReveal: () => RevealRequest | null;
+  takeReveal: (threadId: string) => RevealRequest | null;
 }
 
 export const CommentsContext = createContext<CommentsApi>({
@@ -15,6 +27,12 @@ export const CommentsContext = createContext<CommentsApi>({
   threadsFor: () => [],
   create: async () => {},
   reply: async () => {},
+  unread: () => 0,
+  markRead: () => {},
+  current: null,
+  revealSeq: 0,
+  peekReveal: () => null,
+  takeReveal: () => null,
 });
 
 export const useComments = () => useContext(CommentsContext);
@@ -24,6 +42,12 @@ export function anchorLabel(anchor: ThreadAnchor, withVersion = false): string {
   const lines = anchor.start === anchor.end ? `${side} line ${anchor.start}` : `${side} lines ${anchor.start}–${anchor.end}`;
   if (!withVersion) return lines;
   return anchor.commit ? `${lines} at ${anchor.commit.slice(0, 7)}` : `${lines} in the working tree`;
+}
+
+/** Comments before the first pending answer: the ones the reader can have seen. */
+export function readableCount(thread: Thread): number {
+  const i = thread.comments.findIndex((c) => c.status === "pending");
+  return i < 0 ? thread.comments.length : i;
 }
 
 /** Whether a thread's lines come from the version of the file shown on its side of the diff. */
@@ -84,11 +108,40 @@ export function CommentForm({ placeholder, submitLabel, onSubmit, onCancel }: Fo
 }
 
 export function ThreadView({ thread, withVersion = false }: { thread: Thread; withVersion?: boolean }) {
-  const { reply } = useComments();
+  const { reply, unread, markRead, current, revealSeq, takeReveal } = useComments();
   const [replying, setReplying] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const unreadCount = unread(thread);
+
+  useEffect(() => {
+    const request = takeReveal(thread.id);
+    if (!request) return;
+    ref.current?.scrollIntoView({ block: "center" });
+    if (request.reply) setReplying(true);
+  }, [revealSeq]);
+
+  // An answer counts as read once its thread is on screen while the page is in front.
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || unreadCount === 0) return;
+    let inView = false;
+    const check = () => {
+      if (inView && document.visibilityState === "visible") markRead(thread);
+    };
+    const observer = new IntersectionObserver(([entry]) => {
+      inView = entry?.isIntersecting ?? false;
+      check();
+    });
+    observer.observe(el);
+    document.addEventListener("visibilitychange", check);
+    return () => {
+      observer.disconnect();
+      document.removeEventListener("visibilitychange", check);
+    };
+  }, [thread, unreadCount, markRead]);
 
   return (
-    <div className="thread">
+    <div ref={ref} className={`thread${current === thread.id ? " is-current" : ""}`} data-thread={thread.id}>
       <div className="thread-head">{anchorLabel(thread.anchor, withVersion)}</div>
       {thread.comments.map((c) => (
         <div key={c.id} className={`comment comment-${c.author}`}>

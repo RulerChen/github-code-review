@@ -3,10 +3,12 @@ import type { CommitInfo, Comparison, DiffResult, FileDiff, Thread, ViewData } f
 import { ApiError, comparisonFromQuery, comparisonQuery, createThread, fetchRefs, fetchView, replyToThread } from "./api";
 import { type CommentsApi, CommentsContext } from "./comments";
 import { CommitList, CompareControls, refLabel, sameComparison } from "./Compare";
+import { ConversationsButton, ConversationsPanel, type Place, useConversations } from "./Conversations";
 import { FileCard } from "./FileCard";
 import { comparePaths, FileTree } from "./FileTree";
+import { KeyboardButton, ShortcutHelp, stepSection, toggleSection, useShortcuts } from "./keyboard";
 import { readStorage, writeStorage } from "./storage";
-import { buildTopics, TopicList, TopicSection, type TopicView } from "./Topics";
+import { buildTopics, TopicList, TopicSection, topicShows, type TopicView } from "./Topics";
 
 interface Props {
   viewId: string | null;
@@ -86,7 +88,7 @@ export function App({ viewId }: Props) {
 
   const oldCommit = data?.diff.oldCommit ?? null;
   const headCommit = data?.diff.headCommit ?? null;
-  const comments = useMemo<CommentsApi>(() => {
+  const comments = useMemo<Pick<CommentsApi, "versions" | "threadsFor" | "create" | "reply">>(() => {
     const byPath = new Map<string, Thread[]>();
     for (const t of threads) byPath.set(t.anchor.path, [...(byPath.get(t.anchor.path) ?? []), t]);
     const versions = { old: oldCommit, new: headCommit };
@@ -125,6 +127,50 @@ export function App({ viewId }: Props) {
     () => (review && isOpened ? buildTopics(review, entries.map((e) => e.file)) : []),
     [review, isOpened, entries],
   );
+
+  const topicTab = review !== null && isOpened && tab === "topics";
+  const place = useCallback(
+    (t: Thread): Place | null => {
+      const fileIndex = entries.findIndex((e) => e.file.path === t.anchor.path);
+      if (fileIndex < 0) return null;
+      if (!topicTab) return { tab: "files", rank: fileIndex };
+      const topicIndex = topics.findIndex((topic) => topicShows(topic, t, comments.versions));
+      return topicIndex >= 0 ? { tab: "topics", rank: topicIndex } : { tab: "files", rank: topics.length + fileIndex };
+    },
+    [entries, topics, topicTab, comments.versions],
+  );
+  const conv = useConversations({
+    repoRoot: diff?.repoRoot ?? null,
+    threads,
+    place,
+    show: (t, p) => {
+      if (topicTab || tab === "commits") setTab(p.tab);
+      if (p.tab === "files" && !t.anchor.path.toLowerCase().includes(filter.trim().toLowerCase())) setFilter("");
+    },
+  });
+  const commentsValue = useMemo(() => ({ ...comments, ...conv.api }), [comments, conv.api]);
+  const [help, setHelp] = useState(false);
+  useShortcuts({
+    j: () => stepSection(1, active, setActive),
+    k: () => stepSection(-1, active, setActive),
+    v: () => toggleSection("viewed", active, setActive),
+    o: () => toggleSection("collapsed", active, setActive),
+    n: () => conv.step(1),
+    p: () => conv.step(-1),
+    u: conv.nextUnread,
+    r: conv.replyToCurrent,
+    c: () => conv.setOpen((o) => !o),
+    t: () => {
+      if (topicTab) setTab("files");
+      else if (review && isOpened) setTab("topics");
+    },
+    "/": () => {
+      setTab("files");
+      requestAnimationFrame(() => document.querySelector<HTMLInputElement>(".sidebar .filter")?.focus());
+    },
+    "?": () => setHelp((h) => !h),
+    Escape: () => (help ? setHelp(false) : conv.setOpen(false)),
+  });
 
   const isViewed = useCallback((f: FileDiff) => viewed[f.path] === signature(f), [viewed]);
   const toggleViewed = (f: FileDiff) => {
@@ -189,7 +235,7 @@ export function App({ viewId }: Props) {
   const firstUnrelated = topics.findIndex((t) => !t.related);
 
   return (
-    <CommentsContext.Provider value={comments}>
+    <CommentsContext.Provider value={commentsValue}>
       <div className="app">
         <header className="topbar">
           <div className="topbar-title">
@@ -237,6 +283,8 @@ export function App({ viewId }: Props) {
               )}
             </div>
           )}
+          <ConversationsButton conv={conv} />
+          <KeyboardButton onClick={() => setHelp(true)} />
           <ThemeToggle theme={theme} onToggle={toggleTheme} />
           <button className="button" onClick={() => void load(requested.current)} disabled={loading} title={updatedAt ? `Updated ${updatedAt.toLocaleTimeString()}` : undefined}>
             {loading ? "Refreshing…" : "Refresh"}
@@ -245,7 +293,7 @@ export function App({ viewId }: Props) {
 
         {error && <div className="banner">{error.message}</div>}
 
-        <div className={`layout${view === "commits" ? " no-sidebar" : ""}`}>
+        <div className={`layout${conv.open ? " with-conversations" : ""}${view === "commits" ? " no-sidebar" : ""}`}>
           <aside className="sidebar" hidden={view === "commits"}>
             {byTopic ? (
               <TopicList topics={topics} active={active} isViewed={isTopicViewed} onSelect={select} />
@@ -296,6 +344,8 @@ export function App({ viewId }: Props) {
             )}
           </main>
         </div>
+        {conv.open && <ConversationsPanel conv={conv} />}
+        {help && <ShortcutHelp onClose={() => setHelp(false)} />}
       </div>
     </CommentsContext.Provider>
   );

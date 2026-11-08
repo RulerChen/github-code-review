@@ -40,7 +40,15 @@ export function FileCard({ file, blocks = file.blocks, anchor, viewed = false, o
     setExpansion((e) => ({ ...e, [dir]: { ...e[dir], [id]: (e[dir][id] ?? 0) + lines } }));
 
   const lineCount = baseHunks.reduce((s, h) => s + h.lines.length, 0);
-  const { threadsFor, versions } = useComments();
+  const { threadsFor, versions, revealSeq, peekReveal } = useComments();
+  useEffect(() => {
+    const thread = peekReveal()?.thread;
+    if (!thread || thread.anchor.path !== file.path) return;
+    const placed = onShownVersion(thread, versions) && hasLine(hunks, thread.anchor.side, thread.anchor.end);
+    if (!placed && partial) return;
+    setCollapsed(false);
+    if (placed) setForceLoad(true);
+  }, [revealSeq]);
   const unplaced = partial
     ? []
     : threadsFor(file.path).filter((t) => !onShownVersion(t, versions) || !hasLine(hunks, t.anchor.side, t.anchor.end));
@@ -153,7 +161,7 @@ function FileBody({
   );
 }
 
-function hunksOf(file: FileDiff, blocks: Block[], expansion: Expansion | null): DisplayHunk[] {
+export function hunksOf(file: FileDiff, blocks: Block[], expansion: Expansion | null): DisplayHunk[] {
   if (blocks.length === 0) return [];
   const lines = (text: string | null) => (text === null ? null : splitLines(text));
   return buildHunks(blocks, lines(file.oldContent), lines(file.newContent), file.blocks, expansion);

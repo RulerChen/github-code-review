@@ -1,0 +1,205 @@
+:root {
+  --conversations-w: 380px;
+}
+
+.topic {
+  scroll-margin-top: calc(var(--topbar-h) + 8px);
+}
+
+.thread.is-current {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.conv-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.conv-button svg {
+  flex: none;
+}
+
+.conv-button.is-open {
+  border-color: var(--accent);
+  background: var(--accent-subtle);
+}
+
+.conv-badge {
+  flex: none;
+  padding: 0 6px;
+  border-radius: 10px;
+  background: var(--accent);
+  color: var(--primary-fg);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 18px;
+  white-space: nowrap;
+}
+
+.layout.with-conversations .files {
+  margin-right: var(--conversations-w);
+}
+
+.conversations {
+  position: fixed;
+  top: var(--topbar-h);
+  right: 0;
+  bottom: 0;
+  z-index: 15;
+  display: flex;
+  flex-direction: column;
+  width: min(var(--conversations-w), 100vw);
+  border-left: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.conversations-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 8px 8px 16px;
+  border-bottom: 1px solid var(--border-muted);
+}
+
+.conversations-head h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.conversations-count {
+  min-width: 22px;
+  padding: 0 6px;
+  border-radius: 10px;
+  background: var(--bar-neutral);
+  font-size: 12px;
+  text-align: center;
+}
+
+.conversations-head .link-button {
+  font-size: 12px;
+}
+
+.conversations-empty {
+  margin: 0;
+  padding: 16px;
+  color: var(--fg-muted);
+}
+
+.conversations-list {
+  display: grid;
+  flex: 1;
+  align-content: start;
+  gap: 2px;
+  margin: 0;
+  padding: 8px;
+  overflow: auto;
+  list-style: none;
+}
+
+.conv-item {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+
+.conv-item:hover {
+  background: var(--bg-subtle);
+}
+
+.conv-item.is-current {
+  border-color: var(--accent);
+  background: var(--accent-subtle);
+}
+
+.conv-item.is-static {
+  cursor: default;
+}
+
+.conv-item.is-static:hover {
+  background: none;
+}
+
+.conv-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.conv-where {
+  display: flex;
+  flex: 1;
+  gap: 8px;
+  min-width: 0;
+  font: 12px/18px var(--mono);
+}
+
+.conv-file {
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conv-dir {
+  color: var(--fg-muted);
+  font-weight: 400;
+}
+
+.conv-lines {
+  flex: none;
+  color: var(--fg-muted);
+}
+
+.conv-text {
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.conv-last {
+  color: var(--fg-muted);
+  -webkit-line-clamp: 3;
+}
+
+.conv-item.is-unread .conv-last {
+  color: var(--fg);
+}
+
+.conv-status {
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+
+.conv-status.is-error {
+  color: var(--danger);
+}
+
+.conversations-foot {
+  padding: 8px 16px;
+  border-top: 1px solid var(--border-muted);
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+
+@media (max-width: 1100px) {
+  .layout.with-conversations .files {
+    margin-right: 0;
+  }
+
+  .conversations {
+    box-shadow: -8px 0 24px rgb(1 4 9 / 0.2);
+  }
+}
