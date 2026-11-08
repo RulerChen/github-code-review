@@ -26,6 +26,20 @@ export interface DiffLine {
 export interface DisplayHunk {
   header: string;
   lines: DiffLine[];
+  /** First and last block in the hunk. Expansion above and below the hunk is keyed by them. */
+  firstId: string;
+  lastId: string;
+  /** Unchanged lines hidden right above and below the hunk that expanding can show. */
+  hiddenAbove: number;
+  hiddenBelow: number;
+  /** The lines hidden above are the same ones hidden below the previous hunk, with no change between. */
+  joinsPrevious: boolean;
+}
+
+/** Unchanged lines to show beyond the default context, above and below each block, by block id. */
+export interface Expansion {
+  above: Record<string, number>;
+  below: Record<string, number>;
 }
 
 export interface FileDiff {

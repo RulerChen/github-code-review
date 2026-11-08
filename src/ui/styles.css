@@ -565,6 +565,41 @@ button {
   white-space: pre;
   overflow: hidden;
   text-overflow: ellipsis;
+  vertical-align: middle !important;
+}
+
+.diff .num.expander {
+  padding: 0;
+}
+
+.expand-button {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+
+.expand-button:not(:only-child) {
+  height: 22px;
+}
+
+.expand-button:hover,
+.expand-button:focus-visible {
+  background: var(--accent);
+  color: var(--primary-fg);
+}
+
+.expand-button svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .noeol {

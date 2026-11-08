@@ -36680,7 +36680,7 @@ function rangeHeader(start0, count) {
   if (count === 1) return `${start0 + 1}`;
   return `${start0 + 1},${count}`;
 }
-function buildHunks(blocks, oldLines, newLines, all = blocks) {
+function buildHunks(blocks, oldLines, newLines, all = blocks, expansion = null) {
   if (blocks.length === 0) return [];
   const hasCtx = newLines !== null || oldLines !== null;
   const C = hasCtx ? CONTEXT_LINES : 0;
@@ -36688,24 +36688,35 @@ function buildHunks(blocks, oldLines, newLines, all = blocks) {
   const endOf = (b) => newLines ? b.newStart + b.newCount : b.oldStart + b.oldCount;
   const startOf = (b) => newLines ? b.newStart : b.oldStart;
   const ctxText = (o, n) => (newLines ? newLines[n] : oldLines?.[o]) ?? "";
+  const wantAbove = (b) => hasCtx ? C + (expansion?.above[b.id] ?? 0) : 0;
+  const wantBelow = (b) => hasCtx ? C + (expansion?.below[b.id] ?? 0) : 0;
   const index = new Map(all.map((b, i) => [b, i]));
+  const shown = new Set(blocks);
+  const runBefore = (i) => Math.max(0, (i < all.length ? startOf(all[i]) : total) - (i > 0 ? endOf(all[i - 1]) : 0));
   const groups = [];
   for (const b of blocks) {
     const g = groups[groups.length - 1];
     const prev = g?.[g.length - 1];
-    const adjacent = prev !== void 0 && index.get(b) === index.get(prev) + 1;
-    if (g && prev && hasCtx && adjacent && startOf(b) - endOf(prev) <= 2 * C) g.push(b);
+    const i = index.get(b);
+    const adjacent = prev !== void 0 && i === index.get(prev) + 1;
+    if (g && prev && hasCtx && adjacent && runBefore(i) <= wantBelow(prev) + wantAbove(b)) g.push(b);
     else groups.push([b]);
   }
   return groups.map((g) => {
     const first = g[0];
     const last = g[g.length - 1];
-    const prevBlock = all[index.get(first) - 1];
-    const nextBlock = all[index.get(last) + 1];
-    const prevEnd = prevBlock ? endOf(prevBlock) : 0;
-    const nextStart = nextBlock ? startOf(nextBlock) : total;
-    const before = Math.min(C, startOf(first) - prevEnd);
-    const after = Math.max(0, Math.min(C, nextStart - endOf(last)));
+    const fi = index.get(first);
+    const li = index.get(last);
+    const prevBlock = all[fi - 1];
+    const nextBlock = all[li + 1];
+    const joinsPrevious = prevBlock !== void 0 && shown.has(prevBlock);
+    const joinsNext = nextBlock !== void 0 && shown.has(nextBlock);
+    const runAbove = runBefore(fi);
+    const runBelow = runBefore(li + 1);
+    const before = Math.min(wantAbove(first), runAbove);
+    const after = Math.min(wantBelow(last), runBelow);
+    const hiddenAbove = hasCtx ? Math.max(0, runAbove - before - (joinsPrevious ? wantBelow(prevBlock) : 0)) : 0;
+    const hiddenBelow = hasCtx ? Math.max(0, runBelow - after - (joinsNext ? wantAbove(nextBlock) : 0)) : 0;
     let o = first.oldStart - before;
     let n = first.newStart - before;
     const startO = o;
@@ -36728,7 +36739,7 @@ function buildHunks(blocks, oldLines, newLines, all = blocks) {
     }
     context(after);
     const header = `@@ -${rangeHeader(startO, o - startO)} +${rangeHeader(startN, n - startN)} @@${first.section ? ` ${first.section}` : ""}`;
-    return { header, lines };
+    return { header, lines, firstId: first.id, lastId: last.id, hiddenAbove, hiddenBelow, joinsPrevious };
   });
 }
 

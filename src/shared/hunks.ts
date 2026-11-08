@@ -1,4 +1,4 @@
-import type { Block, DiffLine, DisplayHunk, FileDiff } from "./types.js";
+import type { Block, DiffLine, DisplayHunk, Expansion, FileDiff } from "./types.js";
 
 export const CONTEXT_LINES = 3;
 
@@ -24,6 +24,7 @@ export function buildHunks(
   oldLines: string[] | null,
   newLines: string[] | null,
   all: Block[] = blocks,
+  expansion: Expansion | null = null,
 ): DisplayHunk[] {
   if (blocks.length === 0) return [];
   const hasCtx = newLines !== null || oldLines !== null;
@@ -33,26 +34,40 @@ export function buildHunks(
   const endOf = (b: Block) => (newLines ? b.newStart + b.newCount : b.oldStart + b.oldCount);
   const startOf = (b: Block) => (newLines ? b.newStart : b.oldStart);
   const ctxText = (o: number, n: number) => (newLines ? newLines[n] : oldLines?.[o]) ?? "";
+  const wantAbove = (b: Block) => (hasCtx ? C + (expansion?.above[b.id] ?? 0) : 0);
+  const wantBelow = (b: Block) => (hasCtx ? C + (expansion?.below[b.id] ?? 0) : 0);
 
   const index = new Map(all.map((b, i) => [b, i]));
+  const shown = new Set(blocks);
+  // Unchanged lines between all[i - 1] and all[i], counting from the file's start and to its end.
+  const runBefore = (i: number) =>
+    Math.max(0, (i < all.length ? startOf(all[i]!) : total) - (i > 0 ? endOf(all[i - 1]!) : 0));
+
   const groups: Block[][] = [];
   for (const b of blocks) {
     const g = groups[groups.length - 1];
     const prev = g?.[g.length - 1];
-    const adjacent = prev !== undefined && index.get(b) === index.get(prev)! + 1;
-    if (g && prev && hasCtx && adjacent && startOf(b) - endOf(prev) <= 2 * C) g.push(b);
+    const i = index.get(b)!;
+    const adjacent = prev !== undefined && i === index.get(prev)! + 1;
+    if (g && prev && hasCtx && adjacent && runBefore(i) <= wantBelow(prev) + wantAbove(b)) g.push(b);
     else groups.push([b]);
   }
 
   return groups.map((g) => {
     const first = g[0]!;
     const last = g[g.length - 1]!;
-    const prevBlock = all[index.get(first)! - 1];
-    const nextBlock = all[index.get(last)! + 1];
-    const prevEnd = prevBlock ? endOf(prevBlock) : 0;
-    const nextStart = nextBlock ? startOf(nextBlock) : total;
-    const before = Math.min(C, startOf(first) - prevEnd);
-    const after = Math.max(0, Math.min(C, nextStart - endOf(last)));
+    const fi = index.get(first)!;
+    const li = index.get(last)!;
+    const prevBlock = all[fi - 1];
+    const nextBlock = all[li + 1];
+    const joinsPrevious = prevBlock !== undefined && shown.has(prevBlock);
+    const joinsNext = nextBlock !== undefined && shown.has(nextBlock);
+    const runAbove = runBefore(fi);
+    const runBelow = runBefore(li + 1);
+    const before = Math.min(wantAbove(first), runAbove);
+    const after = Math.min(wantBelow(last), runBelow);
+    const hiddenAbove = hasCtx ? Math.max(0, runAbove - before - (joinsPrevious ? wantBelow(prevBlock) : 0)) : 0;
+    const hiddenBelow = hasCtx ? Math.max(0, runBelow - after - (joinsNext ? wantAbove(nextBlock) : 0)) : 0;
 
     let o = first.oldStart - before;
     let n = first.newStart - before;
@@ -78,6 +93,6 @@ export function buildHunks(
     context(after);
 
     const header = `@@ -${rangeHeader(startO, o - startO)} +${rangeHeader(startN, n - startN)} @@${first.section ? ` ${first.section}` : ""}`;
-    return { header, lines };
+    return { header, lines, firstId: first.id, lastId: last.id, hiddenAbove, hiddenBelow, joinsPrevious };
   });
 }

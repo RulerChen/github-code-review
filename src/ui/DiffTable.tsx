@@ -1,5 +1,5 @@
 import { Fragment, useState } from "react";
-import type { DiffLine, DisplayHunk, Thread } from "../shared/types";
+import type { DiffLine, DisplayHunk, Expansion, Thread } from "../shared/types";
 import { CommentForm, ThreadView, useComments } from "./comments";
 import type { Token, TokenLines } from "./highlight";
 
@@ -12,14 +12,18 @@ interface Selection {
   pivot: number;
 }
 
+export type OnExpand = (dir: keyof Expansion, blockId: string, lines: number) => void;
+
 interface Props {
   path: string;
   hunks: DisplayHunk[];
   oldTokens: TokenLines | null;
   newTokens: TokenLines | null;
+  onExpand: OnExpand;
 }
 
 const MARK = { add: "+", del: "-", context: " " } as const;
+const EXPAND_STEP = 20;
 
 const stripCr = (s: string) => (s.endsWith("\r") ? s.slice(0, -1) : s);
 
@@ -48,10 +52,11 @@ function Code({ line, tokens }: { line: DiffLine; tokens: Token[] | undefined })
   );
 }
 
-export function DiffTable({ path, hunks, oldTokens, newTokens }: Props) {
+export function DiffTable({ path, hunks, oldTokens, newTokens, onExpand }: Props) {
   const { threadsFor, create } = useComments();
   const [selection, setSelection] = useState<Selection | null>(null);
   const threads = threadsFor(path);
+  const last = hunks[hunks.length - 1];
 
   const isSelected = (side: Side, no: number | null) =>
     selection !== null && no !== null && selection.side === side && no >= selection.start && no <= selection.end;
@@ -101,7 +106,9 @@ export function DiffTable({ path, hunks, oldTokens, newTokens }: Props) {
         {hunks.map((h, hi) => (
           <Fragment key={hi}>
             <tr className="hunk">
-              <td className="num" />
+              <td className="num expander">
+                <HunkExpanders prev={hunks[hi - 1]} hunk={h} onExpand={onExpand} />
+              </td>
               <td className="hunk-text" colSpan={3}>
                 {h.header}
               </td>
@@ -134,8 +141,48 @@ export function DiffTable({ path, hunks, oldTokens, newTokens }: Props) {
             })}
           </Fragment>
         ))}
+        {last && last.hiddenBelow > 0 && (
+          <tr className="hunk">
+            <td className="num expander">
+              <ExpandButton dir="down" onClick={() => onExpand("below", last.lastId, EXPAND_STEP)} />
+            </td>
+            <td className="hunk-text" colSpan={3} />
+          </tr>
+        )}
       </tbody>
     </table>
+  );
+}
+
+// Lines hidden between two hunks with no change between them open together once few are left,
+// as on GitHub. Otherwise each side opens EXPAND_STEP lines at a time.
+function HunkExpanders({ prev, hunk, onExpand }: { prev: DisplayHunk | undefined; hunk: DisplayHunk; onExpand: OnExpand }) {
+  const up = hunk.hiddenAbove;
+  if (hunk.joinsPrevious && up > 0 && up <= EXPAND_STEP) {
+    return <ExpandButton dir="all" onClick={() => onExpand("above", hunk.firstId, up)} />;
+  }
+  return (
+    <>
+      {prev && prev.hiddenBelow > 0 && <ExpandButton dir="down" onClick={() => onExpand("below", prev.lastId, EXPAND_STEP)} />}
+      {up > 0 && <ExpandButton dir="up" onClick={() => onExpand("above", hunk.firstId, EXPAND_STEP)} />}
+    </>
+  );
+}
+
+const EXPAND_ICON = {
+  up: { label: "Expand up", d: "M8 13V3M4.5 6.5 8 3l3.5 3.5" },
+  down: { label: "Expand down", d: "M8 3v10M4.5 9.5 8 13l3.5-3.5" },
+  all: { label: "Expand all", d: "M8 2v12M5 5l3-3 3 3M5 11l3 3 3-3" },
+} as const;
+
+function ExpandButton({ dir, onClick }: { dir: keyof typeof EXPAND_ICON; onClick: () => void }) {
+  const { label, d } = EXPAND_ICON[dir];
+  return (
+    <button className="expand-button" aria-label={label} title={label} onClick={onClick}>
+      <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+        <path d={d} />
+      </svg>
+    </button>
   );
 }
 

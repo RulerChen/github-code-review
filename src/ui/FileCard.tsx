@@ -1,14 +1,16 @@
-import { useEffect, useState } from "react";
-import type { DisplayHunk, FileDiff } from "../shared/types";
+import { useEffect, useMemo, useState } from "react";
+import { buildHunks, splitLines } from "../shared/hunks";
+import type { Block, DisplayHunk, Expansion, FileDiff } from "../shared/types";
 import { ThreadView, useComments } from "./comments";
-import { DiffTable, hasLine } from "./DiffTable";
+import { DiffTable, hasLine, type OnExpand } from "./DiffTable";
 import { highlight, languageFor, type TokenLines } from "./highlight";
 
 const LARGE_DIFF_LINES = 800;
+const NO_EXPANSION: Expansion = { above: {}, below: {} };
 
 interface Props {
   file: FileDiff;
-  hunks?: DisplayHunk[];
+  blocks?: Block[];
   anchor: string;
   viewed?: boolean;
   onToggleViewed?: () => void;
@@ -22,13 +24,22 @@ export function ChevronIcon() {
   );
 }
 
-export function FileCard({ file, hunks = file.hunks, anchor, viewed = false, onToggleViewed }: Props) {
+export function FileCard({ file, blocks = file.blocks, anchor, viewed = false, onToggleViewed }: Props) {
   const [collapsed, setCollapsed] = useState(viewed);
   const [forceLoad, setForceLoad] = useState(false);
+  const [expansion, setExpansion] = useState(NO_EXPANSION);
   useEffect(() => setCollapsed(viewed), [viewed]);
 
-  const lineCount = hunks.reduce((s, h) => s + h.lines.length, 0);
-  const partial = hunks !== file.hunks;
+  const partial = blocks !== file.blocks;
+  const baseHunks = useMemo(() => (partial ? hunksOf(file, blocks, null) : file.hunks), [file, blocks, partial]);
+  const hunks = useMemo(
+    () => (expansion === NO_EXPANSION ? baseHunks : hunksOf(file, blocks, expansion)),
+    [file, blocks, expansion, baseHunks],
+  );
+  const expand: OnExpand = (dir, id, lines) =>
+    setExpansion((e) => ({ ...e, [dir]: { ...e[dir], [id]: (e[dir][id] ?? 0) + lines } }));
+
+  const lineCount = baseHunks.reduce((s, h) => s + h.lines.length, 0);
   const { threadsFor } = useComments();
   const unplaced = partial ? [] : threadsFor(file.path).filter((t) => !hasLine(hunks, t.anchor.side, t.anchor.end));
   const additions = partial ? countLines(hunks, "add") : file.additions;
@@ -70,13 +81,21 @@ export function FileCard({ file, hunks = file.hunks, anchor, viewed = false, onT
         <div className="file-body">
           {unplaced.length > 0 && (
             <div className="unplaced">
-              <p className="file-note inline">Comments on lines that are no longer in this diff</p>
+              <p className="file-note inline">Comments on lines not shown in this diff</p>
               {unplaced.map((t) => (
                 <ThreadView key={t.id} thread={t} />
               ))}
             </div>
           )}
-          <FileBody file={file} hunks={hunks} deferred={deferred} lineCount={lineCount} onLoad={() => setForceLoad(true)} tokens={tokens} />
+          <FileBody
+            file={file}
+            hunks={hunks}
+            deferred={deferred}
+            lineCount={lineCount}
+            onLoad={() => setForceLoad(true)}
+            onExpand={expand}
+            tokens={tokens}
+          />
         </div>
       )}
     </section>
@@ -89,6 +108,7 @@ function FileBody({
   deferred,
   lineCount,
   onLoad,
+  onExpand,
   tokens,
 }: {
   file: FileDiff;
@@ -96,6 +116,7 @@ function FileBody({
   deferred: boolean;
   lineCount: number;
   onLoad: () => void;
+  onExpand: OnExpand;
   tokens: { old: TokenLines | null; new: TokenLines | null };
 }) {
   if (file.binary) return <p className="file-note">Binary file not shown.</p>;
@@ -124,10 +145,16 @@ function FileBody({
       )}
       {file.tooLarge && <p className="file-note inline">File too large to load in full: context lines and highlighting are off.</p>}
       <div className="diff-scroll">
-        <DiffTable path={file.path} hunks={hunks} oldTokens={tokens.old} newTokens={tokens.new} />
+        <DiffTable path={file.path} hunks={hunks} oldTokens={tokens.old} newTokens={tokens.new} onExpand={onExpand} />
       </div>
     </>
   );
+}
+
+function hunksOf(file: FileDiff, blocks: Block[], expansion: Expansion | null): DisplayHunk[] {
+  if (blocks.length === 0) return [];
+  const lines = (text: string | null) => (text === null ? null : splitLines(text));
+  return buildHunks(blocks, lines(file.oldContent), lines(file.newContent), file.blocks, expansion);
 }
 
 function countLines(hunks: DisplayHunk[], kind: "add" | "del"): number {

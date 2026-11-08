@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
-import { buildHunks, changeIds, splitLines } from "../shared/hunks";
-import type { DisplayHunk, FileDiff, Review } from "../shared/types";
+import { changeIds } from "../shared/hunks";
+import type { Block, FileDiff, Review } from "../shared/types";
 import { ChevronIcon, FileCard } from "./FileCard";
 import { Markdown } from "./Markdown";
 
 export interface TopicPart {
   file: FileDiff;
-  hunks: DisplayHunk[];
+  blocks: Block[];
   anchor: string;
 }
 
@@ -25,18 +25,6 @@ export interface TopicView {
 export function buildTopics(review: Review, files: FileDiff[]): TopicView[] {
   const known = new Set(files.flatMap(changeIds));
   const assigned = new Set<string>();
-  const lines = new Map<FileDiff, { old: string[] | null; new: string[] | null }>();
-  const linesOf = (f: FileDiff) => {
-    let l = lines.get(f);
-    if (!l) {
-      l = {
-        old: f.oldContent === null ? null : splitLines(f.oldContent),
-        new: f.newContent === null ? null : splitLines(f.newContent),
-      };
-      lines.set(f, l);
-    }
-    return l;
-  };
 
   const make = (key: string, index: number, title: string, summary: string, related: boolean, ids: string[]): TopicView => {
     const present = [...new Set(ids)].filter((id) => known.has(id));
@@ -46,9 +34,7 @@ export function buildTopics(review: Review, files: FileDiff[]): TopicView[] {
     const parts: TopicPart[] = [];
     files.forEach((f, fi) => {
       if (!changeIds(f).some((id) => chosen.has(id))) return;
-      const blocks = f.blocks.filter((b) => chosen.has(b.id));
-      const l = linesOf(f);
-      parts.push({ file: f, hunks: blocks.length ? buildHunks(blocks, l.old, l.new, f.blocks) : [], anchor: `topic-${index}-file-${fi}` });
+      parts.push({ file: f, blocks: f.blocks.filter((b) => chosen.has(b.id)), anchor: `topic-${index}-file-${fi}` });
     });
 
     return {
@@ -118,7 +104,7 @@ export function TopicSection({ topic, viewed, onToggleViewed }: SectionProps) {
             </p>
           )}
           {topic.parts.map((p) => (
-            <FileCard key={p.anchor} file={p.file} hunks={p.hunks} anchor={p.anchor} />
+            <FileCard key={p.anchor} file={p.file} blocks={p.blocks} anchor={p.anchor} />
           ))}
         </div>
       )}
