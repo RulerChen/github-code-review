@@ -6,13 +6,12 @@ import { comparePaths, FileTree } from "./FileTree";
 import { readStorage, writeStorage } from "./storage";
 
 interface Props {
-  token: string | null;
   viewId: string | null;
 }
 
 const signature = (f: FileDiff) => (f.blocks.length ? f.blocks.map((b) => b.id).join(",") : `${f.status}:${f.binary}`);
 
-export function App({ token, viewId }: Props) {
+export function App({ viewId }: Props) {
   const [diff, setDiff] = useState<DiffResult | null>(null);
   const [error, setError] = useState<{ message: string; status: number } | null>(null);
   const [loading, setLoading] = useState(false);
@@ -23,10 +22,10 @@ export function App({ token, viewId }: Props) {
   const [viewed, setViewed] = useState<Record<string, string>>({});
 
   const load = useCallback(async () => {
-    if (!token || !viewId) return;
+    if (!viewId) return;
     setLoading(true);
     try {
-      const result = await fetchDiff(viewId, token);
+      const result = await fetchDiff(viewId);
       setDiff(result);
       setError(null);
       setUpdatedAt(new Date());
@@ -36,7 +35,7 @@ export function App({ token, viewId }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [token, viewId]);
+  }, [viewId]);
 
   useEffect(() => {
     void load();
@@ -76,20 +75,12 @@ export function App({ token, viewId }: Props) {
     document.getElementById(anchor)?.scrollIntoView({ block: "start" });
   };
 
-  if (!token || !viewId) {
-    return (
-      <Notice title="This link is incomplete">
-        Open the exact link Claude gave you. It ends with <code>#token=…</code>, which this page needs to read the diff.
-      </Notice>
-    );
+  if (!viewId) {
+    return <Notice title="This link is incomplete">Open the exact link Claude gave you.</Notice>;
   }
   if (error && !diff) {
     const hint =
-      error.status === 401
-        ? "The token in this link is not valid for the running server. Ask Claude to open the viewer again."
-        : error.status === 404
-          ? "The server restarted since this link was made. Ask Claude to open the viewer again."
-          : null;
+      error.status === 404 ? "The server restarted since this link was made. Ask Claude to open the viewer again." : null;
     return (
       <Notice title="Could not load the diff">
         {error.message}

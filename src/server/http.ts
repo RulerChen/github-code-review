@@ -1,4 +1,4 @@
-import { randomBytes, timingSafeEqual } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -10,8 +10,6 @@ export interface View {
   repo: string;
   base: string;
 }
-
-export const TOKEN_HEADER = "x-review-token";
 
 const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -27,7 +25,6 @@ const CSP =
   "connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'";
 
 export class ReviewServer {
-  readonly token = randomBytes(24).toString("base64url");
   private readonly views = new Map<string, View>();
   private readonly uiDir: string;
   private server: Server | null = null;
@@ -65,7 +62,7 @@ export class ReviewServer {
   }
 
   url(view: View): string {
-    return `http://127.0.0.1:${this.port}/v/${view.id}#token=${this.token}`;
+    return `http://127.0.0.1:${this.port}/v/${view.id}`;
   }
 
   private async handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -78,7 +75,6 @@ export class ReviewServer {
     const { pathname } = new URL(req.url ?? "/", "http://127.0.0.1");
     const api = /^\/api\/views\/([\w-]+)\/diff$/.exec(pathname);
     if (api) {
-      if (!this.authorized(req)) return sendJson(res, 401, { error: "Missing or invalid token" });
       const view = this.views.get(api[1]!);
       if (!view) return sendJson(res, 404, { error: "Unknown view. Ask Claude to open the viewer again." });
       try {
@@ -91,14 +87,6 @@ export class ReviewServer {
     if (/^\/v\/[\w-]+$/.test(pathname)) return this.sendFile(res, "index.html", "no-store");
     if (pathname.startsWith("/assets/")) return this.sendFile(res, pathname.slice(1), "public, max-age=31536000, immutable");
     return sendText(res, 404, "Not found");
-  }
-
-  private authorized(req: IncomingMessage): boolean {
-    const got = req.headers[TOKEN_HEADER];
-    if (typeof got !== "string") return false;
-    const a = Buffer.from(got);
-    const b = Buffer.from(this.token);
-    return a.length === b.length && timingSafeEqual(a, b);
   }
 
   private async sendFile(res: ServerResponse, rel: string, cacheControl: string): Promise<void> {

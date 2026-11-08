@@ -4,7 +4,6 @@ import { App } from "./App";
 import { readStorage } from "./storage";
 import "./styles.css";
 
-const token = new URLSearchParams(location.hash.slice(1)).get("token");
 const viewId = /^\/v\/([\w-]+)$/.exec(location.pathname)?.[1] ?? null;
 
 const stored = readStorage<string | null>("diff-review:theme", null);
@@ -13,6 +12,6 @@ document.documentElement.dataset.theme =
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <App token={token} viewId={viewId} />
+    <App viewId={viewId} />
   </StrictMode>,
 );

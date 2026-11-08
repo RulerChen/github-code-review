@@ -37006,11 +37006,10 @@ async function mapLimit(items, limit, fn) {
 }
 
 // src/server/http.ts
-import { randomBytes, timingSafeEqual } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { readFile as readFile2 } from "node:fs/promises";
 import { createServer } from "node:http";
 import path2 from "node:path";
-var TOKEN_HEADER = "x-review-token";
 var MIME = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
@@ -37021,7 +37020,6 @@ var MIME = {
 };
 var CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'";
 var ReviewServer = class {
-  token = randomBytes(24).toString("base64url");
   views = /* @__PURE__ */ new Map();
   uiDir;
   server = null;
@@ -37054,7 +37052,7 @@ var ReviewServer = class {
     return view;
   }
   url(view) {
-    return `http://127.0.0.1:${this.port}/v/${view.id}#token=${this.token}`;
+    return `http://127.0.0.1:${this.port}/v/${view.id}`;
   }
   async handle(req, res) {
     const host = req.headers.host;
@@ -37065,7 +37063,6 @@ var ReviewServer = class {
     const { pathname } = new URL(req.url ?? "/", "http://127.0.0.1");
     const api = /^\/api\/views\/([\w-]+)\/diff$/.exec(pathname);
     if (api) {
-      if (!this.authorized(req)) return sendJson(res, 401, { error: "Missing or invalid token" });
       const view = this.views.get(api[1]);
       if (!view) return sendJson(res, 404, { error: "Unknown view. Ask Claude to open the viewer again." });
       try {
@@ -37078,13 +37075,6 @@ var ReviewServer = class {
     if (/^\/v\/[\w-]+$/.test(pathname)) return this.sendFile(res, "index.html", "no-store");
     if (pathname.startsWith("/assets/")) return this.sendFile(res, pathname.slice(1), "public, max-age=31536000, immutable");
     return sendText(res, 404, "Not found");
-  }
-  authorized(req) {
-    const got = req.headers[TOKEN_HEADER];
-    if (typeof got !== "string") return false;
-    const a = Buffer.from(got);
-    const b = Buffer.from(this.token);
-    return a.length === b.length && timingSafeEqual(a, b);
   }
   async sendFile(res, rel, cacheControl) {
     const abs = path2.resolve(this.uiDir, rel);
