@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { FileDiff } from "../shared/types";
+import type { DisplayHunk, FileDiff } from "../shared/types";
 import { DiffTable } from "./DiffTable";
 import { highlight, languageFor, type TokenLines } from "./highlight";
 
@@ -7,17 +7,29 @@ const LARGE_DIFF_LINES = 800;
 
 interface Props {
   file: FileDiff;
+  hunks?: DisplayHunk[];
   anchor: string;
-  viewed: boolean;
-  onToggleViewed: () => void;
+  viewed?: boolean;
+  onToggleViewed?: () => void;
 }
 
-export function FileCard({ file, anchor, viewed, onToggleViewed }: Props) {
+export function ChevronIcon() {
+  return (
+    <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+      <path d="M12.78 5.22a.75.75 0 0 1 0 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L3.22 6.28a.75.75 0 0 1 1.06-1.06L8 8.94l3.72-3.72a.75.75 0 0 1 1.06 0Z" />
+    </svg>
+  );
+}
+
+export function FileCard({ file, hunks = file.hunks, anchor, viewed = false, onToggleViewed }: Props) {
   const [collapsed, setCollapsed] = useState(viewed);
   const [forceLoad, setForceLoad] = useState(false);
   useEffect(() => setCollapsed(viewed), [viewed]);
 
-  const lineCount = file.hunks.reduce((s, h) => s + h.lines.length, 0);
+  const lineCount = hunks.reduce((s, h) => s + h.lines.length, 0);
+  const partial = hunks !== file.hunks;
+  const additions = partial ? countLines(hunks, "add") : file.additions;
+  const deletions = partial ? countLines(hunks, "del") : file.deletions;
   const deferred = lineCount > LARGE_DIFF_LINES && !forceLoad;
   const tokens = useHighlight(file, !collapsed && !deferred);
 
@@ -30,11 +42,9 @@ export function FileCard({ file, anchor, viewed, onToggleViewed }: Props) {
           aria-label={collapsed ? "Expand file" : "Collapse file"}
           onClick={() => setCollapsed(!collapsed)}
         >
-          <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
-            <path d="M12.78 5.22a.75.75 0 0 1 0 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L3.22 6.28a.75.75 0 0 1 1.06-1.06L8 8.94l3.72-3.72a.75.75 0 0 1 1.06 0Z" />
-          </svg>
+          <ChevronIcon />
         </button>
-        <DiffStat additions={file.additions} deletions={file.deletions} />
+        <DiffStat additions={additions} deletions={deletions} />
         <span className="file-path" title={file.path}>
           {file.oldPath ? (
             <>
@@ -46,14 +56,16 @@ export function FileCard({ file, anchor, viewed, onToggleViewed }: Props) {
         </span>
         <CopyButton text={file.path} />
         <span className="spacer" />
-        <label className="viewed-toggle">
-          <input type="checkbox" checked={viewed} onChange={onToggleViewed} />
-          Viewed
-        </label>
+        {onToggleViewed && (
+          <label className="viewed-toggle">
+            <input type="checkbox" checked={viewed} onChange={onToggleViewed} />
+            Viewed
+          </label>
+        )}
       </header>
       {!collapsed && (
         <div className="file-body">
-          <FileBody file={file} deferred={deferred} lineCount={lineCount} onLoad={() => setForceLoad(true)} tokens={tokens} />
+          <FileBody file={file} hunks={hunks} deferred={deferred} lineCount={lineCount} onLoad={() => setForceLoad(true)} tokens={tokens} />
         </div>
       )}
     </section>
@@ -62,19 +74,21 @@ export function FileCard({ file, anchor, viewed, onToggleViewed }: Props) {
 
 function FileBody({
   file,
+  hunks,
   deferred,
   lineCount,
   onLoad,
   tokens,
 }: {
   file: FileDiff;
+  hunks: DisplayHunk[];
   deferred: boolean;
   lineCount: number;
   onLoad: () => void;
   tokens: { old: TokenLines | null; new: TokenLines | null };
 }) {
   if (file.binary) return <p className="file-note">Binary file not shown.</p>;
-  if (file.hunks.length === 0) {
+  if (hunks.length === 0) {
     if (file.tooLarge) return <p className="file-note">File too large to display.</p>;
     if (file.modeChange) return <p className="file-note">File mode changed from {file.modeChange.from} to {file.modeChange.to}.</p>;
     if (file.status === "renamed") return <p className="file-note">File renamed without changes.</p>;
@@ -99,10 +113,14 @@ function FileBody({
       )}
       {file.tooLarge && <p className="file-note inline">File too large to load in full: context lines and highlighting are off.</p>}
       <div className="diff-scroll">
-        <DiffTable hunks={file.hunks} oldTokens={tokens.old} newTokens={tokens.new} />
+        <DiffTable hunks={hunks} oldTokens={tokens.old} newTokens={tokens.new} />
       </div>
     </>
   );
+}
+
+function countLines(hunks: DisplayHunk[], kind: "add" | "del"): number {
+  return hunks.reduce((n, h) => n + h.lines.filter((l) => l.kind === kind).length, 0);
 }
 
 function useHighlight(file: FileDiff, enabled: boolean): { old: TokenLines | null; new: TokenLines | null } {

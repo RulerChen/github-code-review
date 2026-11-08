@@ -13,7 +13,7 @@ Requires Node.js 20 or newer and git.
 
 ## Use
 
-In a git repository, run `/diff-review:review` to compare the working tree with `HEAD`, or `/diff-review:review main` to compare with another branch, tag or commit. Open the link Claude replies with, and press Refresh on the page after further changes.
+In a git repository, run `/diff-review:review` to compare the working tree with `HEAD`, or `/diff-review:review main` to compare with another branch, tag or commit. Add what you want to review, as in `/diff-review:review the cache eviction change`, and Claude puts the matching changes first. Claude groups the changes into topics and explains each one. Open the link Claude replies with, and press Refresh on the page after further changes.
 
 ## Update
 

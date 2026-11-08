@@ -1,35 +1,42 @@
-import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
-import type { DiffResult, FileDiff } from "../shared/types";
-import { ApiError, fetchDiff } from "./api";
+import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import type { FileDiff, ViewData } from "../shared/types";
+import { ApiError, fetchView } from "./api";
 import { FileCard } from "./FileCard";
 import { comparePaths, FileTree } from "./FileTree";
 import { readStorage, writeStorage } from "./storage";
+import { buildTopics, TopicList, TopicSection, type TopicView } from "./Topics";
 
 interface Props {
   viewId: string | null;
 }
 
+type Tab = "topics" | "files";
+
 const signature = (f: FileDiff) => (f.blocks.length ? f.blocks.map((b) => b.id).join(",") : `${f.status}:${f.binary}`);
 
 export function App({ viewId }: Props) {
-  const [diff, setDiff] = useState<DiffResult | null>(null);
+  const [data, setData] = useState<ViewData | null>(null);
   const [error, setError] = useState<{ message: string; status: number } | null>(null);
   const [loading, setLoading] = useState(false);
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
   const [theme, setTheme] = useState(document.documentElement.dataset.theme === "dark" ? "dark" : "light");
+  const [tab, setTab] = useState<Tab>("topics");
   const [filter, setFilter] = useState("");
   const [active, setActive] = useState<string | null>(null);
   const [viewed, setViewed] = useState<Record<string, string>>({});
+  const [viewedTopics, setViewedTopics] = useState<Record<string, string>>({});
 
   const load = useCallback(async () => {
     if (!viewId) return;
     setLoading(true);
     try {
-      const result = await fetchDiff(viewId);
-      setDiff(result);
+      const result = await fetchView(viewId);
+      const root = result.diff.repoRoot;
+      setData(result);
       setError(null);
       setUpdatedAt(new Date());
-      setViewed((prev) => (Object.keys(prev).length ? prev : readStorage(`diff-review:viewed:${result.repoRoot}`, {})));
+      setViewed((prev) => (Object.keys(prev).length ? prev : readStorage(`diff-review:viewed:${root}`, {})));
+      setViewedTopics((prev) => (Object.keys(prev).length ? prev : readStorage(`diff-review:viewed-topics:${root}`, {})));
     } catch (e) {
       setError({ message: e instanceof Error ? e.message : String(e), status: e instanceof ApiError ? e.status : 0 });
     } finally {
@@ -40,6 +47,9 @@ export function App({ viewId }: Props) {
   useEffect(() => {
     void load();
   }, [load]);
+
+  const diff = data?.diff ?? null;
+  const review = data?.review ?? null;
 
   const entries = useMemo(
     () =>
@@ -52,6 +62,10 @@ export function App({ viewId }: Props) {
     const q = filter.trim().toLowerCase();
     return q ? entries.filter((e) => e.file.path.toLowerCase().includes(q)) : entries;
   }, [entries, filter]);
+  const topics = useMemo(
+    () => (review ? buildTopics(review, entries.map((e) => e.file)) : []),
+    [review, entries],
+  );
 
   const isViewed = useCallback((f: FileDiff) => viewed[f.path] === signature(f), [viewed]);
   const toggleViewed = (f: FileDiff) => {
@@ -61,6 +75,16 @@ export function App({ viewId }: Props) {
     else next[f.path] = signature(f);
     setViewed(next);
     writeStorage(`diff-review:viewed:${diff.repoRoot}`, next);
+  };
+
+  const isTopicViewed = useCallback((t: TopicView) => viewedTopics[t.key] === t.signature, [viewedTopics]);
+  const toggleTopicViewed = (t: TopicView) => {
+    if (!diff) return;
+    const next = { ...viewedTopics };
+    if (isTopicViewed(t)) delete next[t.key];
+    else next[t.key] = t.signature;
+    setViewedTopics(next);
+    writeStorage(`diff-review:viewed-topics:${diff.repoRoot}`, next);
   };
 
   const toggleTheme = () => {
@@ -90,10 +114,14 @@ export function App({ viewId }: Props) {
   }
   if (!diff) return <Notice title="Loading diff…" />;
 
+  const byTopic = review !== null && tab === "topics";
   const additions = diff.files.reduce((s, f) => s + f.additions, 0);
   const deletions = diff.files.reduce((s, f) => s + f.deletions, 0);
-  const viewedCount = diff.files.filter(isViewed).length;
+  const total = byTopic ? topics.length : diff.files.length;
+  const viewedCount = byTopic ? topics.filter(isTopicViewed).length : diff.files.filter(isViewed).length;
+  const unit = byTopic ? "topics" : "files";
   const repoName = diff.repoRoot.slice(diff.repoRoot.lastIndexOf("/") + 1);
+  const firstUnrelated = topics.findIndex((t) => !t.related);
 
   return (
     <div className="app">
@@ -115,37 +143,70 @@ export function App({ viewId }: Props) {
           <span className="count-del">−{deletions.toLocaleString()}</span>
         </div>
         <span className="spacer" />
-        <div className="viewed-progress" title={`${viewedCount} of ${diff.files.length} files viewed`}>
+        <div className="viewed-progress" title={`${viewedCount} of ${total} ${unit} viewed`}>
           <span>
-            {viewedCount} / {diff.files.length} viewed
+            {viewedCount} / {total} viewed
           </span>
           <span className="progress" aria-hidden="true">
-            <span style={{ width: `${diff.files.length ? (viewedCount / diff.files.length) * 100 : 0}%` }} />
+            <span style={{ width: `${total ? (viewedCount / total) * 100 : 0}%` }} />
           </span>
         </div>
+        {review && (
+          <div className="segmented" role="tablist" aria-label="Group changes by">
+            <button role="tab" aria-selected={tab === "topics"} onClick={() => setTab("topics")}>
+              Topics
+            </button>
+            <button role="tab" aria-selected={tab === "files"} onClick={() => setTab("files")}>
+              Files
+            </button>
+          </div>
+        )}
         <ThemeToggle theme={theme} onToggle={toggleTheme} />
         <button className="button" onClick={() => void load()} disabled={loading} title={updatedAt ? `Updated ${updatedAt.toLocaleTimeString()}` : undefined}>
           {loading ? "Refreshing…" : "Refresh"}
         </button>
       </header>
+
       {error && <div className="banner">Refresh failed: {error.message}</div>}
+
       <div className="layout">
         <aside className="sidebar">
-          <input
-            className="filter"
-            type="search"
-            placeholder="Filter files"
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            aria-label="Filter files"
-          />
-          <FileTree entries={shown} active={active} isViewed={isViewed} onSelect={select} />
+          {byTopic ? (
+            <TopicList topics={topics} active={active} isViewed={isTopicViewed} onSelect={select} />
+          ) : (
+            <>
+              <input
+                className="filter"
+                type="search"
+                placeholder="Filter files"
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+                aria-label="Filter files"
+              />
+              <FileTree entries={shown} active={active} isViewed={isViewed} onSelect={select} />
+            </>
+          )}
         </aside>
+
         <main className="files">
           {diff.files.length === 0 ? (
             <Notice title="No changes">
               The working tree matches <code>{diff.base}</code>.
             </Notice>
+          ) : byTopic ? (
+            <>
+              {review.focus && (
+                <p className="focus">
+                  Focus: <strong>{review.focus}</strong>
+                </p>
+              )}
+              {topics.map((t, i) => (
+                <Fragment key={`${t.key}:${t.signature}`}>
+                  {i === firstUnrelated && <h2 className="topic-divider">Not related to the focus</h2>}
+                  <TopicSection topic={t} viewed={isTopicViewed(t)} onToggleViewed={() => toggleTopicViewed(t)} />
+                </Fragment>
+              ))}
+            </>
           ) : (
             shown.map(({ file, anchor }) => (
               <FileCard

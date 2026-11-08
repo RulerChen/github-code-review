@@ -4,11 +4,13 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { AddressInfo } from "node:net";
 import path from "node:path";
 import { computeDiff } from "../engine/diff.js";
+import type { Review, ViewData } from "../shared/types.js";
 
 export interface View {
   id: string;
   repo: string;
   base: string;
+  review: Review | null;
 }
 
 const MIME: Record<string, string> = {
@@ -55,8 +57,8 @@ export class ReviewServer {
     this.server = null;
   }
 
-  addView(repo: string, base: string): View {
-    const view = { id: randomBytes(6).toString("base64url"), repo, base };
+  addView(repo: string, base: string, review: Review | null): View {
+    const view = { id: randomBytes(6).toString("base64url"), repo, base, review };
     this.views.set(view.id, view);
     return view;
   }
@@ -79,7 +81,8 @@ export class ReviewServer {
       if (!view) return sendJson(res, 404, { error: "Unknown view. Ask Claude to open the viewer again." });
       try {
         const diff = await computeDiff(view.repo, view.base);
-        return sendJson(res, 200, { diff });
+        const data: ViewData = { diff, review: view.review };
+        return sendJson(res, 200, data);
       } catch (err) {
         return sendJson(res, 500, { error: errorMessage(err) });
       }

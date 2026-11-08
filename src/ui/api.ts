@@ -1,4 +1,4 @@
-import type { DiffResult } from "../shared/types";
+import type { ViewData } from "../shared/types";
 
 export class ApiError extends Error {
   constructor(
@@ -9,9 +9,9 @@ export class ApiError extends Error {
   }
 }
 
-export async function fetchDiff(viewId: string): Promise<DiffResult> {
+export async function fetchView(viewId: string): Promise<ViewData> {
   const res = await fetch(`/api/views/${encodeURIComponent(viewId)}/diff`, { cache: "no-store" });
-  const body = (await res.json().catch(() => null)) as { diff?: DiffResult; error?: string } | null;
+  const body = (await res.json().catch(() => null)) as (Partial<ViewData> & { error?: string }) | null;
   if (!res.ok || !body?.diff) throw new ApiError(body?.error ?? `HTTP ${res.status}`, res.status);
-  return body.diff;
+  return { diff: body.diff, review: body.review ?? null };
 }

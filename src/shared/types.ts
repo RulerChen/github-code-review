@@ -45,6 +45,23 @@ export interface FileDiff {
   newContent: string | null;
 }
 
+export interface Topic {
+  title: string;
+  summary: string;
+  ids: string[];
+  related: boolean;
+}
+
+export interface Review {
+  focus: string | null;
+  topics: Topic[];
+}
+
+export interface ViewData {
+  diff: DiffResult;
+  review: Review | null;
+}
+
 export interface DiffResult {
   repoRoot: string;
   base: string;

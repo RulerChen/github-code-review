@@ -36664,6 +36664,74 @@ import { createHash } from "node:crypto";
 import { lstat, readFile, readlink } from "node:fs/promises";
 import path from "node:path";
 
+// src/shared/hunks.ts
+var CONTEXT_LINES = 3;
+function splitLines(text) {
+  if (text === "") return [];
+  const lines = text.split("\n");
+  if (lines[lines.length - 1] === "") lines.pop();
+  return lines;
+}
+function changeIds(file2) {
+  return file2.blocks.length ? file2.blocks.map((b) => b.id) : [`file:${file2.path}`];
+}
+function rangeHeader(start0, count) {
+  if (count === 0) return `${start0},0`;
+  if (count === 1) return `${start0 + 1}`;
+  return `${start0 + 1},${count}`;
+}
+function buildHunks(blocks, oldLines, newLines, all = blocks) {
+  if (blocks.length === 0) return [];
+  const hasCtx = newLines !== null || oldLines !== null;
+  const C = hasCtx ? CONTEXT_LINES : 0;
+  const total = newLines ? newLines.length : oldLines ? oldLines.length : 0;
+  const endOf = (b) => newLines ? b.newStart + b.newCount : b.oldStart + b.oldCount;
+  const startOf = (b) => newLines ? b.newStart : b.oldStart;
+  const ctxText = (o, n) => (newLines ? newLines[n] : oldLines?.[o]) ?? "";
+  const index = new Map(all.map((b, i) => [b, i]));
+  const groups = [];
+  for (const b of blocks) {
+    const g = groups[groups.length - 1];
+    const prev = g?.[g.length - 1];
+    const adjacent = prev !== void 0 && index.get(b) === index.get(prev) + 1;
+    if (g && prev && hasCtx && adjacent && startOf(b) - endOf(prev) <= 2 * C) g.push(b);
+    else groups.push([b]);
+  }
+  return groups.map((g) => {
+    const first = g[0];
+    const last = g[g.length - 1];
+    const prevBlock = all[index.get(first) - 1];
+    const nextBlock = all[index.get(last) + 1];
+    const prevEnd = prevBlock ? endOf(prevBlock) : 0;
+    const nextStart = nextBlock ? startOf(nextBlock) : total;
+    const before = Math.min(C, startOf(first) - prevEnd);
+    const after = Math.max(0, Math.min(C, nextStart - endOf(last)));
+    let o = first.oldStart - before;
+    let n = first.newStart - before;
+    const startO = o;
+    const startN = n;
+    const lines = [];
+    const context = (count) => {
+      for (let k = 0; k < count; k++, o++, n++) {
+        lines.push({ kind: "context", oldNo: o + 1, newNo: n + 1, text: ctxText(o, n), blockId: null, noEol: false });
+      }
+    };
+    context(before);
+    for (const b of g) {
+      context(b.newStart - n);
+      b.del.forEach((text, k) => {
+        lines.push({ kind: "del", oldNo: ++o, newNo: null, text, blockId: b.id, noEol: b.oldNoEol && k === b.del.length - 1 });
+      });
+      b.add.forEach((text, k) => {
+        lines.push({ kind: "add", oldNo: null, newNo: ++n, text, blockId: b.id, noEol: b.newNoEol && k === b.add.length - 1 });
+      });
+    }
+    context(after);
+    const header = `@@ -${rangeHeader(startO, o - startO)} +${rangeHeader(startN, n - startN)} @@${first.section ? ` ${first.section}` : ""}`;
+    return { header, lines };
+  });
+}
+
 // src/engine/git.ts
 import { execFile } from "node:child_process";
 var GitError = class extends Error {
@@ -36696,7 +36764,6 @@ function git(cwd, args, okCodes = [0]) {
 }
 
 // src/engine/diff.ts
-var CONTEXT_LINES = 3;
 var MAX_CONTENT_BYTES = 1024 * 1024;
 var EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 async function computeDiff(repo, base = "HEAD") {
@@ -36855,12 +36922,6 @@ async function readWorkTree(repoRoot, filePath) {
     return { kind: "absent" };
   }
 }
-function splitLines(text) {
-  if (text === "") return [];
-  const lines = text.split("\n");
-  if (lines[lines.length - 1] === "") lines.pop();
-  return lines;
-}
 var stripCr = (s) => s.endsWith("\r") ? s.slice(0, -1) : s;
 function matchesBlocks(lines, blocks, side) {
   return blocks.every((b) => {
@@ -36939,59 +37000,6 @@ async function buildUntrackedFile(repoRoot, filePath) {
   ]);
   return { ...base, additions: lines.length, blocks, hunks: buildHunks(blocks, null, lines), newContent: c.text };
 }
-function rangeHeader(start0, count) {
-  if (count === 0) return `${start0},0`;
-  if (count === 1) return `${start0 + 1}`;
-  return `${start0 + 1},${count}`;
-}
-function buildHunks(blocks, oldLines, newLines) {
-  if (blocks.length === 0) return [];
-  const hasCtx = newLines !== null || oldLines !== null;
-  const C = hasCtx ? CONTEXT_LINES : 0;
-  const total = newLines ? newLines.length : oldLines ? oldLines.length : 0;
-  const endOf = (b) => newLines ? b.newStart + b.newCount : b.oldStart + b.oldCount;
-  const startOf = (b) => newLines ? b.newStart : b.oldStart;
-  const ctxText = (o, n) => (newLines ? newLines[n] : oldLines?.[o]) ?? "";
-  const groups = [];
-  for (const b of blocks) {
-    const g = groups[groups.length - 1];
-    const prev = g?.[g.length - 1];
-    if (g && prev && hasCtx && startOf(b) - endOf(prev) <= 2 * C) g.push(b);
-    else groups.push([b]);
-  }
-  return groups.map((g, gi) => {
-    const first = g[0];
-    const last = g[g.length - 1];
-    const prevGroup = groups[gi - 1];
-    const prevEnd = prevGroup ? endOf(prevGroup[prevGroup.length - 1]) : 0;
-    const nextStart = groups[gi + 1] ? startOf(groups[gi + 1][0]) : total;
-    const before = Math.min(C, startOf(first) - prevEnd);
-    const after = Math.max(0, Math.min(C, nextStart - endOf(last)));
-    let o = first.oldStart - before;
-    let n = first.newStart - before;
-    const startO = o;
-    const startN = n;
-    const lines = [];
-    const context = (count) => {
-      for (let k = 0; k < count; k++, o++, n++) {
-        lines.push({ kind: "context", oldNo: o + 1, newNo: n + 1, text: ctxText(o, n), blockId: null, noEol: false });
-      }
-    };
-    context(before);
-    for (const b of g) {
-      context(b.newStart - n);
-      b.del.forEach((text, k) => {
-        lines.push({ kind: "del", oldNo: ++o, newNo: null, text, blockId: b.id, noEol: b.oldNoEol && k === b.del.length - 1 });
-      });
-      b.add.forEach((text, k) => {
-        lines.push({ kind: "add", oldNo: null, newNo: ++n, text, blockId: b.id, noEol: b.newNoEol && k === b.add.length - 1 });
-      });
-    }
-    context(after);
-    const header = `@@ -${rangeHeader(startO, o - startO)} +${rangeHeader(startN, n - startN)} @@${first.section ? ` ${first.section}` : ""}`;
-    return { header, lines };
-  });
-}
 async function mapLimit(items, limit, fn) {
   const out = new Array(items.length);
   let next = 0;
@@ -37046,8 +37054,8 @@ var ReviewServer = class {
     this.server?.close();
     this.server = null;
   }
-  addView(repo, base) {
-    const view = { id: randomBytes(6).toString("base64url"), repo, base };
+  addView(repo, base, review) {
+    const view = { id: randomBytes(6).toString("base64url"), repo, base, review };
     this.views.set(view.id, view);
     return view;
   }
@@ -37067,7 +37075,8 @@ var ReviewServer = class {
       if (!view) return sendJson(res, 404, { error: "Unknown view. Ask Claude to open the viewer again." });
       try {
         const diff = await computeDiff(view.repo, view.base);
-        return sendJson(res, 200, { diff });
+        const data = { diff, review: view.review };
+        return sendJson(res, 200, data);
       } catch (err) {
         return sendJson(res, 500, { error: errorMessage(err) });
       }
@@ -37111,6 +37120,49 @@ function errorMessage(err) {
   return err instanceof Error ? err.message : String(err);
 }
 
+// src/server/review.ts
+var MAX_CHARS = 6e4;
+var MAX_LINES_PER_CHANGE = 40;
+var MAX_LINE_CHARS = 300;
+function formatChanges(diff) {
+  const count = diff.files.reduce((n, f) => n + changeIds(f).length, 0);
+  const out = [`${summarize(diff)}, ${count} change${count === 1 ? "" : "s"}. Each change starts with its id.`];
+  let size = 0;
+  let omitted = 0;
+  for (const f of diff.files) {
+    const stat = f.binary ? "binary" : `+${f.additions} -${f.deletions}`;
+    out.push("", `${f.oldPath ? `${f.oldPath} -> ` : ""}${f.path} (${f.status}, ${stat})`);
+    if (f.blocks.length === 0) {
+      out.push(`  file:${f.path}`);
+      continue;
+    }
+    for (const b of f.blocks) {
+      out.push(`  ${b.id}  @@ -${rangeHeader(b.oldStart, b.oldCount)} +${rangeHeader(b.newStart, b.newCount)} @@${b.section ? ` ${b.section}` : ""}`);
+      if (size > MAX_CHARS) {
+        omitted++;
+        continue;
+      }
+      const lines = [...b.del.map((l) => `-${l}`), ...b.add.map((l) => `+${l}`)];
+      for (const l of lines.slice(0, MAX_LINES_PER_CHANGE)) {
+        const line = l.length > MAX_LINE_CHARS ? `${l.slice(0, MAX_LINE_CHARS)}\u2026` : l;
+        out.push(`    ${line}`);
+        size += line.length + 5;
+      }
+      if (lines.length > MAX_LINES_PER_CHANGE) out.push(`    \u2026 ${lines.length - MAX_LINES_PER_CHANGE} more lines`);
+    }
+  }
+  if (omitted) out.push("", `The lines of ${omitted} change${omitted === 1 ? " were" : "s were"} left out to keep this short. Read the files for them.`);
+  return out.join("\n");
+}
+function checkTopics(diff, topics) {
+  const known = new Set(diff.files.flatMap(changeIds));
+  const used = new Set(topics.flatMap((t) => t.ids));
+  return {
+    unknown: [...used].filter((id) => !known.has(id)),
+    unassigned: [...known].filter((id) => !used.has(id))
+  };
+}
+
 // src/server/main.ts
 var DIST_DIR = path3.dirname(fileURLToPath(import.meta.url));
 var UI_DIR = path3.join(DIST_DIR, "ui");
@@ -37124,40 +37176,80 @@ function getServer() {
   })();
   return serverPromise;
 }
-async function openViewer(repo, base) {
+async function openViewer(repo, base, focus, topics) {
   const diff = await computeDiff(repo, base);
+  let review = null;
+  let note = "";
+  if (topics) {
+    const { unknown: unknown2, unassigned } = checkTopics(diff, topics);
+    if (unknown2.length) {
+      throw new Error(`Unknown change ids: ${unknown2.join(", ")}. Call list_changes again and use the ids it prints.`);
+    }
+    if (unassigned.length) {
+      note = `
+${unassigned.length} change(s) are in no topic and appear under "Other changes": ${unassigned.join(", ")}`;
+    }
+    review = { focus: focus?.trim() || null, topics };
+  }
   const server = await getServer();
-  const view = server.addView(diff.repoRoot, base);
-  return { url: server.url(view), summary: summarize(diff) };
+  const view = server.addView(diff.repoRoot, base, review);
+  return `${server.url(view)}
+${summarize(diff)}${note}`;
 }
 async function shutdown() {
   if (serverPromise) (await serverPromise).close();
   process.exit(0);
 }
 async function runHttpOnly(base) {
-  const { url: url2, summary } = await openViewer(process.cwd(), base);
-  console.error(`${summary}
-${url2}`);
+  console.error(await openViewer(process.cwd(), base));
   process.on("SIGINT", () => void shutdown());
 }
 async function runMcp() {
   const mcp = new McpServer({ name: "diff-review", version: VERSION });
+  const repo = external_exports.string().optional().describe("Absolute path of a directory inside the git repository. Defaults to the server's working directory.");
+  const base = external_exports.string().optional().describe("Git ref to compare the working tree against, such as HEAD, main, HEAD~3, a tag or a commit. Defaults to HEAD.");
+  mcp.registerTool(
+    "list_changes",
+    {
+      title: "List changes",
+      description: "List every change in the working tree (staged, unstaged and untracked) compared with a base ref, each with a stable id and its removed and added lines. Use the ids to group changes into topics for open_diff_viewer.",
+      inputSchema: { repo, base },
+      annotations: { readOnlyHint: true, openWorldHint: false }
+    },
+    async (args) => {
+      try {
+        const diff = await computeDiff(args.repo ?? process.cwd(), args.base ?? "HEAD");
+        return { content: [{ type: "text", text: formatChanges(diff) }] };
+      } catch (err) {
+        return { content: [{ type: "text", text: `Could not list changes: ${errorMessage(err)}` }], isError: true };
+      }
+    }
+  );
   mcp.registerTool(
     "open_diff_viewer",
     {
       title: "Open diff viewer",
-      description: "Open a GitHub-style diff viewer in the user's browser for a git repository: the working tree (staged, unstaged and untracked files) compared with a base ref. Returns a local URL to give to the user.",
+      description: "Open a GitHub-style diff viewer in the user's browser for a git repository: the working tree compared with a base ref. With topics, the page also shows the changes grouped by topic with your explanation of each. Returns a local URL to give to the user.",
       inputSchema: {
-        repo: external_exports.string().optional().describe("Absolute path of a directory inside the git repository. Defaults to the server's working directory."),
-        base: external_exports.string().optional().describe("Git ref to compare the working tree against, such as HEAD, main, HEAD~3, a tag or a commit. Defaults to HEAD.")
+        repo,
+        base,
+        focus: external_exports.string().optional().describe("What the user wants to review, in their words."),
+        topics: external_exports.array(
+          external_exports.object({
+            title: external_exports.string().describe("A few words naming the topic."),
+            summary: external_exports.string().describe("Markdown explaining what changed in this topic and why."),
+            ids: external_exports.array(external_exports.string()).describe("Ids from list_changes of the changes in this topic."),
+            related: external_exports.boolean().optional().describe("false when the topic has nothing to do with the focus.")
+          })
+        ).optional().describe("Every change from list_changes grouped into topics, in the order the reviewer should read them.")
       },
       annotations: { readOnlyHint: true, openWorldHint: false }
     },
-    async ({ repo, base }) => {
+    async (args) => {
       try {
-        const { url: url2, summary } = await openViewer(repo ?? process.cwd(), base ?? "HEAD");
-        return { content: [{ type: "text", text: `${url2}
-${summary}` }] };
+        const topics = args.topics?.map((t) => ({ ...t, related: t.related ?? true }));
+        const text = await openViewer(args.repo ?? process.cwd(), args.base ?? "HEAD", args.focus, topics);
+        return { content: [{ type: "text", text }] };
       } catch (err) {
         return { content: [{ type: "text", text: `Could not open the diff viewer: ${errorMessage(err)}` }], isError: true };
       }

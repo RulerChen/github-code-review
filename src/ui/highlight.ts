@@ -164,7 +164,20 @@ function getHighlighter(): Promise<HighlighterCore> {
   return highlighter;
 }
 
-export async function highlight(code: string, lang: Lang): Promise<TokenLines | null> {
+const cache = new Map<string, Promise<TokenLines | null>>();
+
+export function highlight(code: string, lang: Lang): Promise<TokenLines | null> {
+  const key = `${lang}\0${code}`;
+  let result = cache.get(key);
+  if (!result) {
+    result = highlightUncached(code, lang);
+    cache.set(key, result);
+    if (cache.size > 64) cache.delete(cache.keys().next().value!);
+  }
+  return result;
+}
+
+async function highlightUncached(code: string, lang: Lang): Promise<TokenLines | null> {
   if (code.length > MAX_HIGHLIGHT_CHARS) return null;
   const h = await getHighlighter();
   let ready = loaded.get(lang);
