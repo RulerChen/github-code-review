@@ -1,4 +1,6 @@
+import { useState } from "react";
 import type { FileDiff, FileStatus } from "../shared/types";
+import { ChevronIcon } from "./FileCard";
 
 interface DirNode {
   name: string;
@@ -60,46 +62,60 @@ interface Props {
 }
 
 export function FileTree({ entries, active, isViewed, onSelect }: Props) {
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
+  const toggle = (path: string) =>
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(path)) next.add(path);
+      return next;
+    });
   const tree = buildTree(entries);
   if (entries.length === 0) return <p className="tree-empty">No matching files.</p>;
   return (
     <ul className="tree" role="tree">
-      <TreeLevel node={tree} depth={0} active={active} isViewed={isViewed} onSelect={onSelect} />
+      <TreeLevel node={tree} path="" depth={0} active={active} isViewed={isViewed} onSelect={onSelect} collapsed={collapsed} onToggle={toggle} />
     </ul>
   );
 }
 
-function TreeLevel({
-  node,
-  depth,
-  active,
-  isViewed,
-  onSelect,
-}: {
+interface LevelProps {
   node: DirNode;
+  path: string;
   depth: number;
   active: string | null;
   isViewed: (file: FileDiff) => boolean;
   onSelect: (anchor: string) => void;
-}) {
+  collapsed: ReadonlySet<string>;
+  onToggle: (path: string) => void;
+}
+
+function TreeLevel({ node, path, depth, ...rest }: LevelProps) {
+  const { active, isViewed, onSelect, collapsed, onToggle } = rest;
   const indent = { paddingLeft: `${8 + depth * 14}px` };
   return (
     <>
       {[...node.dirs.values()]
         .sort((a, b) => a.name.localeCompare(b.name))
-        .map((dir) => (
-          <li key={`d:${dir.name}`} role="treeitem" aria-expanded="true">
-            <div className="tree-dir" style={indent}>
-              <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
-                <path d="M.513 1.513A1.75 1.75 0 0 1 1.75 1h3.5c.55 0 1.07.26 1.4.7l.9 1.2a.25.25 0 0 0 .2.1H13a1 1 0 0 1 1 1v.5H2.75a.75.75 0 0 0 0 1.5h11.978a1 1 0 0 1 .994 1.117L15 13.25A1.75 1.75 0 0 1 13.25 15H1.75A1.75 1.75 0 0 1 0 13.25V2.75c0-.464.184-.91.513-1.237Z" />
-              </svg>
-              <span>{dir.name}</span>
-            </div>
-            <ul role="group">
-              <TreeLevel node={dir} depth={depth + 1} active={active} isViewed={isViewed} onSelect={onSelect} />
-            </ul>
-          </li>
-        ))}
+        .map((dir) => {
+          const dirPath = path ? `${path}/${dir.name}` : dir.name;
+          const open = !collapsed.has(dirPath);
+          return (
+            <li key={`d:${dir.name}`} role="treeitem" aria-expanded={open}>
+              <button className="tree-dir" style={indent} onClick={() => onToggle(dirPath)} title={dirPath}>
+                <ChevronIcon />
+                <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+                  <path d="M.513 1.513A1.75 1.75 0 0 1 1.75 1h3.5c.55 0 1.07.26 1.4.7l.9 1.2a.25.25 0 0 0 .2.1H13a1 1 0 0 1 1 1v.5H2.75a.75.75 0 0 0 0 1.5h11.978a1 1 0 0 1 .994 1.117L15 13.25A1.75 1.75 0 0 1 13.25 15H1.75A1.75 1.75 0 0 1 0 13.25V2.75c0-.464.184-.91.513-1.237Z" />
+                </svg>
+                <span>{dir.name}</span>
+              </button>
+              {open && (
+                <ul role="group">
+                  <TreeLevel node={dir} path={dirPath} depth={depth + 1} {...rest} />
+                </ul>
+              )}
+            </li>
+          );
+        })}
       {node.files.map(({ file, anchor }) => (
         <li key={anchor} role="treeitem">
           <button

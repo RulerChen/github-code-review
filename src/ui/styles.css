@@ -248,12 +248,28 @@ button {
 }
 
 .tree-dir {
+  border: 0;
+  background: none;
   color: var(--fg-muted);
+  text-align: left;
+  cursor: pointer;
+}
+
+.tree-dir:hover {
+  background: var(--bg-subtle);
 }
 
 .tree-dir svg {
   flex: none;
   fill: currentColor;
+}
+
+.tree-dir svg:first-child {
+  transition: transform 0.15s ease-out;
+}
+
+[aria-expanded="false"] > .tree-dir svg:first-child {
+  transform: rotate(-90deg);
 }
 
 .tree-dir span {
@@ -913,7 +929,8 @@ button {
 
 @media (prefers-reduced-motion: reduce) {
   .progress > span,
-  .chevron svg {
+  .chevron svg,
+  .tree-dir svg:first-child {
     transition: none;
   }
 }
