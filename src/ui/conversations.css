@@ -3,7 +3,7 @@
 }
 
 .topic {
-  scroll-margin-top: calc(var(--topbar-h) + 8px);
+  scroll-margin-top: 8px;
 }
 
 .thread.is-current {

@@ -4,6 +4,7 @@ import type { Block, DisplayHunk, Expansion, FileDiff } from "../shared/types";
 import { onShownVersion, ThreadView, useComments } from "./comments";
 import { DiffTable, hasLine, type OnExpand, splitRowCount } from "./DiffTable";
 import { highlight, languageFor, type TokenLines } from "./highlight";
+import { keepHeaderInPlace } from "./keyboard";
 
 // GitHub loads 400 lines or 20 KB of a file's diff before asking. Characters stand in for bytes.
 const AUTO_LOAD_LINES = 400;
@@ -70,6 +71,7 @@ export function FileCard({ file, blocks = file.blocks, anchor, viewed = false, o
   const lineCount = baseHunks.reduce((s, h) => s + h.lines.length, 0);
   const charCount = useMemo(() => baseHunks.reduce((s, h) => h.lines.reduce((n, l) => n + l.text.length + 1, s), 0), [baseHunks]);
   const ref = useRef<HTMLElement>(null);
+  const header = useRef<HTMLElement>(null);
   const [near, setNear] = useState(false);
   useEffect(() => (near || !ref.current ? undefined : whenNear(ref.current, () => setNear(true))), [near]);
   const { threadsFor, versions, revealSeq, peekReveal } = useComments();
@@ -92,12 +94,12 @@ export function FileCard({ file, blocks = file.blocks, anchor, viewed = false, o
 
   return (
     <section className={`file${viewed ? " is-viewed" : ""}`} id={anchor} ref={ref}>
-      <header className="file-header">
+      <header className="file-header" ref={header}>
         <button
           className="icon-button chevron"
           aria-expanded={!collapsed}
           aria-label={collapsed ? "Expand file" : "Collapse file"}
-          onClick={() => setCollapsed(!collapsed)}
+          onClick={() => keepHeaderInPlace(header.current, () => setCollapsed(!collapsed))}
         >
           <ChevronIcon />
         </button>
@@ -115,7 +117,16 @@ export function FileCard({ file, blocks = file.blocks, anchor, viewed = false, o
         <span className="spacer" />
         {onToggleViewed && (
           <label className="viewed-toggle">
-            <input type="checkbox" checked={viewed} onChange={onToggleViewed} />
+            <input
+              type="checkbox"
+              checked={viewed}
+              onChange={() =>
+                keepHeaderInPlace(header.current, () => {
+                  if (!viewed) setCollapsed(true);
+                  onToggleViewed();
+                })
+              }
+            />
             Viewed
           </label>
         )}

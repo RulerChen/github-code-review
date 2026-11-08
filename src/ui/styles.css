@@ -63,6 +63,11 @@
   color: var(--shiki-dark) !important;
 }
 
+/* The top bar covers this band, so scrolling into view and scroll anchoring both start below it. */
+html {
+  scroll-padding-top: var(--topbar-h);
+}
+
 * {
   box-sizing: border-box;
 }
@@ -336,7 +341,7 @@ button {
   margin-bottom: 16px;
   border: 1px solid var(--border);
   border-radius: 6px;
-  scroll-margin-top: calc(var(--topbar-h) + 8px);
+  scroll-margin-top: 8px;
 }
 
 .file-header {

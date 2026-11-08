@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { changeIds } from "../shared/hunks";
 import type { Block, DisplayHunk, FileDiff, Review, Thread } from "../shared/types";
 import { type CommentsApi, onShownVersion, useComments } from "./comments";
 import { hasLine } from "./DiffTable";
 import { ChevronIcon, FileCard, hunksOf } from "./FileCard";
+import { keepHeaderInPlace } from "./keyboard";
 import { Markdown } from "./Markdown";
 
 export interface TopicPart {
@@ -95,15 +96,16 @@ export function TopicSection({ topic, viewed, onToggleViewed }: SectionProps) {
     if (thread && topicShows(topic, thread, versions)) setCollapsed(false);
   }, [revealSeq]);
 
+  const header = useRef<HTMLElement>(null);
   const files = topic.parts.length;
   return (
     <section className={`topic${viewed ? " is-viewed" : ""}`} id={topic.anchor}>
-      <header className="topic-header">
+      <header className="topic-header" ref={header}>
         <button
           className="icon-button chevron"
           aria-expanded={!collapsed}
           aria-label={collapsed ? "Expand topic" : "Collapse topic"}
-          onClick={() => setCollapsed(!collapsed)}
+          onClick={() => keepHeaderInPlace(header.current, () => setCollapsed(!collapsed))}
         >
           <ChevronIcon />
         </button>
@@ -113,7 +115,16 @@ export function TopicSection({ topic, viewed, onToggleViewed }: SectionProps) {
         </span>
         <span className="spacer" />
         <label className="viewed-toggle">
-          <input type="checkbox" checked={viewed} onChange={onToggleViewed} />
+          <input
+            type="checkbox"
+            checked={viewed}
+            onChange={() =>
+              keepHeaderInPlace(header.current, () => {
+                if (!viewed) setCollapsed(true);
+                onToggleViewed();
+              })
+            }
+          />
           Viewed
         </label>
       </header>

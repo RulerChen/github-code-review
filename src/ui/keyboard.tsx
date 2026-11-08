@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useRef } from "react";
+import { flushSync } from "react-dom";
 import "./keyboard.css";
 
 const TEXT_INPUT = /^(text|search|email|url|password|number|tel)$/;
@@ -35,9 +36,24 @@ export function useShortcuts(shortcuts: Record<string, () => void>): void {
 // File and topic sections are found in the page itself, so the keys follow the reader's scrolling.
 const sections = () => [...document.querySelectorAll<HTMLElement>(".files > section[id]")];
 
-function topOffset(): number {
+function topBar(): number {
   const bar = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--topbar-h"));
-  return (Number.isFinite(bar) ? bar : 0) + 8;
+  return Number.isFinite(bar) ? bar : 0;
+}
+
+function topOffset(): number {
+  return topBar() + 8;
+}
+
+/**
+ * Applies a change that may fold a file or topic, then scrolls so its header stays where it was on screen.
+ * Folding under a stuck header would otherwise leave the reader files further down the page.
+ * A header above the top bar, which only the keyboard can fold, comes back to just under it.
+ */
+export function keepHeaderInPlace(header: HTMLElement | null, change: () => void): void {
+  const before = header?.getBoundingClientRect().top;
+  flushSync(change);
+  if (header && before !== undefined) window.scrollBy(0, header.getBoundingClientRect().top - Math.max(before, topBar()));
 }
 
 /** The active section while it is on screen, otherwise the last one whose top has reached the top bar, or the first. */
@@ -77,10 +93,6 @@ export function toggleSection(what: "viewed" | "collapsed", active: string | nul
   const selector = what === "viewed" ? ":scope > header input[type=checkbox]" : ":scope > header .chevron";
   el.querySelector<HTMLElement>(selector)?.click();
   setActive(el.id);
-  // A section that folds while its header is above the screen would leave the reader further down the page.
-  requestAnimationFrame(() => {
-    if (el.getBoundingClientRect().top < topOffset() - 2) el.scrollIntoView({ block: "start" });
-  });
 }
 
 export function CloseIcon() {
