@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { randomInt } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -60,7 +60,10 @@ export class ReviewServer {
   }
 
   addView(repo: string, base: string, review: Review | null, cwd: string, session: string | null): View {
-    const view = { id: randomBytes(6).toString("base64url"), repo, base, review };
+    let id: string;
+    do id = Array.from({ length: 5 }, () => String.fromCharCode(97 + randomInt(26))).join("");
+    while (this.views.has(id));
+    const view = { id, repo, base, review };
     this.views.set(view.id, view);
     let threads = this.repos.get(repo);
     if (!threads) {

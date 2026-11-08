@@ -37098,7 +37098,7 @@ function describe3(cwd, tool, input2) {
 }
 
 // src/server/http.ts
-import { randomBytes as randomBytes2 } from "node:crypto";
+import { randomInt } from "node:crypto";
 import { readFile as readFile2 } from "node:fs/promises";
 import { createServer } from "node:http";
 import path3 from "node:path";
@@ -37255,7 +37255,11 @@ var ReviewServer = class {
     this.server = null;
   }
   addView(repo, base, review, cwd, session) {
-    const view = { id: randomBytes2(6).toString("base64url"), repo, base, review };
+    let id;
+    do
+      id = Array.from({ length: 5 }, () => String.fromCharCode(97 + randomInt(26))).join("");
+    while (this.views.has(id));
+    const view = { id, repo, base, review };
     this.views.set(view.id, view);
     let threads = this.repos.get(repo);
     if (!threads) {
