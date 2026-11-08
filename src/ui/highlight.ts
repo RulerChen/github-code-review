@@ -152,12 +152,19 @@ export function languageFor(filePath: string): Lang | null {
 
 const MAX_HIGHLIGHT_CHARS = 400_000;
 
+const SOFT_DARK_COLORS: Record<string, string> = { "#adbac7": "#d1d7e0", "#768390": "#9198a1" };
+
+async function softDarkTheme() {
+  const theme = (await import("@shikijs/themes/github-dark-dimmed")).default;
+  return JSON.parse(JSON.stringify(theme).replace(/#adbac7|#768390/gi, (c) => SOFT_DARK_COLORS[c.toLowerCase()]!));
+}
+
 let highlighter: Promise<HighlighterCore> | null = null;
 const loaded = new Map<Lang, Promise<void>>();
 
 function getHighlighter(): Promise<HighlighterCore> {
   highlighter ??= createHighlighterCore({
-    themes: [import("@shikijs/themes/github-light-default"), import("@shikijs/themes/github-dark-default")],
+    themes: [import("@shikijs/themes/github-light-default"), softDarkTheme()],
     langs: [],
     engine: createJavaScriptRegexEngine(),
   });
@@ -186,6 +193,6 @@ async function highlightUncached(code: string, lang: Lang): Promise<TokenLines |
     loaded.set(lang, ready);
   }
   await ready;
-  const { tokens } = h.codeToTokens(code, { lang, themes: { light: "github-light-default", dark: "github-dark-default" } });
+  const { tokens } = h.codeToTokens(code, { lang, themes: { light: "github-light-default", dark: "github-dark-dimmed" } });
   return tokens.map((line) => line.map((t) => ({ content: t.content, style: t.htmlStyle })));
 }
