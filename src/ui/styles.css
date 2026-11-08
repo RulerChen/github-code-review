@@ -1004,7 +1004,8 @@ button {
   .layout {
     grid-template-columns: minmax(0, 1fr);
   }
-  .sidebar {
+  .sidebar,
+  .sidebar-toggle {
     display: none;
   }
 

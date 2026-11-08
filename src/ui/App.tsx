@@ -26,6 +26,11 @@ export function App({ viewId }: Props) {
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
   const [theme, setTheme] = useState(document.documentElement.dataset.theme === "dark" ? "dark" : "light");
   const [tab, setTab] = useState<Tab>("topics");
+  const [sidebarOpen, setSidebarOpen] = useState(() => readStorage("diff-review:sidebar", true));
+  const showSidebar = (open: boolean) => {
+    setSidebarOpen(open);
+    writeStorage("diff-review:sidebar", open);
+  };
   const [filter, setFilter] = useState("");
   const [active, setActive] = useState<string | null>(null);
   const [viewed, setViewed] = useState<Record<string, string>>({});
@@ -175,6 +180,7 @@ export function App({ viewId }: Props) {
     },
     "/": () => {
       setTab("files");
+      showSidebar(true);
       requestAnimationFrame(() => document.querySelector<HTMLInputElement>(".sidebar .filter")?.focus());
     },
     "?": () => setHelp((h) => !h),
@@ -246,6 +252,7 @@ export function App({ viewId }: Props) {
     <CommentsContext.Provider value={commentsValue}>
       <div className="app">
         <header className="topbar">
+          {view !== "commits" && <SidebarToggle open={sidebarOpen} onToggle={() => showSidebar(!sidebarOpen)} />}
           <div className="topbar-title">
             <CompareControls diff={diff} loadRefs={loadRefs} onCompare={compareWith} />
           </div>
@@ -301,8 +308,8 @@ export function App({ viewId }: Props) {
 
         {error && <div className="banner">{error.message}</div>}
 
-        <div className={`layout${conv.open ? " with-conversations" : ""}${view === "commits" ? " no-sidebar" : ""}`}>
-          <aside className="sidebar" hidden={view === "commits"}>
+        <div className={`layout${conv.open ? " with-conversations" : ""}${view === "commits" || !sidebarOpen ? " no-sidebar" : ""}`}>
+          <aside className="sidebar" hidden={view === "commits" || !sidebarOpen}>
             {byTopic ? (
               <TopicList topics={topics} active={active} isViewed={isTopicViewed} onSelect={select} />
             ) : (
@@ -386,6 +393,33 @@ function noChanges(d: DiffResult): ReactNode {
       <code>{refLabel(d.base)}</code>
     );
   return d.head === null ? <>The working tree matches {from}.</> : <><code>{refLabel(d.head)}</code> has the same files as {from}.</>;
+}
+
+// Octicons sidebar-collapse-16 and sidebar-expand-16 draw the panel on the right; mirror them for a left sidebar.
+const SIDEBAR_ICON = {
+  collapse: [
+    "M6.823 7.823a.25.25 0 0 1 0 .354l-2.396 2.396A.25.25 0 0 1 4 10.396V5.604a.25.25 0 0 1 .427-.177Z",
+    "M1.75 0h12.5C15.216 0 16 .784 16 1.75v12.5A1.75 1.75 0 0 1 14.25 16H1.75A1.75 1.75 0 0 1 0 14.25V1.75C0 .784.784 0 1.75 0ZM1.5 1.75v12.5c0 .138.112.25.25.25H9.5v-13H1.75a.25.25 0 0 0-.25.25ZM11 14.5h3.25a.25.25 0 0 0 .25-.25V1.75a.25.25 0 0 0-.25-.25H11Z",
+  ],
+  expand: [
+    "m4.177 7.823 2.396-2.396A.25.25 0 0 1 7 5.604v4.792a.25.25 0 0 1-.427.177L4.177 8.177a.25.25 0 0 1 0-.354Z",
+    "M0 1.75C0 .784.784 0 1.75 0h12.5C15.216 0 16 .784 16 1.75v12.5A1.75 1.75 0 0 1 14.25 16H1.75A1.75 1.75 0 0 1 0 14.25Zm1.75-.25a.25.25 0 0 0-.25.25v12.5c0 .138.112.25.25.25H9.5v-13Zm12.5 13a.25.25 0 0 0 .25-.25V1.75a.25.25 0 0 0-.25-.25H11v13Z",
+  ],
+};
+
+function SidebarToggle({ open, onToggle }: { open: boolean; onToggle: () => void }) {
+  const label = open ? "Collapse sidebar" : "Expand sidebar";
+  return (
+    <button className="icon-button sidebar-toggle" onClick={onToggle} aria-label={label} aria-expanded={open} title={label}>
+      <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+        <g transform="matrix(-1 0 0 1 16 0)">
+          {SIDEBAR_ICON[open ? "collapse" : "expand"].map((d) => (
+            <path key={d} d={d} />
+          ))}
+        </g>
+      </svg>
+    </button>
+  );
 }
 
 function ThemeToggle({ theme, onToggle }: { theme: string; onToggle: () => void }) {
