@@ -1,1 +1,2 @@
 * text=auto eol=lf
+plugins/diff-review/dist/** linguist-generated=true
