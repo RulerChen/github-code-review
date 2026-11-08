@@ -5,7 +5,6 @@ import { Markdown } from "./Markdown";
 
 export interface RevealRequest {
   thread: Thread;
-  reply: boolean;
 }
 
 export interface CommentsApi {
@@ -122,7 +121,6 @@ export function ThreadView({ thread, withVersion = false }: { thread: Thread; wi
     const request = takeReveal(thread.id);
     if (!request) return;
     ref.current?.scrollIntoView({ block: "center" });
-    if (request.reply) setReplying(true);
   }, [revealSeq]);
 
   // An answer counts as read once its thread is on screen while the page is in front.

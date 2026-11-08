@@ -2,7 +2,6 @@ import { type SetStateAction, useCallback, useEffect, useMemo, useRef, useState 
 import type { Thread, ThreadAnchor } from "../shared/types";
 import { anchorLabel, type CommentsApi, readableCount, type RevealRequest, ThreadView } from "./comments";
 import { comparePaths } from "./FileTree";
-import { CloseIcon } from "./keyboard";
 import { readStorage, writeStorage } from "./storage";
 import "./conversations.css";
 
@@ -26,10 +25,8 @@ export interface Conversations {
   unreadThreads: number;
   open: boolean;
   setOpen: (open: SetStateAction<boolean>) => void;
-  reveal: (thread: Thread, reply?: boolean) => void;
-  step: (dir: 1 | -1) => void;
+  reveal: (thread: Thread) => void;
   nextUnread: () => void;
-  replyToCurrent: () => void;
   markAllRead: () => void;
 }
 
@@ -105,7 +102,7 @@ export function useConversations({ repoRoot, threads, place, show }: Options): C
     return p.request;
   }, []);
 
-  const reveal = (thread: Thread, reply = false) => {
+  const reveal = (thread: Thread) => {
     setCurrent(thread.id);
     if (!document.querySelector(`.files [data-thread="${thread.id}"]`)) {
       const p = placeOf.get(thread.id);
@@ -115,25 +112,16 @@ export function useConversations({ repoRoot, threads, place, show }: Options): C
     if (pending.current) clearTimeout(pending.current.timer);
     // Files and topics open over a few renders. A request nothing took must not scroll a thread later.
     const timer = window.setTimeout(() => (pending.current = null), 1500);
-    pending.current = { request: { thread, reply }, timer };
+    pending.current = { request: { thread }, timer };
     setRevealSeq((s) => s + 1);
   };
 
   const at = ordered.findIndex((t) => t.id === current);
-  const step = (dir: 1 | -1) => {
-    if (!ordered.length) return;
-    const i = at < 0 ? (dir > 0 ? 0 : ordered.length - 1) : Math.min(Math.max(at + dir, 0), ordered.length - 1);
-    reveal(ordered[i]!);
-  };
   const nextUnread = () => {
     for (let k = 1; k <= ordered.length; k++) {
       const t = ordered[(at + k + ordered.length) % ordered.length]!;
       if (unread(t) > 0) return reveal(t);
     }
-  };
-  const replyToCurrent = () => {
-    const t = ordered[at];
-    if (t) reveal(t, true);
   };
   const markAllRead = () => {
     if (!key) return;
@@ -147,7 +135,15 @@ export function useConversations({ repoRoot, threads, place, show }: Options): C
     [unread, markRead, current, revealSeq, peekReveal, takeReveal],
   );
 
-  return { api, ordered, placeOf, unreadThreads, open, setOpen, reveal, step, nextUnread, replyToCurrent, markAllRead };
+  return { api, ordered, placeOf, unreadThreads, open, setOpen, reveal, nextUnread, markAllRead };
+}
+
+function CloseIcon() {
+  return (
+    <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+      <path d="M3.75 3.75l8.5 8.5M12.25 3.75l-8.5 8.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
 }
 
 function lineLabel(anchor: ThreadAnchor): string {
@@ -166,7 +162,7 @@ export function ConversationsButton({ conv }: { conv: Conversations }) {
       onClick={() => conv.setOpen((o) => !o)}
       aria-pressed={conv.open}
       aria-label={label}
-      title={`${label} (c)`}
+      title={label}
     >
       <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
         <path
@@ -196,7 +192,7 @@ export function ConversationsPanel({ conv }: { conv: Conversations }) {
             Mark all read
           </button>
         )}
-        <button className="icon-button" onClick={() => conv.setOpen(false)} aria-label="Hide conversations" title="Hide conversations (c)">
+        <button className="icon-button" onClick={() => conv.setOpen(false)} aria-label="Hide conversations" title="Hide conversations">
           <CloseIcon />
         </button>
       </header>
@@ -220,7 +216,7 @@ export function ConversationsPanel({ conv }: { conv: Conversations }) {
         </ul>
       )}
       <footer className="conversations-foot">
-        <kbd>n</kbd> <kbd>p</kbd> move, <kbd>u</kbd> next unread, <kbd>r</kbd> reply, <kbd>?</kbd> all shortcuts
+        <kbd>u</kbd> jumps to the next new answer
       </footer>
     </aside>
   );

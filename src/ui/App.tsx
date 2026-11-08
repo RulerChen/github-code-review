@@ -6,7 +6,7 @@ import { CommitList, CompareControls, refLabel, sameComparison } from "./Compare
 import { ConversationsButton, ConversationsPanel, type Place, useConversations } from "./Conversations";
 import { FileCard } from "./FileCard";
 import { comparePaths, FileTree } from "./FileTree";
-import { KeyboardButton, ShortcutHelp, stepSection, toggleSection, useShortcuts } from "./keyboard";
+import { stepSection, useShortcuts } from "./keyboard";
 import { readStorage, writeStorage } from "./storage";
 import { SubmitReview } from "./SubmitReview";
 import { buildTopics, TopicList, TopicSection, topicShows, type TopicView } from "./Topics";
@@ -203,28 +203,11 @@ export function App({ viewId }: Props) {
     },
   });
   const commentsValue = useMemo(() => ({ ...comments, ...conv.api }), [comments, conv.api]);
-  const [help, setHelp] = useState(false);
   useShortcuts({
     j: () => stepSection(1, active, setActive),
     k: () => stepSection(-1, active, setActive),
-    v: () => toggleSection("viewed", active, setActive),
-    o: () => toggleSection("collapsed", active, setActive),
-    n: () => conv.step(1),
-    p: () => conv.step(-1),
     u: conv.nextUnread,
-    r: conv.replyToCurrent,
-    c: () => conv.setOpen((o) => !o),
-    t: () => {
-      if (topicTab) setTab("files");
-      else if (review && isOpened) setTab("topics");
-    },
-    "/": () => {
-      setTab("files");
-      showSidebar(true);
-      requestAnimationFrame(() => document.querySelector<HTMLInputElement>(".sidebar .filter")?.focus());
-    },
-    "?": () => setHelp((h) => !h),
-    Escape: () => (help ? setHelp(false) : conv.setOpen(false)),
+    Escape: () => conv.setOpen(false),
   });
 
   const isViewed = useCallback((f: FileDiff) => viewed[f.path] === signature(f), [viewed]);
@@ -338,7 +321,6 @@ export function App({ viewId }: Props) {
             </div>
           )}
           <ConversationsButton conv={conv} />
-          <KeyboardButton onClick={() => setHelp(true)} />
           <ThemeToggle theme={theme} onToggle={toggleTheme} />
           <button className="button" onClick={() => void load(requested.current)} disabled={loading} title={updatedAt ? `Updated ${updatedAt.toLocaleTimeString()}` : undefined}>
             Refresh
@@ -400,7 +382,6 @@ export function App({ viewId }: Props) {
           </main>
         </div>
         {conv.open && <ConversationsPanel conv={conv} />}
-        {help && <ShortcutHelp onClose={() => setHelp(false)} />}
       </div>
     </CommentsContext.Provider>
   );
