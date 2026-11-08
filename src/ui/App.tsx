@@ -231,7 +231,6 @@ export function App({ viewId }: Props) {
   const total = byTopic ? topics.length : diff.files.length;
   const viewedCount = byTopic ? topics.filter(isTopicViewed).length : diff.files.filter(isViewed).length;
   const unit = byTopic ? "topics" : "files";
-  const repoName = diff.repoRoot.slice(diff.repoRoot.lastIndexOf("/") + 1);
   const firstUnrelated = topics.findIndex((t) => !t.related);
 
   return (
@@ -239,7 +238,6 @@ export function App({ viewId }: Props) {
       <div className="app">
         <header className="topbar">
           <div className="topbar-title">
-            <strong>{repoName}</strong>
             <CompareControls diff={diff} loadRefs={loadRefs} onCompare={compareWith} />
           </div>
           <div className="topbar-stats">
