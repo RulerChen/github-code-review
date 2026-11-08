@@ -50,13 +50,16 @@ export function formatChanges(diff: DiffResult): string {
 }
 
 /**
- * The reviews numbered above `after`, or the latest one without it. Only without `after`, when the user asks
- * directly, does it add the draft comments not submitted yet and the @claude questions, which never go into a
+ * The reviews numbered above `after`. Without it, the reviews numbered above `read`, the newest one returned
+ * before, or the latest review when there are none: a single comment is a review of its own, and one sent while
+ * Claude was not waiting must not hide behind the review submitted after it. Only without `after`, when the user
+ * asks directly, does it add the draft comments not submitted yet and the @claude questions, which never go into a
  * review: the wait flow must not act on drafts before the user submits. Null when there is nothing to show.
  */
-export function formatReviewComments(threads: Thread[], submissions: Submission[], after: number | null): string | null {
+export function formatReviewComments(threads: Thread[], submissions: Submission[], after: number | null, read: number): string | null {
   const withDrafts = after === null;
-  const reviews = after === null ? submissions.slice(-1) : submissions.filter((s) => s.n > after);
+  const unread = submissions.filter((s) => s.n > (after ?? read));
+  const reviews = after === null && !unread.length ? submissions.slice(-1) : unread;
   const numbers = new Set(reviews.map((s) => s.n));
   const submitted = threads.filter((t) => t.comments.some((c) => c.review !== null && numbers.has(c.review)));
   const drafts = withDrafts ? threads.filter((t) => !submitted.includes(t) && t.comments.some((c) => c.draft)) : [];

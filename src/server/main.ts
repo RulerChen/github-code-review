@@ -162,8 +162,9 @@ async function runMcp(): Promise<void> {
       description:
         "Read the review the user submitted in the diff viewer: their comment on the whole review and each comment " +
         "thread with its id, the selected lines (or the whole file or topic) and the earlier comments. Without after it also " +
-        "lists draft comments they have not submitted yet and their @claude questions. Use it when the wait command from open_diff_viewer " +
-        "finishes, or when the user asks you to address their review comments.",
+        "lists draft comments they have not submitted yet and their @claude questions. A ```suggestion block in a comment " +
+        "holds the lines the user wants in place of the thread's selected lines. Use it when the wait command from " +
+        "open_diff_viewer finishes, or when the user asks you to address their review comments.",
       inputSchema: {
         repo: z
           .string()
@@ -176,7 +177,7 @@ async function runMcp(): Promise<void> {
           .optional()
           .describe(
             "Read every review of that repository numbered above this one, as the wait command says. Omit it for the " +
-              "latest review and the drafts.",
+              "reviews this tool has not returned yet, or the latest one if it returned them all, and the drafts.",
           ),
       },
       annotations: { readOnlyHint: true, openWorldHint: false },
@@ -192,7 +193,8 @@ async function runMcp(): Promise<void> {
         return { content: [{ type: "text", text }], isError: true };
       }
       const parts = repos.flatMap(({ repo, threads, view }) => {
-        const text = formatReviewComments(threads.threads, threads.submissions, args.after ?? null);
+        const text = formatReviewComments(threads.threads, threads.submissions, args.after ?? null, threads.read);
+        threads.read = threads.submissions.length;
         if (!text) return [];
         return [
           `${repo}\n\n${text}\n\nWhen you have addressed it, reply on each thread with reply_to_review. Then wait for the next ` +

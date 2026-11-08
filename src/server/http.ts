@@ -219,13 +219,15 @@ export class ReviewServer {
       }
       if (req.method === "POST" && route === "threads" && !commentId) {
         if (!this.sameOrigin(req)) return sendJson(res, 403, { error: "Cross-site request refused" });
-        const { anchor, snippet, body: text } = (await readJson(req)) ?? {};
-        if (!isText(text, 20 * 1024, true)) return sendJson(res, 400, { error: "Invalid comment" });
+        const { anchor, snippet, body: text, single } = (await readJson(req)) ?? {};
+        if (!isText(text, 20 * 1024, true) || (single !== undefined && typeof single !== "boolean")) {
+          return sendJson(res, 400, { error: "Invalid comment" });
+        }
         if (!threadId) {
           if (!isAnchor(anchor) || !isText(snippet, 64 * 1024)) return sendJson(res, 400, { error: "Invalid comment" });
-          return sendJson(res, 201, { thread: threads.create(anchor, snippet, text.trim()) });
+          return sendJson(res, 201, { thread: threads.create(anchor, snippet, text.trim(), single === true) });
         }
-        const thread = threads.reply(threadId, text.trim());
+        const thread = threads.reply(threadId, text.trim(), single === true);
         if (!thread) return sendJson(res, 404, { error: "Unknown thread" });
         return sendJson(res, 200, { thread });
       }

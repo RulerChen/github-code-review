@@ -162,10 +162,10 @@ export function TopicSection({ topic, viewed, onToggleViewed }: SectionProps) {
                 <div className="thread thread-new">
                   <CommentForm
                     placeholder="Comment on this topic"
-                    onSubmit={async (body) => {
+                    onSubmit={async (body, single) => {
                       const anchor = { topic: topic.title, path: null, side: null, start: null, end: null, commit: null };
                       const files = `Files: ${topic.parts.map((p) => p.file.path).join(", ")}`;
-                      await create(anchor, topic.summary ? `${files}\n\n${topic.summary}` : files, body);
+                      await create(anchor, topic.summary ? `${files}\n\n${topic.summary}` : files, body, single);
                       setCommenting(false);
                     }}
                     onCancel={() => setCommenting(false)}

@@ -18,6 +18,8 @@ export interface Submission {
 export class RepoThreads {
   readonly threads: Thread[] = [];
   readonly submissions: Submission[] = [];
+  /** The newest review get_review_comments has returned, so that without `after` it returns the ones after it. */
+  read = 0;
   cwd: string;
   parentSession: string | null = null;
   private fork: { parent: string | null; session: string | null } | null = null;
@@ -46,17 +48,18 @@ export class RepoThreads {
     return () => this.listeningListeners.delete(fn);
   }
 
-  create(anchor: ThreadAnchor, snippet: string, body: string): Thread {
+  /** A single comment is submitted on its own at once, as a review of one comment, instead of waiting in the pending review. */
+  create(anchor: ThreadAnchor, snippet: string, body: string, single: boolean): Thread {
     const thread: Thread = { id: newId(), rev: 0, anchor, snippet, comments: [] };
     this.threads.push(thread);
-    this.addComment(thread, body);
+    this.addComment(thread, body, single);
     return thread;
   }
 
-  reply(threadId: string, body: string): Thread | null {
+  reply(threadId: string, body: string, single: boolean): Thread | null {
     const thread = this.threads.find((t) => t.id === threadId);
     if (!thread) return null;
-    this.addComment(thread, body);
+    this.addComment(thread, body, single);
     return thread;
   }
 
@@ -103,8 +106,7 @@ export class RepoThreads {
   submit(body: string): { submission: Submission; delivered: boolean; threads: Thread[] } | null {
     const changed = this.threads.filter((t) => t.comments.some((c) => c.draft));
     if (!changed.length && !body) return null;
-    const submission: Submission = { n: this.submissions.length + 1, body, submittedAt: new Date().toISOString() };
-    this.submissions.push(submission);
+    const submission = this.newSubmission(body);
     for (const t of changed) {
       for (const c of t.comments) {
         if (!c.draft) continue;
@@ -113,11 +115,22 @@ export class RepoThreads {
       }
       this.emit(t);
     }
+    return { submission, delivered: this.wake(submission), threads: changed };
+  }
+
+  private newSubmission(body: string): Submission {
+    const submission: Submission = { n: this.submissions.length + 1, body, submittedAt: new Date().toISOString() };
+    this.submissions.push(submission);
+    return submission;
+  }
+
+  /** Hands a submitted review to whoever waits for one. Returns whether anyone was waiting. */
+  private wake(submission: Submission): boolean {
     const delivered = this.waiters.size > 0;
     for (const wake of this.waiters) wake(submission);
     this.waiters.clear();
     if (delivered) this.emitListening();
-    return { submission, delivered, threads: changed };
+    return delivered;
   }
 
   /** Calls onReview once a review numbered above `after` is submitted, right away if one already is. Returns a function that stops waiting. */
@@ -143,13 +156,24 @@ export class RepoThreads {
     for (const fn of this.listeners) fn(thread);
   }
 
-  private addComment(thread: Thread, body: string): void {
+  private addComment(thread: Thread, body: string, single: boolean): void {
     const asking = MENTION.test(body);
     const c = comment("user", body, "done");
-    c.draft = !asking;
     thread.comments.push(c);
-    if (asking) this.answer(thread);
+    if (asking) {
+      this.answer(thread);
+      this.emit(thread);
+      return;
+    }
+    if (!single) {
+      c.draft = true;
+      this.emit(thread);
+      return;
+    }
+    const submission = this.newSubmission("");
+    c.review = submission.n;
     this.emit(thread);
+    this.wake(submission);
   }
 
   private answer(thread: Thread): void {

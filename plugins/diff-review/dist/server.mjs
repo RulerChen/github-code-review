@@ -37346,9 +37346,10 @@ function formatChanges(diff) {
   if (omitted) out.push("", `The lines of ${omitted} change${omitted === 1 ? " were" : "s were"} left out to keep this short. Read the files for them.`);
   return out.join("\n");
 }
-function formatReviewComments(threads, submissions, after) {
+function formatReviewComments(threads, submissions, after, read) {
   const withDrafts = after === null;
-  const reviews = after === null ? submissions.slice(-1) : submissions.filter((s) => s.n > after);
+  const unread = submissions.filter((s) => s.n > (after ?? read));
+  const reviews = after === null && !unread.length ? submissions.slice(-1) : unread;
   const numbers = new Set(reviews.map((s) => s.n));
   const submitted = threads.filter((t) => t.comments.some((c) => c.review !== null && numbers.has(c.review)));
   const drafts = withDrafts ? threads.filter((t) => !submitted.includes(t) && t.comments.some((c) => c.draft)) : [];
@@ -37490,6 +37491,8 @@ var newId = () => randomBytes(6).toString("base64url");
 var RepoThreads = class {
   threads = [];
   submissions = [];
+  /** The newest review get_review_comments has returned, so that without `after` it returns the ones after it. */
+  read = 0;
   cwd;
   parentSession = null;
   fork = null;
@@ -37513,16 +37516,17 @@ var RepoThreads = class {
     this.listeningListeners.add(fn);
     return () => this.listeningListeners.delete(fn);
   }
-  create(anchor2, snippet, body) {
+  /** A single comment is submitted on its own at once, as a review of one comment, instead of waiting in the pending review. */
+  create(anchor2, snippet, body, single) {
     const thread = { id: newId(), rev: 0, anchor: anchor2, snippet, comments: [] };
     this.threads.push(thread);
-    this.addComment(thread, body);
+    this.addComment(thread, body, single);
     return thread;
   }
-  reply(threadId, body) {
+  reply(threadId, body, single) {
     const thread = this.threads.find((t) => t.id === threadId);
     if (!thread) return null;
-    this.addComment(thread, body);
+    this.addComment(thread, body, single);
     return thread;
   }
   /** Changes the text of a comment the user wrote. It does not ask Claude again. */
@@ -37564,8 +37568,7 @@ var RepoThreads = class {
   submit(body) {
     const changed = this.threads.filter((t) => t.comments.some((c) => c.draft));
     if (!changed.length && !body) return null;
-    const submission = { n: this.submissions.length + 1, body, submittedAt: (/* @__PURE__ */ new Date()).toISOString() };
-    this.submissions.push(submission);
+    const submission = this.newSubmission(body);
     for (const t of changed) {
       for (const c of t.comments) {
         if (!c.draft) continue;
@@ -37574,11 +37577,20 @@ var RepoThreads = class {
       }
       this.emit(t);
     }
+    return { submission, delivered: this.wake(submission), threads: changed };
+  }
+  newSubmission(body) {
+    const submission = { n: this.submissions.length + 1, body, submittedAt: (/* @__PURE__ */ new Date()).toISOString() };
+    this.submissions.push(submission);
+    return submission;
+  }
+  /** Hands a submitted review to whoever waits for one. Returns whether anyone was waiting. */
+  wake(submission) {
     const delivered = this.waiters.size > 0;
     for (const wake of this.waiters) wake(submission);
     this.waiters.clear();
     if (delivered) this.emitListening();
-    return { submission, delivered, threads: changed };
+    return delivered;
   }
   /** Calls onReview once a review numbered above `after` is submitted, right away if one already is. Returns a function that stops waiting. */
   waitForReview(after, onReview) {
@@ -37601,13 +37613,24 @@ var RepoThreads = class {
     thread.rev++;
     for (const fn of this.listeners) fn(thread);
   }
-  addComment(thread, body) {
+  addComment(thread, body, single) {
     const asking = MENTION.test(body);
     const c = comment("user", body, "done");
-    c.draft = !asking;
     thread.comments.push(c);
-    if (asking) this.answer(thread);
+    if (asking) {
+      this.answer(thread);
+      this.emit(thread);
+      return;
+    }
+    if (!single) {
+      c.draft = true;
+      this.emit(thread);
+      return;
+    }
+    const submission = this.newSubmission("");
+    c.review = submission.n;
     this.emit(thread);
+    this.wake(submission);
   }
   answer(thread) {
     const prompt = buildPrompt2(thread);
@@ -37894,13 +37917,15 @@ var ReviewServer = class {
       }
       if (req.method === "POST" && route === "threads" && !commentId) {
         if (!this.sameOrigin(req)) return sendJson(res, 403, { error: "Cross-site request refused" });
-        const { anchor: anchor2, snippet, body: text } = await readJson(req) ?? {};
-        if (!isText(text, 20 * 1024, true)) return sendJson(res, 400, { error: "Invalid comment" });
+        const { anchor: anchor2, snippet, body: text, single } = await readJson(req) ?? {};
+        if (!isText(text, 20 * 1024, true) || single !== void 0 && typeof single !== "boolean") {
+          return sendJson(res, 400, { error: "Invalid comment" });
+        }
         if (!threadId) {
           if (!isAnchor(anchor2) || !isText(snippet, 64 * 1024)) return sendJson(res, 400, { error: "Invalid comment" });
-          return sendJson(res, 201, { thread: threads.create(anchor2, snippet, text.trim()) });
+          return sendJson(res, 201, { thread: threads.create(anchor2, snippet, text.trim(), single === true) });
         }
-        const thread = threads.reply(threadId, text.trim());
+        const thread = threads.reply(threadId, text.trim(), single === true);
         if (!thread) return sendJson(res, 404, { error: "Unknown thread" });
         return sendJson(res, 200, { thread });
       }
@@ -38148,11 +38173,11 @@ async function runMcp() {
     "get_review_comments",
     {
       title: "Get review comments",
-      description: "Read the review the user submitted in the diff viewer: their comment on the whole review and each comment thread with its id, the selected lines (or the whole file or topic) and the earlier comments. Without after it also lists draft comments they have not submitted yet and their @claude questions. Use it when the wait command from open_diff_viewer finishes, or when the user asks you to address their review comments.",
+      description: "Read the review the user submitted in the diff viewer: their comment on the whole review and each comment thread with its id, the selected lines (or the whole file or topic) and the earlier comments. Without after it also lists draft comments they have not submitted yet and their @claude questions. A ```suggestion block in a comment holds the lines the user wants in place of the thread's selected lines. Use it when the wait command from open_diff_viewer finishes, or when the user asks you to address their review comments.",
       inputSchema: {
         repo: external_exports.string().optional().describe("The repository the wait command names. Omit it to read every repository with a viewer open."),
         after: external_exports.number().int().min(0).optional().describe(
-          "Read every review of that repository numbered above this one, as the wait command says. Omit it for the latest review and the drafts."
+          "Read every review of that repository numbered above this one, as the wait command says. Omit it for the reviews this tool has not returned yet, or the latest one if it returned them all, and the drafts."
         )
       },
       annotations: { readOnlyHint: true, openWorldHint: false }
@@ -38167,7 +38192,8 @@ async function runMcp() {
         return { content: [{ type: "text", text }], isError: true };
       }
       const parts = repos.flatMap(({ repo: repo2, threads, view }) => {
-        const text = formatReviewComments(threads.threads, threads.submissions, args.after ?? null);
+        const text = formatReviewComments(threads.threads, threads.submissions, args.after ?? null, threads.read);
+        threads.read = threads.submissions.length;
         if (!text) return [];
         return [
           `${repo2}

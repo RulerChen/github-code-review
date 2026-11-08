@@ -56,13 +56,14 @@ async function postJson<T>(url: string, payload: unknown, ok: (body: Partial<T>)
 
 const hasThread = (b: Partial<{ thread: Thread }>) => b.thread !== undefined;
 
-export async function createThread(viewId: string, anchor: ThreadAnchor, snippet: string, body: string): Promise<Thread> {
-  return (await postJson(`/api/views/${encodeURIComponent(viewId)}/threads`, { anchor, snippet, body }, hasThread)).thread;
+/** A single comment is submitted on its own at once instead of going into the pending review. */
+export async function createThread(viewId: string, anchor: ThreadAnchor, snippet: string, body: string, single: boolean): Promise<Thread> {
+  return (await postJson(`/api/views/${encodeURIComponent(viewId)}/threads`, { anchor, snippet, body, single }, hasThread)).thread;
 }
 
-export async function replyToThread(viewId: string, threadId: string, body: string): Promise<Thread> {
+export async function replyToThread(viewId: string, threadId: string, body: string, single: boolean): Promise<Thread> {
   const url = `/api/views/${encodeURIComponent(viewId)}/threads/${encodeURIComponent(threadId)}/comments`;
-  return (await postJson(url, { body }, hasThread)).thread;
+  return (await postJson(url, { body, single }, hasThread)).thread;
 }
 
 const commentUrl = (viewId: string, threadId: string, commentId: string) =>

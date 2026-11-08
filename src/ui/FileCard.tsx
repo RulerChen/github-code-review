@@ -194,8 +194,8 @@ export function FileCard({ file: next, blocks: nextBlocks = next.blocks, anchor,
                 <div className="thread thread-new">
                   <CommentForm
                     placeholder="Comment on this file"
-                    onSubmit={async (body) => {
-                      await create({ path: file.path, side: null, start: null, end: null }, "", body);
+                    onSubmit={async (body, single) => {
+                      await create({ path: file.path, side: null, start: null, end: null }, "", body, single);
                       setCommenting(false);
                     }}
                     onCancel={() => setCommenting(false)}

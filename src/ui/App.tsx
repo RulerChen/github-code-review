@@ -204,7 +204,9 @@ export function App({ viewId }: Props) {
   const headCommit = diff?.headCommit ?? null;
   // A deleted thread stays in `threads` with no comments, so an older copy arriving late cannot bring it back.
   const live = useMemo(() => threads.filter((t) => t.comments.length > 0), [threads]);
-  const comments = useMemo<Pick<CommentsApi, "versions" | "threadsFor" | "threadsForTopic" | "create" | "reply" | "edit" | "remove">>(() => {
+  const comments = useMemo<
+    Pick<CommentsApi, "versions" | "threadsFor" | "threadsForTopic" | "create" | "reply" | "edit" | "remove" | "pending" | "listening">
+  >(() => {
     const byPath = new Map<string, Thread[]>();
     const byTopic = new Map<string, Thread[]>();
     for (const t of live) {
@@ -218,13 +220,13 @@ export function App({ viewId }: Props) {
       versions,
       threadsFor: (path) => byPath.get(path) ?? [],
       threadsForTopic: (title) => byTopic.get(title) ?? [],
-      create: async (anchor, snippet, body) => {
+      create: async (anchor, snippet, body, single) => {
         if (!viewId || !current) return;
         const full: ThreadAnchor = anchor.path === null ? { ...anchor, compare: current } : { ...anchor, commit: versions[anchor.side ?? "new"] };
-        update(await createThread(viewId, full, snippet, body));
+        update(await createThread(viewId, full, snippet, body, single));
       },
-      reply: async (threadId, body) => {
-        if (viewId) update(await replyToThread(viewId, threadId, body));
+      reply: async (threadId, body, single) => {
+        if (viewId) update(await replyToThread(viewId, threadId, body, single));
       },
       edit: async (threadId, commentId, body) => {
         if (viewId) update(await editComment(viewId, threadId, commentId, body));
@@ -232,8 +234,10 @@ export function App({ viewId }: Props) {
       remove: async (threadId, commentId) => {
         if (viewId) update(await deleteComment(viewId, threadId, commentId));
       },
+      pending: live.some((t) => t.comments.some((c) => c.draft)),
+      listening,
     };
-  }, [live, viewId, oldCommit, headCommit, current]);
+  }, [live, viewId, oldCommit, headCommit, current, listening]);
 
   const drafts = live.reduce((n, t) => n + t.comments.filter((c) => c.draft).length, 0);
   const submit = async (body: string) => {

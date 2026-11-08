@@ -1,6 +1,6 @@
 import { memo, type MouseEvent, type ReactNode, useEffect, useMemo, useState } from "react";
 import type { DiffLine, DisplayHunk, Expansion, Thread } from "../shared/types";
-import { CommentForm, onShownVersion, ThreadView, useComments } from "./comments";
+import { CommentForm, onShownVersion, ThreadView, unmark, useComments } from "./comments";
 import { keepInPlace } from "./anchor";
 import type { Token, TokenLines } from "./highlight";
 
@@ -116,10 +116,10 @@ export function DiffTable({ path, hunks, oldTokens, newTokens, onExpand }: Props
     return () => window.removeEventListener("mouseup", release);
   }, [drag]);
 
-  const submit = async (body: string) => {
+  const submit = async (body: string, single: boolean) => {
     if (!selection) return;
     const { side, start, end } = selection;
-    await create({ path, side, start, end }, snippetOf(hunks, side, start, end), body);
+    await create({ path, side, start, end }, snippetOf(hunks, side, start, end), body, single);
     setSelection(null);
   };
 
@@ -142,7 +142,12 @@ export function DiffTable({ path, hunks, oldTokens, newTokens, onExpand }: Props
     if (no !== null && selection?.side === side && selection.end === no) {
       out.push(
         <div className="thread thread-new" key="form">
-          <CommentForm placeholder="Leave a comment" onSubmit={submit} onCancel={() => setSelection(null)} />
+          <CommentForm
+            placeholder="Leave a comment"
+            lines={side === "new" ? unmark(snippetOf(hunks, side, selection.start, selection.end)) : undefined}
+            onSubmit={submit}
+            onCancel={() => setSelection(null)}
+          />
         </div>,
       );
     }
