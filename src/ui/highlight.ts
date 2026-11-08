@@ -157,7 +157,7 @@ const loaded = new Map<Lang, Promise<void>>();
 
 function getHighlighter(): Promise<HighlighterCore> {
   highlighter ??= createHighlighterCore({
-    themes: [import("@shikijs/themes/github-light"), import("@shikijs/themes/github-dark-dimmed")],
+    themes: [import("@shikijs/themes/github-light-default"), import("@shikijs/themes/github-dark-default")],
     langs: [],
     engine: createJavaScriptRegexEngine(),
   });
@@ -186,6 +186,6 @@ async function highlightUncached(code: string, lang: Lang): Promise<TokenLines |
     loaded.set(lang, ready);
   }
   await ready;
-  const { tokens } = h.codeToTokens(code, { lang, themes: { light: "github-light", dark: "github-dark-dimmed" } });
+  const { tokens } = h.codeToTokens(code, { lang, themes: { light: "github-light-default", dark: "github-dark-default" } });
   return tokens.map((line) => line.map((t) => ({ content: t.content, style: t.htmlStyle })));
 }
