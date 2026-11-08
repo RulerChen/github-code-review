@@ -157,7 +157,7 @@ const loaded = new Map<Lang, Promise<void>>();
 
 function getHighlighter(): Promise<HighlighterCore> {
   highlighter ??= createHighlighterCore({
-    themes: [import("@shikijs/themes/github-light"), import("@shikijs/themes/github-dark")],
+    themes: [import("@shikijs/themes/github-light"), import("@shikijs/themes/github-dark-dimmed")],
     langs: [],
     engine: createJavaScriptRegexEngine(),
   });
@@ -173,6 +173,6 @@ export async function highlight(code: string, lang: Lang): Promise<TokenLines | 
     loaded.set(lang, ready);
   }
   await ready;
-  const { tokens } = h.codeToTokens(code, { lang, themes: { light: "github-light", dark: "github-dark" } });
+  const { tokens } = h.codeToTokens(code, { lang, themes: { light: "github-light", dark: "github-dark-dimmed" } });
   return tokens.map((line) => line.map((t) => ({ content: t.content, style: t.htmlStyle })));
 }

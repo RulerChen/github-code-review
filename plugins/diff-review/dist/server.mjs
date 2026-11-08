@@ -7256,6 +7256,7 @@ var require_dist = __commonJS({
 });
 
 // src/server/main.ts
+import { readFileSync } from "node:fs";
 import path3 from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -37121,8 +37122,9 @@ function errorMessage(err) {
 }
 
 // src/server/main.ts
-var VERSION = "0.1.0";
-var UI_DIR = path3.join(path3.dirname(fileURLToPath(import.meta.url)), "ui");
+var DIST_DIR = path3.dirname(fileURLToPath(import.meta.url));
+var UI_DIR = path3.join(DIST_DIR, "ui");
+var VERSION = JSON.parse(readFileSync(path3.join(DIST_DIR, "..", ".claude-plugin", "plugin.json"), "utf8")).version;
 var serverPromise = null;
 function getServer() {
   serverPromise ??= (async () => {

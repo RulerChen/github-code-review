@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -6,9 +7,9 @@ import { z } from "zod";
 import { computeDiff, summarize } from "../engine/diff.js";
 import { errorMessage, ReviewServer } from "./http.js";
 
-const VERSION = "0.1.0";
-
-const UI_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "ui");
+const DIST_DIR = path.dirname(fileURLToPath(import.meta.url));
+const UI_DIR = path.join(DIST_DIR, "ui");
+const VERSION: string = JSON.parse(readFileSync(path.join(DIST_DIR, "..", ".claude-plugin", "plugin.json"), "utf8")).version;
 
 let serverPromise: Promise<ReviewServer> | null = null;
 

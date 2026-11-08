@@ -2,11 +2,8 @@ import { Fragment } from "react";
 import type { DiffLine, DisplayHunk } from "../shared/types";
 import type { Token, TokenLines } from "./highlight";
 
-export type Mode = "unified" | "split";
-
 interface Props {
   hunks: DisplayHunk[];
-  mode: Mode;
   oldTokens: TokenLines | null;
   newTokens: TokenLines | null;
 }
@@ -40,9 +37,9 @@ function Code({ line, tokens }: { line: DiffLine; tokens: Token[] | undefined })
 
 const MARK = { add: "+", del: "-", context: " " } as const;
 
-export function DiffTable({ hunks, mode, oldTokens, newTokens }: Props) {
-  return mode === "split" ? (
-    <table className="diff split">
+export function DiffTable({ hunks, oldTokens, newTokens }: Props) {
+  return (
+    <table className="diff">
       <colgroup>
         <col className="col-num" />
         <col />
@@ -62,33 +59,6 @@ export function DiffTable({ hunks, mode, oldTokens, newTokens }: Props) {
               <tr key={ri}>
                 <SplitCell line={row.left} tokens={row.left ? tokensFor(row.left, oldTokens, newTokens) : undefined} side="old" />
                 <SplitCell line={row.right} tokens={row.right ? tokensFor(row.right, oldTokens, newTokens) : undefined} side="new" />
-              </tr>
-            ))}
-          </Fragment>
-        ))}
-      </tbody>
-    </table>
-  ) : (
-    <table className="diff unified">
-      <colgroup>
-        <col className="col-num" />
-        <col className="col-num" />
-        <col />
-      </colgroup>
-      <tbody>
-        {hunks.map((h, hi) => (
-          <Fragment key={hi}>
-            <tr className="hunk">
-              <td className="num" colSpan={2} />
-              <td className="hunk-text">{h.header}</td>
-            </tr>
-            {h.lines.map((line, li) => (
-              <tr key={li} className={line.kind}>
-                <td className="num" data-n={line.oldNo ?? ""} />
-                <td className="num" data-n={line.newNo ?? ""} />
-                <td className="code" data-mark={MARK[line.kind]}>
-                  <Code line={line} tokens={tokensFor(line, oldTokens, newTokens)} />
-                </td>
               </tr>
             ))}
           </Fragment>

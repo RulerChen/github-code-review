@@ -1,10 +1,9 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import type { DiffResult, FileDiff } from "../shared/types";
 import { ApiError, fetchDiff } from "./api";
-import type { Mode } from "./DiffTable";
 import { FileCard } from "./FileCard";
 import { comparePaths, FileTree } from "./FileTree";
-import { readStorage, usePersistentState, writeStorage } from "./storage";
+import { readStorage, writeStorage } from "./storage";
 
 interface Props {
   token: string | null;
@@ -18,7 +17,7 @@ export function App({ token, viewId }: Props) {
   const [error, setError] = useState<{ message: string; status: number } | null>(null);
   const [loading, setLoading] = useState(false);
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
-  const [mode, setMode] = usePersistentState<Mode>("diff-review:mode", "unified");
+  const [theme, setTheme] = useState(document.documentElement.dataset.theme === "dark" ? "dark" : "light");
   const [filter, setFilter] = useState("");
   const [active, setActive] = useState<string | null>(null);
   const [viewed, setViewed] = useState<Record<string, string>>({});
@@ -63,6 +62,13 @@ export function App({ token, viewId }: Props) {
     else next[f.path] = signature(f);
     setViewed(next);
     writeStorage(`diff-review:viewed:${diff.repoRoot}`, next);
+  };
+
+  const toggleTheme = () => {
+    const next = theme === "dark" ? "light" : "dark";
+    document.documentElement.dataset.theme = next;
+    writeStorage("diff-review:theme", next);
+    setTheme(next);
   };
 
   const select = (anchor: string) => {
@@ -126,14 +132,7 @@ export function App({ token, viewId }: Props) {
             <span style={{ width: `${diff.files.length ? (viewedCount / diff.files.length) * 100 : 0}%` }} />
           </span>
         </div>
-        <div className="segmented" role="group" aria-label="Diff layout">
-          <button aria-pressed={mode === "unified"} onClick={() => setMode("unified")}>
-            Unified
-          </button>
-          <button aria-pressed={mode === "split"} onClick={() => setMode("split")}>
-            Split
-          </button>
-        </div>
+        <ThemeToggle theme={theme} onToggle={toggleTheme} />
         <button className="button" onClick={() => void load()} disabled={loading} title={updatedAt ? `Updated ${updatedAt.toLocaleTimeString()}` : undefined}>
           {loading ? "Refreshing…" : "Refresh"}
         </button>
@@ -162,7 +161,6 @@ export function App({ token, viewId }: Props) {
                 key={`${file.path}:${signature(file)}`}
                 file={file}
                 anchor={anchor}
-                mode={mode}
                 viewed={isViewed(file)}
                 onToggleViewed={() => toggleViewed(file)}
               />
@@ -171,6 +169,29 @@ export function App({ token, viewId }: Props) {
         </main>
       </div>
     </div>
+  );
+}
+
+function ThemeToggle({ theme, onToggle }: { theme: string; onToggle: () => void }) {
+  const label = theme === "dark" ? "Switch to light theme" : "Switch to dark theme";
+  return (
+    <button className="icon-button theme-toggle" onClick={onToggle} aria-label={label} title={label}>
+      {theme === "dark" ? (
+        <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+          <circle cx="8" cy="8" r="3" />
+          <path
+            d="M8 0.75v1.5M8 13.75v1.5M0.75 8h1.5M13.75 8h1.5M2.87 2.87l1.06 1.06M12.07 12.07l1.06 1.06M2.87 13.13l1.06-1.06M12.07 3.93l1.06-1.06"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+          />
+        </svg>
+      ) : (
+        <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+          <path d="M6.2 1.1a6.75 6.75 0 1 0 8.7 8.7A5.5 5.5 0 0 1 6.2 1.1Z" />
+        </svg>
+      )}
+    </button>
   );
 }
 

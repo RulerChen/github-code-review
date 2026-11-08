@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { FileDiff } from "../shared/types";
-import { DiffTable, type Mode } from "./DiffTable";
+import { DiffTable } from "./DiffTable";
 import { highlight, languageFor, type TokenLines } from "./highlight";
 
 const LARGE_DIFF_LINES = 800;
@@ -8,12 +8,11 @@ const LARGE_DIFF_LINES = 800;
 interface Props {
   file: FileDiff;
   anchor: string;
-  mode: Mode;
   viewed: boolean;
   onToggleViewed: () => void;
 }
 
-export function FileCard({ file, anchor, mode, viewed, onToggleViewed }: Props) {
+export function FileCard({ file, anchor, viewed, onToggleViewed }: Props) {
   const [collapsed, setCollapsed] = useState(viewed);
   const [forceLoad, setForceLoad] = useState(false);
   useEffect(() => setCollapsed(viewed), [viewed]);
@@ -54,7 +53,7 @@ export function FileCard({ file, anchor, mode, viewed, onToggleViewed }: Props) 
       </header>
       {!collapsed && (
         <div className="file-body">
-          <FileBody file={file} mode={mode} deferred={deferred} lineCount={lineCount} onLoad={() => setForceLoad(true)} tokens={tokens} />
+          <FileBody file={file} deferred={deferred} lineCount={lineCount} onLoad={() => setForceLoad(true)} tokens={tokens} />
         </div>
       )}
     </section>
@@ -63,14 +62,12 @@ export function FileCard({ file, anchor, mode, viewed, onToggleViewed }: Props) 
 
 function FileBody({
   file,
-  mode,
   deferred,
   lineCount,
   onLoad,
   tokens,
 }: {
   file: FileDiff;
-  mode: Mode;
   deferred: boolean;
   lineCount: number;
   onLoad: () => void;
@@ -102,7 +99,7 @@ function FileBody({
       )}
       {file.tooLarge && <p className="file-note inline">File too large to load in full: context lines and highlighting are off.</p>}
       <div className="diff-scroll">
-        <DiffTable hunks={file.hunks} mode={mode} oldTokens={tokens.old} newTokens={tokens.new} />
+        <DiffTable hunks={file.hunks} oldTokens={tokens.old} newTokens={tokens.new} />
       </div>
     </>
   );

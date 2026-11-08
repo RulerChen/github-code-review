@@ -15,6 +15,15 @@ Requires Node.js 20 or newer and git.
 
 In a git repository, run `/diff-review:review` to compare the working tree with `HEAD`, or `/diff-review:review main` to compare with another branch, tag or commit. Open the link Claude replies with, and press Refresh on the page after further changes.
 
+## Update
+
+```sh
+claude plugin marketplace update github-code-review
+claude plugin update diff-review@github-code-review
+```
+
+Then restart Claude Code.
+
 ## Develop
 
 ```sh
