@@ -108,6 +108,8 @@ export interface Thread {
 
 export interface ViewData {
   diff: DiffResult;
+  /** Changes whenever the diff may have changed. The page asks for it to know when to load the diff again. */
+  version: string;
   /** The comparison Claude opened the viewer with. The review's topics belong to it. */
   opened: Comparison;
   review: Review | null;

@@ -10,6 +10,7 @@ import { keepHeaderInPlace } from "./keyboard";
 const AUTO_LOAD_LINES = 400;
 const AUTO_LOAD_CHARS = 20 * 1024;
 const NO_EXPANSION: Expansion = { above: {}, below: {} };
+const NO_TOKENS: Tokens = { old: null, new: null };
 const ROW_PX = 20;
 const HUNK_PX = 28;
 
@@ -53,14 +54,18 @@ export function ChevronIcon() {
   );
 }
 
-export function FileCard({ file, blocks = file.blocks, anchor, viewed = false, onToggleViewed }: Props) {
+export function FileCard({ file: next, blocks: nextBlocks = next.blocks, anchor, viewed = false, onToggleViewed }: Props) {
   const [collapsed, setCollapsed] = useState(viewed);
   const [forceLoad, setForceLoad] = useState(false);
   const [expansion, setExpansion] = useState(NO_EXPANSION);
+  const [near, setNear] = useState(false);
   useEffect(() => setCollapsed(viewed), [viewed]);
 
+  const { lineCount, charCount } = useMemo(() => sizeOf(baseHunksOf(next, nextBlocks)), [next, nextBlocks]);
+  const deferred = (next.generated || lineCount > AUTO_LOAD_LINES || charCount > AUTO_LOAD_CHARS) && !forceLoad;
+  const { file, blocks, tokens } = useShown(next, nextBlocks, near && !collapsed && !deferred);
   const partial = blocks !== file.blocks;
-  const baseHunks = useMemo(() => (partial ? hunksOf(file, blocks, null) : file.hunks), [file, blocks, partial]);
+  const baseHunks = baseHunksOf(file, blocks);
   const hunks = useMemo(
     () => (expansion === NO_EXPANSION ? baseHunks : hunksOf(file, blocks, expansion)),
     [file, blocks, expansion, baseHunks],
@@ -68,11 +73,8 @@ export function FileCard({ file, blocks = file.blocks, anchor, viewed = false, o
   const expand: OnExpand = (dir, id, lines) =>
     setExpansion((e) => ({ ...e, [dir]: { ...e[dir], [id]: (e[dir][id] ?? 0) + lines } }));
 
-  const lineCount = baseHunks.reduce((s, h) => s + h.lines.length, 0);
-  const charCount = useMemo(() => baseHunks.reduce((s, h) => h.lines.reduce((n, l) => n + l.text.length + 1, s), 0), [baseHunks]);
   const ref = useRef<HTMLElement>(null);
   const header = useRef<HTMLElement>(null);
-  const [near, setNear] = useState(false);
   useEffect(() => (near || !ref.current ? undefined : whenNear(ref.current, () => setNear(true))), [near]);
   const { threadsFor, versions, revealSeq, peekReveal } = useComments();
   useEffect(() => {
@@ -89,8 +91,6 @@ export function FileCard({ file, blocks = file.blocks, anchor, viewed = false, o
     : threadsFor(file.path).filter((t) => !onShownVersion(t, versions) || !hasLine(hunks, t.anchor.side, t.anchor.end));
   const additions = partial ? countLines(hunks, "add") : file.additions;
   const deletions = partial ? countLines(hunks, "del") : file.deletions;
-  const deferred = (file.generated || lineCount > AUTO_LOAD_LINES || charCount > AUTO_LOAD_CHARS) && !forceLoad;
-  const tokens = useHighlight(file, near && !collapsed && !deferred);
 
   return (
     <section className={`file${viewed ? " is-viewed" : ""}`} id={anchor} ref={ref}>
@@ -152,7 +152,7 @@ export function FileCard({ file, blocks = file.blocks, anchor, viewed = false, o
             charCount={charCount}
             onLoad={() => setForceLoad(true)}
             onExpand={expand}
-            tokens={tokens}
+            tokens={tokens ?? NO_TOKENS}
           />
         </div>
       )}
@@ -177,7 +177,7 @@ function FileBody({
   charCount: number;
   onLoad: () => void;
   onExpand: OnExpand;
-  tokens: { old: TokenLines | null; new: TokenLines | null };
+  tokens: Tokens;
 }) {
   if (file.binary) return <p className="file-note">Binary file not shown.</p>;
   if (file.diffTooLarge) {
@@ -221,6 +221,31 @@ export function hunksOf(file: FileDiff, blocks: Block[], expansion: Expansion | 
   return buildHunks(blocks, lines(file.oldContent), lines(file.newContent), file.blocks, expansion);
 }
 
+// Hunks of a topic's part of a file, by the part's blocks, so each card works them out once.
+const partHunks = new WeakMap<Block[], DisplayHunk[]>();
+
+function baseHunksOf(file: FileDiff, blocks: Block[]): DisplayHunk[] {
+  if (blocks === file.blocks) return file.hunks;
+  let hunks = partHunks.get(blocks);
+  if (!hunks) {
+    hunks = hunksOf(file, blocks, null);
+    partHunks.set(blocks, hunks);
+  }
+  return hunks;
+}
+
+function sizeOf(hunks: DisplayHunk[]): { lineCount: number; charCount: number } {
+  let lineCount = 0;
+  let charCount = 0;
+  for (const h of hunks) {
+    for (const l of h.lines) {
+      lineCount++;
+      charCount += l.text.length + 1;
+    }
+  }
+  return { lineCount, charCount };
+}
+
 // Height of a body that has not mounted yet, so the page keeps its length and anchors land close.
 function estimateHeight(hunks: DisplayHunk[]): number {
   return Math.max(2 * HUNK_PX, hunks.reduce((px, h) => px + HUNK_PX + splitRowCount(h.lines) * ROW_PX, 0));
@@ -230,25 +255,51 @@ function countLines(hunks: DisplayHunk[], kind: "add" | "del"): number {
   return hunks.reduce((n, h) => n + h.lines.filter((l) => l.kind === kind).length, 0);
 }
 
-function useHighlight(file: FileDiff, enabled: boolean): { old: TokenLines | null; new: TokenLines | null } {
-  const [tokens, setTokens] = useState<{ old: TokenLines | null; new: TokenLines | null }>({ old: null, new: null });
+interface Tokens {
+  old: TokenLines | null;
+  new: TokenLines | null;
+}
+
+interface Shown {
+  file: FileDiff;
+  blocks: Block[];
+  /** null until the text is highlighted, and for text that is not. */
+  tokens: Tokens | null;
+}
+
+const sameText = (a: FileDiff, b: FileDiff) =>
+  a.path === b.path && a.oldPath === b.oldPath && a.oldContent === b.oldContent && a.newContent === b.newContent;
+
+// The version of the file the card shows. When a refresh changes the text of a highlighted card, the card
+// keeps showing the old version until the new one is highlighted, then swaps it in one render, so the code
+// does not flash plain.
+function useShown(file: FileDiff, blocks: Block[], enabled: boolean): Shown {
   const lang = languageFor(file.path);
+  const want = enabled && lang !== null;
+  const [shown, setShown] = useState<Shown>({ file, blocks, tokens: null });
+  let current = shown;
+  if (shown.file !== file || shown.blocks !== blocks) {
+    const same = sameText(shown.file, file);
+    if (same || !want || !shown.tokens) {
+      current = { file, blocks, tokens: same ? shown.tokens : null };
+      setShown(current);
+    }
+  }
   useEffect(() => {
-    if (!enabled || !lang) return;
+    if (!want) return;
     let cancelled = false;
+    const show = (tokens: Tokens | null) => {
+      if (!cancelled) setShown({ file, blocks, tokens });
+    };
     Promise.all([
       file.oldContent !== null ? highlight(file.oldContent, languageFor(file.oldPath ?? file.path) ?? lang) : null,
       file.newContent !== null ? highlight(file.newContent, lang) : null,
-    ])
-      .then(([o, n]) => {
-        if (!cancelled) setTokens({ old: o, new: n });
-      })
-      .catch(() => {});
+    ]).then(([o, n]) => show({ old: o, new: n }), () => show(null));
     return () => {
       cancelled = true;
     };
-  }, [enabled, lang, file.oldContent, file.newContent, file.oldPath, file.path]);
-  return tokens;
+  }, [want, lang, file.oldContent, file.newContent, file.oldPath, file.path]);
+  return current;
 }
 
 function DiffStat({ additions, deletions }: { additions: number; deletions: number }) {

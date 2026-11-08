@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import path from "node:path";
-import { computeDiff, listRefs } from "../engine/diff.js";
+import { computeDiff, diffVersion, listRefs } from "../engine/diff.js";
 import type { Comparison, Review, Thread, ThreadAnchor, ViewData } from "../shared/types.js";
 import { RepoThreads } from "./threads.js";
 
@@ -99,7 +99,7 @@ export class ReviewServer {
     }
 
     const { pathname, searchParams } = new URL(req.url ?? "/", "http://127.0.0.1");
-    const api = /^\/api\/views\/([\w-]+)\/(diff|events|refs|threads|review|wait)(?:\/([\w-]+)\/comments)?$/.exec(pathname);
+    const api = /^\/api\/views\/([\w-]+)\/(diff|events|refs|threads|review|wait|version)(?:\/([\w-]+)\/comments)?$/.exec(pathname);
     if (api) {
       const view = this.views.get(api[1]!);
       if (!view) return sendJson(res, 404, { error: "Unknown view. Ask Claude to open the viewer again." });
@@ -109,9 +109,18 @@ export class ReviewServer {
 
       if (req.method === "GET" && route === "diff" && !threadId) {
         try {
-          const diff = await computeDiff(view.repo, comparisonFrom(searchParams) ?? view.compare);
-          const data: ViewData = { diff, opened: view.compare, review: view.review, threads: threads.threads };
+          const compare = comparisonFrom(searchParams) ?? view.compare;
+          const version = await diffVersion(view.repo, compare);
+          const diff = await computeDiff(view.repo, compare);
+          const data: ViewData = { diff, version, opened: view.compare, review: view.review, threads: threads.threads };
           return sendJson(res, 200, data);
+        } catch (err) {
+          return sendJson(res, 500, { error: errorMessage(err) });
+        }
+      }
+      if (req.method === "GET" && route === "version" && !threadId) {
+        try {
+          return sendJson(res, 200, { version: await diffVersion(view.repo, comparisonFrom(searchParams) ?? view.compare) });
         } catch (err) {
           return sendJson(res, 500, { error: errorMessage(err) });
         }

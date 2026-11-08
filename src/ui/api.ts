@@ -28,7 +28,16 @@ export async function fetchView(viewId: string, compare: Comparison | null): Pro
   const res = await fetch(`/api/views/${encodeURIComponent(viewId)}/diff${query}`, { cache: "no-store" });
   const body = (await res.json().catch(() => null)) as (Partial<ViewData> & { error?: string }) | null;
   if (!res.ok || !body?.diff || !body.opened) throw new ApiError(body?.error ?? `HTTP ${res.status}`, res.status);
-  return { diff: body.diff, opened: body.opened, review: body.review ?? null, threads: body.threads ?? [] };
+  return { diff: body.diff, version: body.version ?? "", opened: body.opened, review: body.review ?? null, threads: body.threads ?? [] };
+}
+
+/** A cheap fingerprint of the diff fetchView would load, which changes when the files or refs change. */
+export async function fetchVersion(viewId: string, compare: Comparison | null): Promise<string> {
+  const query = compare ? `?${comparisonQuery(compare)}` : "";
+  const res = await fetch(`/api/views/${encodeURIComponent(viewId)}/version${query}`, { cache: "no-store" });
+  const body = (await res.json().catch(() => null)) as { version?: string; error?: string } | null;
+  if (!res.ok || typeof body?.version !== "string") throw new ApiError(body?.error ?? `HTTP ${res.status}`, res.status);
+  return body.version;
 }
 
 export async function fetchRefs(viewId: string): Promise<RefList> {

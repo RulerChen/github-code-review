@@ -36785,9 +36785,7 @@ async function computeDiff(repo, compare = {}) {
   const base = compare.base ?? "HEAD";
   const head = compare.head ?? null;
   const threeDot = compare.threeDot ?? true;
-  for (const ref of [base, head]) {
-    if (ref !== null && (ref === "" || ref.startsWith("-"))) throw new Error(`Invalid git ref: ${ref}`);
-  }
+  checkRefs(base, head);
   const repoRoot = (await git(repo, ["rev-parse", "--show-toplevel"])).toString("utf8").trim();
   const [baseCommit, headCommit, headOfRepo] = await Promise.all([
     resolveCommit(repoRoot, base),
@@ -36828,6 +36826,42 @@ async function computeDiff(repo, compare = {}) {
   const files = [...tracked, ...added].sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
   for (const f of files) f.generated = generated.has(f.path);
   return { repoRoot, base, head, threeDot, baseCommit, headCommit, oldCommit, ...commits, files };
+}
+function checkRefs(base, head) {
+  for (const ref of [base, head]) {
+    if (ref !== null && (ref === "" || ref.startsWith("-"))) throw new Error(`Invalid git ref: ${ref}`);
+  }
+}
+async function diffVersion(repo, compare = {}) {
+  const base = compare.base ?? "HEAD";
+  const head = compare.head ?? null;
+  checkRefs(base, head);
+  const [commits, status] = await Promise.all([
+    // Exits 128 for a ref that names nothing, such as HEAD before the first commit. The output is still stable.
+    git(repo, ["rev-parse", `${base}^{commit}`, `${head ?? "HEAD"}^{commit}`], [0, 128]),
+    head === null ? git(repo, ["status", "--porcelain", "-z", "--untracked-files=all"]) : null
+  ]);
+  const hash2 = createHash("sha256").update(commits);
+  if (status) {
+    const records = status.toString("utf8").split("\0");
+    const paths = [];
+    for (let i = 0; i < records.length; i++) {
+      const r = records[i];
+      if (r.length < 4) continue;
+      paths.push(r.slice(3));
+      if (/[RC]/.test(r.slice(0, 2))) i++;
+    }
+    const stats = await mapLimit(paths, 16, async (p) => {
+      try {
+        const st = await lstat(path.join(repo, p), { bigint: true });
+        return `${st.mtimeNs} ${st.size} ${st.mode}`;
+      } catch {
+        return "-";
+      }
+    });
+    hash2.update(status).update(stats.join("\0"));
+  }
+  return hash2.digest("hex").slice(0, 16);
 }
 function summarize(result) {
   const add = result.files.reduce((s, f) => s + f.additions, 0);
@@ -37466,7 +37500,7 @@ var ReviewServer = class {
       return sendText(res, 403, "Forbidden host");
     }
     const { pathname, searchParams } = new URL(req.url ?? "/", "http://127.0.0.1");
-    const api = /^\/api\/views\/([\w-]+)\/(diff|events|refs|threads|review|wait)(?:\/([\w-]+)\/comments)?$/.exec(pathname);
+    const api = /^\/api\/views\/([\w-]+)\/(diff|events|refs|threads|review|wait|version)(?:\/([\w-]+)\/comments)?$/.exec(pathname);
     if (api) {
       const view = this.views.get(api[1]);
       if (!view) return sendJson(res, 404, { error: "Unknown view. Ask Claude to open the viewer again." });
@@ -37475,9 +37509,18 @@ var ReviewServer = class {
       const threadId = api[3];
       if (req.method === "GET" && route === "diff" && !threadId) {
         try {
-          const diff = await computeDiff(view.repo, comparisonFrom(searchParams) ?? view.compare);
-          const data = { diff, opened: view.compare, review: view.review, threads: threads.threads };
+          const compare = comparisonFrom(searchParams) ?? view.compare;
+          const version2 = await diffVersion(view.repo, compare);
+          const diff = await computeDiff(view.repo, compare);
+          const data = { diff, version: version2, opened: view.compare, review: view.review, threads: threads.threads };
           return sendJson(res, 200, data);
+        } catch (err) {
+          return sendJson(res, 500, { error: errorMessage(err) });
+        }
+      }
+      if (req.method === "GET" && route === "version" && !threadId) {
+        try {
+          return sendJson(res, 200, { version: await diffVersion(view.repo, comparisonFrom(searchParams) ?? view.compare) });
         } catch (err) {
           return sendJson(res, 500, { error: errorMessage(err) });
         }

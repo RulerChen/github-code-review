@@ -1,6 +1,6 @@
 import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CommitInfo, Comparison, DiffResult, FileDiff, Thread, ViewData } from "../shared/types";
-import { ApiError, comparisonFromQuery, comparisonQuery, createThread, fetchRefs, fetchView, replyToThread, submitReview } from "./api";
+import { ApiError, comparisonFromQuery, comparisonQuery, createThread, fetchRefs, fetchVersion, fetchView, replyToThread, submitReview } from "./api";
 import { type CommentsApi, CommentsContext } from "./comments";
 import { CommitList, CompareControls, refLabel, sameComparison } from "./Compare";
 import { ConversationsButton, ConversationsPanel, type Place, useConversations } from "./Conversations";
@@ -16,6 +16,9 @@ interface Props {
 }
 
 type Tab = "topics" | "files" | "commits";
+
+// How often the page asks whether the diff changed on disk.
+const POLL_MS = 2000;
 
 const signature = (f: FileDiff) => (f.blocks.length ? f.blocks.map((b) => b.id).join(",") : `${f.status}:${f.binary}`);
 
@@ -39,16 +42,21 @@ export function App({ viewId }: Props) {
   // The comparison in the page URL, or null for the one Claude opened the viewer with.
   const requested = useRef<Comparison | null>(comparisonFromQuery(location.search));
   const seq = useRef(0);
+  const busy = useRef(false);
+  // The version of the diff on screen, or of the last one that failed to load.
+  const version = useRef<string | null>(null);
 
-  const load = useCallback(async (target: Comparison | null, push = false) => {
+  const load = useCallback(async (target: Comparison | null, push = false, quiet = false) => {
     if (!viewId) return;
     const n = ++seq.current;
-    setLoading(true);
+    busy.current = true;
+    if (!quiet) setLoading(true);
     try {
       const result = await fetchView(viewId, target);
       if (n !== seq.current) return;
       const root = result.diff.repoRoot;
       requested.current = target;
+      version.current = result.version;
       if (push) history.pushState(null, "", target ? `?${comparisonQuery(target)}` : location.pathname);
       setData(result);
       setThreads((prev) => mergeThreads(prev, result.threads));
@@ -60,7 +68,10 @@ export function App({ viewId }: Props) {
       if (n !== seq.current) return;
       setError({ message: e instanceof Error ? e.message : String(e), status: e instanceof ApiError ? e.status : 0 });
     } finally {
-      if (n === seq.current) setLoading(false);
+      if (n === seq.current) {
+        busy.current = false;
+        setLoading(false);
+      }
     }
   }, [viewId]);
 
@@ -70,6 +81,35 @@ export function App({ viewId }: Props) {
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
   }, [load]);
+
+  // Load the diff again when files or refs change. The check is cheap, and waits while the page is hidden,
+  // while a load runs, and while a comment form is open in the diff so its lines stay put.
+  useEffect(() => {
+    if (!viewId) return;
+    let timer = 0;
+    let stopped = false;
+    const idle = () => version.current !== null && !busy.current && !document.hidden && !document.querySelector("main.files .comment-form");
+    const check = async () => {
+      const target = requested.current;
+      try {
+        if (idle()) {
+          const v = await fetchVersion(viewId, target);
+          if (!stopped && v !== version.current && idle() && requested.current === target) {
+            version.current = v;
+            await load(target, false, true);
+          }
+        }
+      } catch {
+        // The next check tries again.
+      }
+      if (!stopped) timer = window.setTimeout(check, POLL_MS);
+    };
+    timer = window.setTimeout(check, POLL_MS);
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+    };
+  }, [viewId, load]);
 
   const loadRefs = useCallback(() => fetchRefs(viewId ?? ""), [viewId]);
 
@@ -301,7 +341,7 @@ export function App({ viewId }: Props) {
           <KeyboardButton onClick={() => setHelp(true)} />
           <ThemeToggle theme={theme} onToggle={toggleTheme} />
           <button className="button" onClick={() => void load(requested.current)} disabled={loading} title={updatedAt ? `Updated ${updatedAt.toLocaleTimeString()}` : undefined}>
-            {loading ? "Refreshing…" : "Refresh"}
+            Refresh
           </button>
           <SubmitReview drafts={drafts} onSubmit={submit} />
         </header>
@@ -340,7 +380,7 @@ export function App({ viewId }: Props) {
                   </p>
                 )}
                 {topics.map((t, i) => (
-                  <Fragment key={`${t.key}:${t.signature}`}>
+                  <Fragment key={t.key}>
                     {i === firstUnrelated && <h2 className="topic-divider">Not related to the focus</h2>}
                     <TopicSection topic={t} viewed={isTopicViewed(t)} onToggleViewed={() => toggleTopicViewed(t)} />
                   </Fragment>
@@ -349,7 +389,7 @@ export function App({ viewId }: Props) {
             ) : (
               shown.map(({ file, anchor }) => (
                 <FileCard
-                  key={`${file.path}:${signature(file)}`}
+                  key={file.path}
                   file={file}
                   anchor={anchor}
                   viewed={isViewed(file)}

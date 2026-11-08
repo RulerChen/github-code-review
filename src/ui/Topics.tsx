@@ -87,9 +87,8 @@ interface SectionProps {
 
 export function TopicSection({ topic, viewed, onToggleViewed }: SectionProps) {
   const [collapsed, setCollapsed] = useState(viewed || !topic.related);
-  useEffect(() => {
-    if (viewed) setCollapsed(true);
-  }, [viewed]);
+  // A viewed topic whose changes are edited stops being viewed and opens again.
+  useEffect(() => setCollapsed(viewed || !topic.related), [viewed]);
   const { revealSeq, peekReveal, versions } = useComments();
   useEffect(() => {
     const thread = peekReveal()?.thread;
@@ -139,7 +138,7 @@ export function TopicSection({ topic, viewed, onToggleViewed }: SectionProps) {
             </p>
           )}
           {topic.parts.map((p) => (
-            <FileCard key={p.anchor} file={p.file} blocks={p.blocks} anchor={p.anchor} />
+            <FileCard key={p.file.path} file={p.file} blocks={p.blocks} anchor={p.anchor} />
           ))}
         </div>
       )}

@@ -18,9 +18,7 @@ export async function computeDiff(repo: string, compare: Partial<Comparison> = {
   const base = compare.base ?? "HEAD";
   const head = compare.head ?? null;
   const threeDot = compare.threeDot ?? true;
-  for (const ref of [base, head]) {
-    if (ref !== null && (ref === "" || ref.startsWith("-"))) throw new Error(`Invalid git ref: ${ref}`);
-  }
+  checkRefs(base, head);
   const repoRoot = (await git(repo, ["rev-parse", "--show-toplevel"])).toString("utf8").trim();
   const [baseCommit, headCommit, headOfRepo] = await Promise.all([
     resolveCommit(repoRoot, base),
@@ -65,6 +63,50 @@ export async function computeDiff(repo: string, compare: Partial<Comparison> = {
   const files = [...tracked, ...added].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   for (const f of files) f.generated = generated.has(f.path);
   return { repoRoot, base, head, threeDot, baseCommit, headCommit, oldCommit, ...commits, files };
+}
+
+function checkRefs(base: string, head: string | null): void {
+  for (const ref of [base, head]) {
+    if (ref !== null && (ref === "" || ref.startsWith("-"))) throw new Error(`Invalid git ref: ${ref}`);
+  }
+}
+
+/**
+ * A fingerprint of what computeDiff reads, at a fraction of its cost: the commits the refs name and, for the
+ * working tree, git status with the size, mode and mtime of every path it lists. A file missing from git status
+ * has HEAD's content. Take it before the diff, so a change made while the diff runs shows up as a new version.
+ */
+export async function diffVersion(repo: string, compare: Partial<Comparison> = {}): Promise<string> {
+  const base = compare.base ?? "HEAD";
+  const head = compare.head ?? null;
+  checkRefs(base, head);
+  const [commits, status] = await Promise.all([
+    // Exits 128 for a ref that names nothing, such as HEAD before the first commit. The output is still stable.
+    git(repo, ["rev-parse", `${base}^{commit}`, `${head ?? "HEAD"}^{commit}`], [0, 128]),
+    head === null ? git(repo, ["status", "--porcelain", "-z", "--untracked-files=all"]) : null,
+  ]);
+  const hash = createHash("sha256").update(commits);
+  if (status) {
+    // Records are "XY path", and a rename or copy is followed by its source path.
+    const records = status.toString("utf8").split("\0");
+    const paths: string[] = [];
+    for (let i = 0; i < records.length; i++) {
+      const r = records[i]!;
+      if (r.length < 4) continue;
+      paths.push(r.slice(3));
+      if (/[RC]/.test(r.slice(0, 2))) i++;
+    }
+    const stats = await mapLimit(paths, 16, async (p) => {
+      try {
+        const st = await lstat(path.join(repo, p), { bigint: true });
+        return `${st.mtimeNs} ${st.size} ${st.mode}`;
+      } catch {
+        return "-";
+      }
+    });
+    hash.update(status).update(stats.join("\0"));
+  }
+  return hash.digest("hex").slice(0, 16);
 }
 
 export function summarize(result: DiffResult): string {
