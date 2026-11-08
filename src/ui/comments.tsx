@@ -3,12 +3,15 @@ import type { Thread, ThreadAnchor } from "../shared/types";
 import { Markdown } from "./Markdown";
 
 export interface CommentsApi {
+  /** The commit each side of the diff comes from, or null for the working tree. */
+  versions: Record<ThreadAnchor["side"], string | null>;
   threadsFor: (path: string) => Thread[];
-  create: (anchor: ThreadAnchor, snippet: string, body: string) => Promise<void>;
+  create: (anchor: Omit<ThreadAnchor, "commit">, snippet: string, body: string) => Promise<void>;
   reply: (threadId: string, body: string) => Promise<void>;
 }
 
 export const CommentsContext = createContext<CommentsApi>({
+  versions: { old: null, new: null },
   threadsFor: () => [],
   create: async () => {},
   reply: async () => {},
@@ -16,10 +19,15 @@ export const CommentsContext = createContext<CommentsApi>({
 
 export const useComments = () => useContext(CommentsContext);
 
-export function anchorLabel(anchor: ThreadAnchor): string {
+export function anchorLabel(anchor: ThreadAnchor, withVersion = false): string {
   const side = anchor.side === "old" ? "Old" : "New";
-  return anchor.start === anchor.end ? `${side} line ${anchor.start}` : `${side} lines ${anchor.start}–${anchor.end}`;
+  const lines = anchor.start === anchor.end ? `${side} line ${anchor.start}` : `${side} lines ${anchor.start}–${anchor.end}`;
+  if (!withVersion) return lines;
+  return anchor.commit ? `${lines} at ${anchor.commit.slice(0, 7)}` : `${lines} in the working tree`;
 }
+
+/** Whether a thread's lines come from the version of the file shown on its side of the diff. */
+export const onShownVersion = (thread: Thread, versions: CommentsApi["versions"]) => thread.anchor.commit === versions[thread.anchor.side];
 
 interface FormProps {
   placeholder: string;
@@ -75,13 +83,13 @@ export function CommentForm({ placeholder, submitLabel, onSubmit, onCancel }: Fo
   );
 }
 
-export function ThreadView({ thread }: { thread: Thread }) {
+export function ThreadView({ thread, withVersion = false }: { thread: Thread; withVersion?: boolean }) {
   const { reply } = useComments();
   const [replying, setReplying] = useState(false);
 
   return (
     <div className="thread">
-      <div className="thread-head">{anchorLabel(thread.anchor)}</div>
+      <div className="thread-head">{anchorLabel(thread.anchor, withVersion)}</div>
       {thread.comments.map((c) => (
         <div key={c.id} className={`comment comment-${c.author}`}>
           <div className="comment-author">{c.author === "claude" ? "Claude" : "You"}</div>

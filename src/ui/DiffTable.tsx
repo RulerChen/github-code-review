@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useState } from "react";
 import type { DiffLine, DisplayHunk, Expansion, Thread } from "../shared/types";
-import { CommentForm, ThreadView, useComments } from "./comments";
+import { CommentForm, onShownVersion, ThreadView, useComments } from "./comments";
 import type { Token, TokenLines } from "./highlight";
 
 type Side = "old" | "new";
@@ -67,7 +67,7 @@ function Code({ line, tokens }: { line: DiffLine; tokens: Token[] | undefined })
 }
 
 export function DiffTable({ path, hunks, oldTokens, newTokens, onExpand }: Props) {
-  const { threadsFor, create } = useComments();
+  const { threadsFor, create, versions } = useComments();
   const [selection, setSelection] = useState<Selection | null>(null);
   const [drag, setDrag] = useState<Drag | null>(null);
   const threads = threadsFor(path);
@@ -110,7 +110,7 @@ export function DiffTable({ path, hunks, oldTokens, newTokens, onExpand }: Props
     <>
       {no !== null &&
         threads
-          .filter((t) => t.anchor.side === side && t.anchor.end === no)
+          .filter((t) => t.anchor.side === side && t.anchor.end === no && onShownVersion(t, versions))
           .map((t) => <ThreadRow key={t.id} thread={t} />)}
       {selection?.side === side && selection.end === no && (
         <tr className="thread-row">

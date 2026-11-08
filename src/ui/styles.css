@@ -108,25 +108,8 @@ button {
   white-space: nowrap;
 }
 
-.refs {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--fg-muted);
-  white-space: nowrap;
-}
 
-.refs code {
-  padding: 2px 6px;
-  border-radius: 6px;
-  background: var(--accent-subtle);
-  color: var(--accent);
-}
 
-.refs .sha {
-  font-family: var(--mono);
-  font-size: 12px;
-}
 
 .topbar-stats {
   display: flex;
@@ -956,9 +939,7 @@ button {
   .sidebar {
     display: none;
   }
-  .refs {
-    display: none;
-  }
+
   .files {
     padding: 8px;
   }
@@ -972,5 +953,291 @@ button {
   .chevron svg,
   .tree-dir svg:first-child {
     transition: none;
+  }
+}
+
+:root {
+  --overlay-shadow: 0 1px 3px #1f232814, 0 8px 24px #424a5329;
+  --tab-active: #fd8c73;
+}
+
+:root[data-theme="dark"] {
+  --overlay-shadow: 0 0 0 1px #3d444d, 0 8px 24px #010409;
+}
+
+.compare {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.picker {
+  position: relative;
+  min-width: 0;
+}
+
+.picker-button {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 260px;
+  padding: 3px 4px 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-subtle);
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.picker-button:hover,
+.picker-button[aria-expanded="true"] {
+  border-color: var(--fg-muted);
+}
+
+.picker-role {
+  color: var(--fg-muted);
+}
+
+.picker-value {
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+}
+
+.picker-button svg {
+  flex: none;
+  fill: var(--fg-muted);
+}
+
+.dots {
+  padding: 2px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--fg-muted);
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.dots:hover {
+  background: var(--border-muted);
+  color: var(--fg);
+}
+
+.compare .icon-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.compare .icon-button:disabled:hover {
+  background: none;
+  color: var(--fg-muted);
+}
+
+.picker-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 30;
+  width: 340px;
+  max-width: calc(100vw - 32px);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg);
+  box-shadow: var(--overlay-shadow);
+}
+
+.picker-title {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.picker-search {
+  padding: 8px;
+}
+
+.picker-search .filter {
+  margin: 0;
+}
+
+.picker-tabs {
+  display: flex;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--border-muted);
+}
+
+.picker-tabs button {
+  margin-bottom: -1px;
+  padding: 6px 10px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--fg-muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.picker-tabs button[aria-selected="true"] {
+  border-bottom-color: var(--tab-active);
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.picker-list {
+  max-height: 320px;
+  margin: 0;
+  padding: 4px 0;
+  overflow: auto;
+  list-style: none;
+}
+
+.picker-list button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 12px;
+  border: 0;
+  background: none;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.picker-list button.is-cursor {
+  background: var(--bg-subtle);
+}
+
+.picker-check {
+  flex: none;
+  fill: currentColor;
+}
+
+.picker-item-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.picker-item-detail {
+  flex: none;
+  color: var(--fg-muted);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.picker-empty {
+  padding: 12px;
+  color: var(--fg-muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+.counter {
+  display: inline-block;
+  min-width: 20px;
+  padding: 0 6px;
+  border-radius: 2em;
+  background: var(--border-muted);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 18px;
+  text-align: center;
+}
+
+.layout.no-sidebar {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.commits {
+  max-width: 1012px;
+  margin: 0 auto;
+}
+
+.commit-group + .commit-group {
+  margin-top: 24px;
+}
+
+.commit-day {
+  margin: 0 0 8px;
+  color: var(--fg-muted);
+  font-size: 14px;
+  font-weight: 400;
+}
+
+.commit-list {
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  list-style: none;
+}
+
+.commit {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 16px;
+}
+
+.commit + .commit {
+  border-top: 1px solid var(--border-muted);
+}
+
+.commit:hover {
+  background: var(--bg-subtle);
+}
+
+.commit-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.commit-subject {
+  display: block;
+  max-width: 100%;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  background: none;
+  font-weight: 600;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.commit-subject:hover:not(:disabled) {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.commit-subject:disabled {
+  cursor: default;
+}
+
+.commit-meta {
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+
+.commit-sha {
+  flex: none;
+  color: var(--fg-muted);
+}
+
+@media (max-width: 768px) {
+  .picker-role {
+    display: none;
   }
 }

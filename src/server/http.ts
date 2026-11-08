@@ -3,14 +3,14 @@ import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import path from "node:path";
-import { computeDiff } from "../engine/diff.js";
-import type { Review, Thread, ThreadAnchor, ViewData } from "../shared/types.js";
+import { computeDiff, listRefs } from "../engine/diff.js";
+import type { Comparison, Review, Thread, ThreadAnchor, ViewData } from "../shared/types.js";
 import { RepoThreads } from "./threads.js";
 
 export interface View {
   id: string;
   repo: string;
-  base: string;
+  compare: Comparison;
   review: Review | null;
 }
 
@@ -59,11 +59,11 @@ export class ReviewServer {
     this.server = null;
   }
 
-  addView(repo: string, base: string, review: Review | null, cwd: string, session: string | null): View {
+  addView(repo: string, compare: Comparison, review: Review | null, cwd: string, session: string | null): View {
     let id: string;
     do id = Array.from({ length: 5 }, () => String.fromCharCode(97 + randomInt(26))).join("");
     while (this.views.has(id));
-    const view = { id, repo, base, review };
+    const view = { id, repo, compare, review };
     this.views.set(view.id, view);
     let threads = this.repos.get(repo);
     if (!threads) {
@@ -89,8 +89,8 @@ export class ReviewServer {
       return sendText(res, 403, "Forbidden host");
     }
 
-    const { pathname } = new URL(req.url ?? "/", "http://127.0.0.1");
-    const api = /^\/api\/views\/([\w-]+)\/(diff|events|threads)(?:\/([\w-]+)\/comments)?$/.exec(pathname);
+    const { pathname, searchParams } = new URL(req.url ?? "/", "http://127.0.0.1");
+    const api = /^\/api\/views\/([\w-]+)\/(diff|events|refs|threads)(?:\/([\w-]+)\/comments)?$/.exec(pathname);
     if (api) {
       const view = this.views.get(api[1]!);
       if (!view) return sendJson(res, 404, { error: "Unknown view. Ask Claude to open the viewer again." });
@@ -100,9 +100,16 @@ export class ReviewServer {
 
       if (req.method === "GET" && route === "diff" && !threadId) {
         try {
-          const diff = await computeDiff(view.repo, view.base);
-          const data: ViewData = { diff, review: view.review, threads: threads.threads };
+          const diff = await computeDiff(view.repo, comparisonFrom(searchParams) ?? view.compare);
+          const data: ViewData = { diff, opened: view.compare, review: view.review, threads: threads.threads };
           return sendJson(res, 200, data);
+        } catch (err) {
+          return sendJson(res, 500, { error: errorMessage(err) });
+        }
+      }
+      if (req.method === "GET" && route === "refs" && !threadId) {
+        try {
+          return sendJson(res, 200, await listRefs(view.repo));
         } catch (err) {
           return sendJson(res, 500, { error: errorMessage(err) });
         }
@@ -188,6 +195,13 @@ async function readJson(req: IncomingMessage, limit = 256 * 1024): Promise<Recor
   }
 }
 
+/** A comparison the page asks for in place of the view's own: ?base=main&head=feature, with dots=2 for a direct one. */
+function comparisonFrom(params: URLSearchParams): Comparison | null {
+  const base = params.get("base");
+  if (!base) return null;
+  return { base, head: params.get("head") || null, threeDot: params.get("dots") !== "2" };
+}
+
 function isText(value: unknown, max: number, nonEmpty = false): value is string {
   return typeof value === "string" && value.length <= max && (!nonEmpty || value.trim() !== "");
 }
@@ -201,7 +215,8 @@ function isAnchor(value: unknown): value is ThreadAnchor {
     (a.side === "old" || a.side === "new") &&
     line(a.start) &&
     line(a.end) &&
-    (a.start as number) <= (a.end as number)
+    (a.start as number) <= (a.end as number) &&
+    (a.commit === null || (typeof a.commit === "string" && /^[0-9a-f]{40,64}$/.test(a.commit)))
   );
 }
 

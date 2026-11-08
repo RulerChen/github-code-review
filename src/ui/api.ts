@@ -1,4 +1,4 @@
-import type { Thread, ThreadAnchor, ViewData } from "../shared/types";
+import type { Comparison, RefList, Thread, ThreadAnchor, ViewData } from "../shared/types";
 
 export class ApiError extends Error {
   constructor(
@@ -9,11 +9,33 @@ export class ApiError extends Error {
   }
 }
 
-export async function fetchView(viewId: string): Promise<ViewData> {
-  const res = await fetch(`/api/views/${encodeURIComponent(viewId)}/diff`, { cache: "no-store" });
+export function comparisonQuery(c: Comparison): string {
+  const params = new URLSearchParams({ base: c.base });
+  if (c.head !== null) params.set("head", c.head);
+  if (!c.threeDot) params.set("dots", "2");
+  return params.toString();
+}
+
+export function comparisonFromQuery(search: string): Comparison | null {
+  const params = new URLSearchParams(search);
+  const base = params.get("base");
+  return base ? { base, head: params.get("head") || null, threeDot: params.get("dots") !== "2" } : null;
+}
+
+/** Loads the view's diff, or another comparison in the same repository when one is given. */
+export async function fetchView(viewId: string, compare: Comparison | null): Promise<ViewData> {
+  const query = compare ? `?${comparisonQuery(compare)}` : "";
+  const res = await fetch(`/api/views/${encodeURIComponent(viewId)}/diff${query}`, { cache: "no-store" });
   const body = (await res.json().catch(() => null)) as (Partial<ViewData> & { error?: string }) | null;
-  if (!res.ok || !body?.diff) throw new ApiError(body?.error ?? `HTTP ${res.status}`, res.status);
-  return { diff: body.diff, review: body.review ?? null, threads: body.threads ?? [] };
+  if (!res.ok || !body?.diff || !body.opened) throw new ApiError(body?.error ?? `HTTP ${res.status}`, res.status);
+  return { diff: body.diff, opened: body.opened, review: body.review ?? null, threads: body.threads ?? [] };
+}
+
+export async function fetchRefs(viewId: string): Promise<RefList> {
+  const res = await fetch(`/api/views/${encodeURIComponent(viewId)}/refs`, { cache: "no-store" });
+  const body = (await res.json().catch(() => null)) as (Partial<RefList> & { error?: string }) | null;
+  if (!res.ok || !body?.branches) throw new ApiError(body?.error ?? `HTTP ${res.status}`, res.status);
+  return { branches: body.branches, tags: body.tags ?? [], commits: body.commits ?? [] };
 }
 
 async function postJson(url: string, payload: unknown): Promise<Thread> {

@@ -107,14 +107,19 @@ function comment(author: ThreadComment["author"], body: string, status: ThreadCo
 }
 
 function buildPrompt(thread: Thread): string {
-  const { path, side, start, end } = thread.anchor;
+  const { path, side, start, end, commit } = thread.anchor;
   const lines = start === end ? `line ${start}` : `lines ${start}-${end}`;
+  const version = commit
+    ? ` as of commit ${commit}. The files on disk are the working tree and can differ from that commit`
+    : side === "new"
+      ? " in the working tree"
+      : "";
   const history = thread.comments
     .filter((c) => c.status === "done")
     .map((c) => `${c.author === "user" ? "User" : "Claude"}: ${c.body}`)
     .join("\n\n");
   return [
-    `The user is reviewing the code changes in a diff viewer. They selected ${lines} of the ${side} version of ${path} and wrote in a comment thread on them.`,
+    `The user is reviewing the code changes in a diff viewer. They selected ${lines} of the ${side} version of ${path}${version}. They wrote in a comment thread on these lines.`,
     "Answer the last comment directly and concisely, in the language it is written in, using Markdown. You can read files to check details, but do not change anything.",
     "",
     "Selected lines:",

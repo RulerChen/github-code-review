@@ -1,7 +1,8 @@
-import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
-import type { FileDiff, Thread, ThreadAnchor, ViewData } from "../shared/types";
-import { ApiError, createThread, fetchView, replyToThread } from "./api";
+import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { CommitInfo, Comparison, DiffResult, FileDiff, Thread, ViewData } from "../shared/types";
+import { ApiError, comparisonFromQuery, comparisonQuery, createThread, fetchRefs, fetchView, replyToThread } from "./api";
 import { type CommentsApi, CommentsContext } from "./comments";
+import { CommitList, CompareControls, refLabel, sameComparison } from "./Compare";
 import { FileCard } from "./FileCard";
 import { comparePaths, FileTree } from "./FileTree";
 import { readStorage, writeStorage } from "./storage";
@@ -11,7 +12,7 @@ interface Props {
   viewId: string | null;
 }
 
-type Tab = "topics" | "files";
+type Tab = "topics" | "files" | "commits";
 
 const signature = (f: FileDiff) => (f.blocks.length ? f.blocks.map((b) => b.id).join(",") : `${f.status}:${f.binary}`);
 
@@ -27,13 +28,20 @@ export function App({ viewId }: Props) {
   const [viewed, setViewed] = useState<Record<string, string>>({});
   const [viewedTopics, setViewedTopics] = useState<Record<string, string>>({});
   const [threads, setThreads] = useState<Thread[]>([]);
+  // The comparison in the page URL, or null for the one Claude opened the viewer with.
+  const requested = useRef<Comparison | null>(comparisonFromQuery(location.search));
+  const seq = useRef(0);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (target: Comparison | null, push = false) => {
     if (!viewId) return;
+    const n = ++seq.current;
     setLoading(true);
     try {
-      const result = await fetchView(viewId);
+      const result = await fetchView(viewId, target);
+      if (n !== seq.current) return;
       const root = result.diff.repoRoot;
+      requested.current = target;
+      if (push) history.pushState(null, "", target ? `?${comparisonQuery(target)}` : location.pathname);
       setData(result);
       setThreads((prev) => mergeThreads(prev, result.threads));
       setError(null);
@@ -41,15 +49,30 @@ export function App({ viewId }: Props) {
       setViewed((prev) => (Object.keys(prev).length ? prev : readStorage(`diff-review:viewed:${root}`, {})));
       setViewedTopics((prev) => (Object.keys(prev).length ? prev : readStorage(`diff-review:viewed-topics:${root}`, {})));
     } catch (e) {
+      if (n !== seq.current) return;
       setError({ message: e instanceof Error ? e.message : String(e), status: e instanceof ApiError ? e.status : 0 });
     } finally {
-      setLoading(false);
+      if (n === seq.current) setLoading(false);
     }
   }, [viewId]);
 
   useEffect(() => {
-    void load();
+    void load(requested.current);
+    const onPop = () => void load(comparisonFromQuery(location.search));
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
   }, [load]);
+
+  const loadRefs = useCallback(() => fetchRefs(viewId ?? ""), [viewId]);
+
+  const compareWith = (next: Comparison) => {
+    if (data) void load(sameComparison(next, data.opened) ? null : next, true);
+  };
+
+  const viewCommit = (c: CommitInfo) => {
+    setTab("files");
+    compareWith({ base: c.parents[0]!, head: c.sha, threeDot: false });
+  };
 
   useEffect(() => {
     if (!viewId) return;
@@ -61,14 +84,18 @@ export function App({ viewId }: Props) {
     return () => events.close();
   }, [viewId]);
 
+  const oldCommit = data?.diff.oldCommit ?? null;
+  const headCommit = data?.diff.headCommit ?? null;
   const comments = useMemo<CommentsApi>(() => {
     const byPath = new Map<string, Thread[]>();
     for (const t of threads) byPath.set(t.anchor.path, [...(byPath.get(t.anchor.path) ?? []), t]);
+    const versions = { old: oldCommit, new: headCommit };
     return {
+      versions,
       threadsFor: (path) => byPath.get(path) ?? [],
-      create: async (anchor: ThreadAnchor, snippet: string, body: string) => {
+      create: async (anchor, snippet, body) => {
         if (!viewId) return;
-        const thread = await createThread(viewId, anchor, snippet, body);
+        const thread = await createThread(viewId, { ...anchor, commit: versions[anchor.side] }, snippet, body);
         setThreads((prev) => mergeThreads(prev, [thread]));
       },
       reply: async (threadId: string, body: string) => {
@@ -77,10 +104,11 @@ export function App({ viewId }: Props) {
         setThreads((prev) => mergeThreads(prev, [thread]));
       },
     };
-  }, [threads, viewId]);
+  }, [threads, viewId, oldCommit, headCommit]);
 
   const diff = data?.diff ?? null;
   const review = data?.review ?? null;
+  const isOpened = data !== null && sameComparison(data.diff, data.opened);
 
   const entries = useMemo(
     () =>
@@ -94,8 +122,8 @@ export function App({ viewId }: Props) {
     return q ? entries.filter((e) => e.file.path.toLowerCase().includes(q)) : entries;
   }, [entries, filter]);
   const topics = useMemo(
-    () => (review ? buildTopics(review, entries.map((e) => e.file)) : []),
-    [review, entries],
+    () => (review && isOpened ? buildTopics(review, entries.map((e) => e.file)) : []),
+    [review, isOpened, entries],
   );
 
   const isViewed = useCallback((f: FileDiff) => viewed[f.path] === signature(f), [viewed]);
@@ -140,12 +168,18 @@ export function App({ viewId }: Props) {
       <Notice title="Could not load the diff">
         {error.message}
         {hint && <p>{hint}</p>}
+        {!hint && requested.current && (
+          <p>
+            <a href={location.pathname}>Open the comparison Claude chose</a>
+          </p>
+        )}
       </Notice>
     );
   }
   if (!diff) return <Notice title="Loading diff…" />;
 
-  const byTopic = review !== null && tab === "topics";
+  const view: Tab = tab === "topics" && review && isOpened ? "topics" : tab === "commits" && diff.commits.length ? "commits" : "files";
+  const byTopic = view === "topics";
   const additions = diff.files.reduce((s, f) => s + f.additions, 0);
   const deletions = diff.files.reduce((s, f) => s + f.deletions, 0);
   const total = byTopic ? topics.length : diff.files.length;
@@ -160,12 +194,7 @@ export function App({ viewId }: Props) {
         <header className="topbar">
           <div className="topbar-title">
             <strong>{repoName}</strong>
-            <span className="refs">
-              <code>{diff.base}</code>
-              {diff.baseCommit && <span className="sha">{diff.baseCommit.slice(0, 7)}</span>}
-              <span aria-hidden="true">←</span>
-              <code>working tree</code>
-            </span>
+            <CompareControls diff={diff} loadRefs={loadRefs} onCompare={compareWith} />
           </div>
           <div className="topbar-stats">
             <span>
@@ -183,26 +212,41 @@ export function App({ viewId }: Props) {
               <span style={{ width: `${total ? (viewedCount / total) * 100 : 0}%` }} />
             </span>
           </div>
-          {review && (
-            <div className="segmented" role="tablist" aria-label="Group changes by">
-              <button role="tab" aria-selected={tab === "topics"} onClick={() => setTab("topics")}>
-                Topics
-              </button>
-              <button role="tab" aria-selected={tab === "files"} onClick={() => setTab("files")}>
+          {(review || diff.commits.length > 0) && (
+            <div className="segmented" role="tablist" aria-label="Show">
+              {review && (
+                <button
+                  role="tab"
+                  aria-selected={view === "topics"}
+                  title={isOpened ? undefined : `Claude's topics are for ${describe(data!.opened)}. Go back to it.`}
+                  onClick={() => {
+                    setTab("topics");
+                    if (!isOpened) compareWith(data!.opened);
+                  }}
+                >
+                  Topics
+                </button>
+              )}
+              <button role="tab" aria-selected={view === "files"} onClick={() => setTab("files")}>
                 Files
               </button>
+              {diff.commits.length > 0 && (
+                <button role="tab" aria-selected={view === "commits"} onClick={() => setTab("commits")}>
+                  Commits <span className="counter">{diff.commitCount.toLocaleString()}</span>
+                </button>
+              )}
             </div>
           )}
           <ThemeToggle theme={theme} onToggle={toggleTheme} />
-          <button className="button" onClick={() => void load()} disabled={loading} title={updatedAt ? `Updated ${updatedAt.toLocaleTimeString()}` : undefined}>
+          <button className="button" onClick={() => void load(requested.current)} disabled={loading} title={updatedAt ? `Updated ${updatedAt.toLocaleTimeString()}` : undefined}>
             {loading ? "Refreshing…" : "Refresh"}
           </button>
         </header>
 
-        {error && <div className="banner">Refresh failed: {error.message}</div>}
+        {error && <div className="banner">{error.message}</div>}
 
-        <div className="layout">
-          <aside className="sidebar">
+        <div className={`layout${view === "commits" ? " no-sidebar" : ""}`}>
+          <aside className="sidebar" hidden={view === "commits"}>
             {byTopic ? (
               <TopicList topics={topics} active={active} isViewed={isTopicViewed} onSelect={select} />
             ) : (
@@ -221,11 +265,11 @@ export function App({ viewId }: Props) {
           </aside>
 
           <main className="files">
-            {diff.files.length === 0 ? (
-              <Notice title="No changes">
-                The working tree matches <code>{diff.base}</code>.
-              </Notice>
-            ) : byTopic ? (
+            {view === "commits" ? (
+              <CommitList diff={diff} onView={viewCommit} />
+            ) : diff.files.length === 0 ? (
+              <Notice title="No changes">{noChanges(diff)}</Notice>
+            ) : byTopic && review ? (
               <>
                 {review.focus && (
                   <p className="focus">
@@ -268,6 +312,22 @@ function mergeThreads(base: Thread[], updates: Thread[]): Thread[] {
     else if (t.rev >= current.rev) next[i] = t;
   }
   return next;
+}
+
+function describe(c: Comparison): string {
+  return `${refLabel(c.base)}${c.threeDot ? "..." : ".."}${refLabel(c.head)}`;
+}
+
+function noChanges(d: DiffResult): ReactNode {
+  const from =
+    d.threeDot && d.oldCommit && d.oldCommit !== d.baseCommit ? (
+      <>
+        the merge base of <code>{refLabel(d.base)}</code> and <code>{refLabel(d.head ?? "HEAD")}</code>
+      </>
+    ) : (
+      <code>{refLabel(d.base)}</code>
+    );
+  return d.head === null ? <>The working tree matches {from}.</> : <><code>{refLabel(d.head)}</code> has the same files as {from}.</>;
 }
 
 function ThemeToggle({ theme, onToggle }: { theme: string; onToggle: () => void }) {

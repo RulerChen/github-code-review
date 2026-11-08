@@ -76,6 +76,8 @@ export interface ThreadAnchor {
   side: "old" | "new";
   start: number;
   end: number;
+  /** The commit the lines come from, or null for the working tree. */
+  commit: string | null;
 }
 
 export interface ThreadComment {
@@ -98,13 +100,42 @@ export interface Thread {
 
 export interface ViewData {
   diff: DiffResult;
+  /** The comparison Claude opened the viewer with. The review's topics belong to it. */
+  opened: Comparison;
   review: Review | null;
   threads: Thread[];
 }
 
-export interface DiffResult {
-  repoRoot: string;
+export interface Comparison {
   base: string;
+  /** null for the working tree, including untracked files. */
+  head: string | null;
+  /** Compare from the merge base of base and head, like GitHub's base...head, instead of from base itself. */
+  threeDot: boolean;
+}
+
+export interface CommitInfo {
+  sha: string;
+  parents: string[];
+  author: string;
+  date: string;
+  subject: string;
+}
+
+export interface DiffResult extends Comparison {
+  repoRoot: string;
   baseCommit: string | null;
+  headCommit: string | null;
+  /** The commit the old side comes from: the merge base in a three-dot comparison, otherwise baseCommit. */
+  oldCommit: string | null;
+  /** Commits in base..head, oldest first, at most MAX_COMMITS of the newest. */
+  commits: CommitInfo[];
+  commitCount: number;
   files: FileDiff[];
+}
+
+export interface RefList {
+  branches: string[];
+  tags: string[];
+  commits: CommitInfo[];
 }

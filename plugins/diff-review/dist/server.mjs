@@ -36776,17 +36776,31 @@ function git(cwd, args, okCodes = [0]) {
 
 // src/engine/diff.ts
 var MAX_CONTENT_BYTES = 1024 * 1024;
+var MAX_COMMITS = 250;
 var EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
-async function computeDiff(repo, base = "HEAD") {
-  if (base.startsWith("-")) throw new Error(`Invalid git ref: ${base}`);
+async function computeDiff(repo, compare = {}) {
+  const base = compare.base ?? "HEAD";
+  const head = compare.head ?? null;
+  const threeDot = compare.threeDot ?? true;
+  for (const ref of [base, head]) {
+    if (ref !== null && (ref === "" || ref.startsWith("-"))) throw new Error(`Invalid git ref: ${ref}`);
+  }
   const repoRoot = (await git(repo, ["rev-parse", "--show-toplevel"])).toString("utf8").trim();
-  const baseCommit = await resolveBase(repoRoot, base);
-  const treeish = baseCommit ?? EMPTY_TREE;
+  const [baseCommit, headCommit, headOfRepo] = await Promise.all([
+    resolveCommit(repoRoot, base),
+    head === null ? null : resolveCommit(repoRoot, head),
+    head === null ? resolveCommit(repoRoot, "HEAD") : null
+  ]);
+  if (head !== null && headCommit === null) throw new Error(`Unknown git ref: ${head}`);
+  const tip = headCommit ?? headOfRepo;
+  const oldCommit = threeDot && baseCommit && tip ? await mergeBase(repoRoot, baseCommit, tip, base, head) : baseCommit;
+  const range = headCommit ? [oldCommit ?? EMPTY_TREE, headCommit] : [oldCommit ?? EMPTY_TREE];
   const diffArgs = ["diff", "--no-color", "--no-ext-diff", "--no-textconv", "--submodule=short", "--find-renames"];
-  const [nameStatus, patch, untracked] = await Promise.all([
-    git(repoRoot, [...diffArgs, "--name-status", "-z", treeish, "--"]),
-    git(repoRoot, [...diffArgs, "-U0", treeish, "--"]),
-    git(repoRoot, ["ls-files", "--others", "--exclude-standard", "-z"])
+  const [nameStatus, patch, untracked, commits] = await Promise.all([
+    git(repoRoot, [...diffArgs, "--name-status", "-z", ...range, "--"]),
+    git(repoRoot, [...diffArgs, "-U0", ...range, "--"]),
+    head === null ? git(repoRoot, ["ls-files", "--others", "--exclude-standard", "-z"]) : Buffer.alloc(0),
+    listCommits(repoRoot, baseCommit, tip)
   ]);
   const entries = parseNameStatus(nameStatus);
   let sections = splitSections(patch.toString("utf8"));
@@ -36794,28 +36808,66 @@ async function computeDiff(repo, base = "HEAD") {
   const tracked = await mapLimit(
     entries.map((e, i) => [e, sections[i]]),
     8,
-    ([entry, section]) => buildTrackedFile(repoRoot, diffArgs, treeish, baseCommit, entry, section)
+    ([entry, section]) => buildTrackedFile(repoRoot, diffArgs, range, oldCommit, headCommit, entry, section)
   );
   const untrackedPaths = untracked.toString("utf8").split("\0").filter(Boolean);
   const added = (await mapLimit(untrackedPaths, 8, (p) => buildUntrackedFile(repoRoot, p))).filter(
     (f) => f !== null
   );
   const files = [...tracked, ...added].sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
-  return { repoRoot, base, baseCommit, files };
+  return { repoRoot, base, head, threeDot, baseCommit, headCommit, oldCommit, ...commits, files };
 }
 function summarize(result) {
   const add = result.files.reduce((s, f) => s + f.additions, 0);
   const del = result.files.reduce((s, f) => s + f.deletions, 0);
   const n = result.files.length;
-  return `${n} file${n === 1 ? "" : "s"} changed, +${add} -${del} against ${result.base}`;
+  const c = result.commitCount;
+  const fromMergeBase = result.oldCommit !== result.baseCommit && result.oldCommit ? ` from their merge base ${result.oldCommit.slice(0, 7)}` : "";
+  const what = result.head === null ? `the working tree against ${result.base}` : `${result.base}${result.threeDot ? "..." : ".."}${result.head}`;
+  const commits = c ? `, ${c} commit${c === 1 ? "" : "s"}` : "";
+  return `${n} file${n === 1 ? "" : "s"} changed, +${add} -${del}, comparing ${what}${fromMergeBase}${commits}`;
 }
-async function resolveBase(repoRoot, base) {
+async function resolveCommit(repoRoot, ref) {
   try {
-    return (await git(repoRoot, ["rev-parse", "--verify", "--quiet", `${base}^{commit}`])).toString("utf8").trim();
+    return (await git(repoRoot, ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`])).toString("utf8").trim();
   } catch {
-    if (base === "HEAD") return null;
-    throw new Error(`Unknown git ref: ${base}`);
+    if (ref === "HEAD") return null;
+    throw new Error(`Unknown git ref: ${ref}`);
   }
+}
+async function mergeBase(repoRoot, a, b, base, head) {
+  const out = (await git(repoRoot, ["merge-base", a, b], [0, 1])).toString("utf8").trim();
+  if (out) return out;
+  throw new Error(`${base} and ${head ?? "HEAD"} share no history, so there is no merge base. Compare them directly instead.`);
+}
+var COMMIT_FORMAT = "%H%x1f%P%x1f%an%x1f%aI%x1f%s";
+async function listCommits(repoRoot, from, to) {
+  if (!from || !to) return { commits: [], commitCount: 0 };
+  const range = `${from}..${to}`;
+  const [log, count] = await Promise.all([
+    git(repoRoot, ["log", "-z", `-n${MAX_COMMITS}`, "--reverse", `--format=${COMMIT_FORMAT}`, range, "--"]),
+    git(repoRoot, ["rev-list", "--count", range, "--"])
+  ]);
+  return { commits: parseCommits(log), commitCount: Number(count.toString("utf8").trim()) };
+}
+function parseCommits(buf) {
+  return buf.toString("utf8").split("\0").filter(Boolean).map((rec) => {
+    const [sha = "", parents = "", author = "", date5 = "", subject = ""] = rec.split("");
+    return { sha, parents: parents.split(" ").filter(Boolean), author, date: date5, subject };
+  });
+}
+async function recentCommits(repoRoot, limit = 100) {
+  try {
+    return parseCommits(await git(repoRoot, ["log", "-z", `-n${limit}`, `--format=${COMMIT_FORMAT}`, "HEAD", "--"]));
+  } catch {
+    return [];
+  }
+}
+async function listRefs(repo) {
+  const repoRoot = (await git(repo, ["rev-parse", "--show-toplevel"])).toString("utf8").trim();
+  const refs = async (pattern) => (await git(repoRoot, ["for-each-ref", "--sort=-creatordate", "--format=%(refname:short)%00%(symref)", ...pattern])).toString("utf8").split("\n").map((l) => l.split("\0")).filter(([name, symref]) => name && !symref).map(([name]) => name);
+  const [branches, tags, commits] = await Promise.all([refs(["refs/heads", "refs/remotes"]), refs(["refs/tags"]), recentCommits(repoRoot)]);
+  return { branches, tags, commits };
 }
 function parseNameStatus(buf) {
   const parts = buf.toString("utf8").split("\0");
@@ -36914,7 +36966,7 @@ function classify(buf) {
   if (buf.subarray(0, 8e3).includes(0)) return { kind: "binary" };
   return { kind: "text", text: buf.toString("utf8") };
 }
-async function readBase(repoRoot, commit, filePath) {
+async function readBlob(repoRoot, commit, filePath) {
   try {
     return classify(await git(repoRoot, ["cat-file", "blob", `${commit}:${filePath}`]));
   } catch {
@@ -36943,18 +36995,18 @@ function matchesBlocks(lines, blocks, side) {
     });
   });
 }
-async function buildTrackedFile(repoRoot, diffArgs, treeish, baseCommit, entry, section) {
+async function buildTrackedFile(repoRoot, diffArgs, range, oldCommit, headCommit, entry, section) {
   const status = statusOf(entry.code);
   if (!section) {
     const paths = entry.oldPath ? [entry.oldPath, entry.path] : [entry.path];
-    const one = await git(repoRoot, [...diffArgs, "-U0", treeish, "--", ...paths]);
+    const one = await git(repoRoot, [...diffArgs, "-U0", ...range, "--", ...paths]);
     section = splitSections(one.toString("utf8"))[0] ?? [];
   }
   const parsed = parseSection(section);
   const blocks = assignIds(entry.path, parsed.blocks);
   const [oldC, newC] = await Promise.all([
-    status === "added" || !baseCommit ? Promise.resolve({ kind: "absent" }) : readBase(repoRoot, baseCommit, entry.oldPath ?? entry.path),
-    status === "deleted" ? Promise.resolve({ kind: "absent" }) : readWorkTree(repoRoot, entry.path)
+    status === "added" || !oldCommit ? Promise.resolve({ kind: "absent" }) : readBlob(repoRoot, oldCommit, entry.oldPath ?? entry.path),
+    status === "deleted" ? Promise.resolve({ kind: "absent" }) : headCommit ? readBlob(repoRoot, headCommit, entry.path) : readWorkTree(repoRoot, entry.path)
   ]);
   const binary = parsed.binary || oldC.kind === "binary" || newC.kind === "binary";
   let oldLines = oldC.kind === "text" ? splitLines(oldC.text) : null;
@@ -37207,11 +37259,12 @@ function comment(author, body, status) {
   return { id: newId(), author, body, status, activity: null, createdAt: (/* @__PURE__ */ new Date()).toISOString() };
 }
 function buildPrompt(thread) {
-  const { path: path5, side, start, end } = thread.anchor;
+  const { path: path5, side, start, end, commit } = thread.anchor;
   const lines = start === end ? `line ${start}` : `lines ${start}-${end}`;
+  const version2 = commit ? ` as of commit ${commit}. The files on disk are the working tree and can differ from that commit` : side === "new" ? " in the working tree" : "";
   const history = thread.comments.filter((c) => c.status === "done").map((c) => `${c.author === "user" ? "User" : "Claude"}: ${c.body}`).join("\n\n");
   return [
-    `The user is reviewing the code changes in a diff viewer. They selected ${lines} of the ${side} version of ${path5} and wrote in a comment thread on them.`,
+    `The user is reviewing the code changes in a diff viewer. They selected ${lines} of the ${side} version of ${path5}${version2}. They wrote in a comment thread on these lines.`,
     "Answer the last comment directly and concisely, in the language it is written in, using Markdown. You can read files to check details, but do not change anything.",
     "",
     "Selected lines:",
@@ -37265,12 +37318,12 @@ var ReviewServer = class {
     this.server?.close();
     this.server = null;
   }
-  addView(repo, base, review, cwd, session) {
+  addView(repo, compare, review, cwd, session) {
     let id;
     do
       id = Array.from({ length: 5 }, () => String.fromCharCode(97 + randomInt(26))).join("");
     while (this.views.has(id));
-    const view = { id, repo, base, review };
+    const view = { id, repo, compare, review };
     this.views.set(view.id, view);
     let threads = this.repos.get(repo);
     if (!threads) {
@@ -37292,8 +37345,8 @@ var ReviewServer = class {
     if (host !== `127.0.0.1:${this.port}` && host !== `localhost:${this.port}`) {
       return sendText(res, 403, "Forbidden host");
     }
-    const { pathname } = new URL(req.url ?? "/", "http://127.0.0.1");
-    const api = /^\/api\/views\/([\w-]+)\/(diff|events|threads)(?:\/([\w-]+)\/comments)?$/.exec(pathname);
+    const { pathname, searchParams } = new URL(req.url ?? "/", "http://127.0.0.1");
+    const api = /^\/api\/views\/([\w-]+)\/(diff|events|refs|threads)(?:\/([\w-]+)\/comments)?$/.exec(pathname);
     if (api) {
       const view = this.views.get(api[1]);
       if (!view) return sendJson(res, 404, { error: "Unknown view. Ask Claude to open the viewer again." });
@@ -37302,9 +37355,16 @@ var ReviewServer = class {
       const threadId = api[3];
       if (req.method === "GET" && route === "diff" && !threadId) {
         try {
-          const diff = await computeDiff(view.repo, view.base);
-          const data = { diff, review: view.review, threads: threads.threads };
+          const diff = await computeDiff(view.repo, comparisonFrom(searchParams) ?? view.compare);
+          const data = { diff, opened: view.compare, review: view.review, threads: threads.threads };
           return sendJson(res, 200, data);
+        } catch (err) {
+          return sendJson(res, 500, { error: errorMessage(err) });
+        }
+      }
+      if (req.method === "GET" && route === "refs" && !threadId) {
+        try {
+          return sendJson(res, 200, await listRefs(view.repo));
         } catch (err) {
           return sendJson(res, 500, { error: errorMessage(err) });
         }
@@ -37387,6 +37447,11 @@ async function readJson(req, limit = 256 * 1024) {
     return null;
   }
 }
+function comparisonFrom(params) {
+  const base = params.get("base");
+  if (!base) return null;
+  return { base, head: params.get("head") || null, threeDot: params.get("dots") !== "2" };
+}
 function isText(value, max, nonEmpty = false) {
   return typeof value === "string" && value.length <= max && (!nonEmpty || value.trim() !== "");
 }
@@ -37394,7 +37459,7 @@ function isAnchor(value) {
   if (value === null || typeof value !== "object") return false;
   const a = value;
   const line = (n) => Number.isInteger(n) && n > 0;
-  return isText(a.path, 4096, true) && (a.side === "old" || a.side === "new") && line(a.start) && line(a.end) && a.start <= a.end;
+  return isText(a.path, 4096, true) && (a.side === "old" || a.side === "new") && line(a.start) && line(a.end) && a.start <= a.end && (a.commit === null || typeof a.commit === "string" && /^[0-9a-f]{40,64}$/.test(a.commit));
 }
 function sendJson(res, status, body) {
   res.writeHead(status, {
@@ -37416,11 +37481,17 @@ function errorMessage(err) {
 var MAX_CHARS = 6e4;
 var MAX_LINES_PER_CHANGE = 40;
 var MAX_LINE_CHARS = 300;
+var MAX_COMMITS_LISTED = 100;
 function formatChanges(diff) {
   const count = diff.files.reduce((n, f) => n + changeIds(f).length, 0);
   const out = [`${summarize(diff)}, ${count} change${count === 1 ? "" : "s"}. Each change starts with its id.`];
   let size = 0;
   let omitted = 0;
+  if (diff.commits.length) {
+    const shown = diff.commits.slice(-MAX_COMMITS_LISTED);
+    out.push("", diff.commitCount > shown.length ? `Commits (newest ${shown.length} of ${diff.commitCount}, oldest first):` : "Commits, oldest first:");
+    for (const c of shown) out.push(`  ${c.sha.slice(0, 7)} ${c.subject}`);
+  }
   for (const f of diff.files) {
     const stat = f.binary ? "binary" : `+${f.additions} -${f.deletions}`;
     out.push("", `${f.oldPath ? `${f.oldPath} -> ` : ""}${f.path} (${f.status}, ${stat})`);
@@ -37469,8 +37540,8 @@ function getServer() {
   return serverPromise;
 }
 var SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-async function openViewer(repo, base, focus, topics, session) {
-  const diff = await computeDiff(repo, base);
+async function openViewer(repo, compare, focus, topics, session) {
+  const diff = await computeDiff(repo, compare);
   let review = null;
   let note = "";
   if (topics) {
@@ -37485,7 +37556,7 @@ ${unassigned.length} change(s) are in no topic and appear under "Other changes":
     review = { focus: focus?.trim() || null, topics };
   }
   const server = await getServer();
-  const view = server.addView(diff.repoRoot, base, review, repo, session && SESSION_ID.test(session) ? session : null);
+  const view = server.addView(diff.repoRoot, compare, review, repo, session && SESSION_ID.test(session) ? session : null);
   return `${server.url(view)}
 ${summarize(diff)}${note}`;
 }
@@ -37495,24 +37566,33 @@ async function shutdown() {
   process.exit(0);
 }
 async function runHttpOnly(base) {
-  console.error(await openViewer(process.cwd(), base));
+  console.error(await openViewer(process.cwd(), { base, head: null, threeDot: true }));
   process.on("SIGINT", () => void shutdown());
 }
 async function runMcp() {
   const mcp = new McpServer({ name: "diff-review", version: VERSION });
   const repo = external_exports.string().optional().describe("Absolute path of a directory inside the git repository. Defaults to the server's working directory.");
-  const base = external_exports.string().optional().describe("Git ref to compare the working tree against, such as HEAD, main, HEAD~3, a tag or a commit. Defaults to HEAD.");
+  const base = external_exports.string().optional().describe("Git ref for the old side, such as HEAD, main, HEAD~3, a tag or a commit. Defaults to HEAD.");
+  const head = external_exports.string().optional().describe("Git ref for the new side. Omit it to compare the working tree, with staged, unstaged and untracked changes.");
+  const threeDot = external_exports.boolean().optional().describe(
+    "true (the default) compares from the merge base of base and head, like GitHub's base...head, so only the changes made on head's side show. false compares base with head directly, like git diff base..head."
+  );
+  const comparison = (args) => ({
+    base: args.base ?? "HEAD",
+    head: args.head ?? null,
+    threeDot: args.threeDot ?? true
+  });
   mcp.registerTool(
     "list_changes",
     {
       title: "List changes",
-      description: "List every change in the working tree (staged, unstaged and untracked) compared with a base ref, each with a stable id and its removed and added lines. Use the ids to group changes into topics for open_diff_viewer.",
-      inputSchema: { repo, base },
+      description: "List every change between a base ref and either the working tree (staged, unstaged and untracked) or a head ref, each with a stable id and its removed and added lines, and the commits in between. Use the ids to group changes into topics for open_diff_viewer.",
+      inputSchema: { repo, base, head, threeDot },
       annotations: { readOnlyHint: true, openWorldHint: false }
     },
     async (args) => {
       try {
-        const diff = await computeDiff(args.repo ?? process.cwd(), args.base ?? "HEAD");
+        const diff = await computeDiff(args.repo ?? process.cwd(), comparison(args));
         return { content: [{ type: "text", text: formatChanges(diff) }] };
       } catch (err) {
         return { content: [{ type: "text", text: `Could not list changes: ${errorMessage(err)}` }], isError: true };
@@ -37523,10 +37603,12 @@ async function runMcp() {
     "open_diff_viewer",
     {
       title: "Open diff viewer",
-      description: "Open a GitHub-style diff viewer in the user's browser for a git repository: the working tree compared with a base ref. With topics, the page also shows the changes grouped by topic with your explanation of each. Returns a local URL to give to the user.",
+      description: "Open a GitHub-style diff viewer in the user's browser for a git repository: the working tree or a head ref compared with a base ref. The user can pick other branches, tags and commits to compare in the page. With topics, the page also shows the changes grouped by topic with your explanation of each. Returns a local URL to give to the user.",
       inputSchema: {
         repo,
         base,
+        head,
+        threeDot,
         focus: external_exports.string().optional().describe("What the user wants to review, in their words."),
         session: external_exports.string().optional().describe("The current Claude Code session id. @claude questions in the page continue a fork of this session."),
         topics: external_exports.array(
@@ -37543,7 +37625,7 @@ async function runMcp() {
     async (args) => {
       try {
         const topics = args.topics?.map((t) => ({ ...t, related: t.related ?? true }));
-        const text = await openViewer(args.repo ?? process.cwd(), args.base ?? "HEAD", args.focus, topics, args.session);
+        const text = await openViewer(args.repo ?? process.cwd(), comparison(args), args.focus, topics, args.session);
         return { content: [{ type: "text", text }] };
       } catch (err) {
         return { content: [{ type: "text", text: `Could not open the diff viewer: ${errorMessage(err)}` }], isError: true };
@@ -37572,11 +37654,12 @@ ${r.threads.map(formatThread).join("\n\n")}`).join("\n\n") : "No review comments
   await mcp.connect(new StdioServerTransport());
 }
 function formatThread(t) {
-  const { path: path5, side, start, end } = t.anchor;
+  const { path: path5, side, start, end, commit } = t.anchor;
   const range = start === end ? `line ${start}` : `lines ${start}-${end}`;
+  const version2 = commit ? ` at commit ${commit}` : side === "new" ? " in the working tree" : "";
   const snippet = t.snippet.split("\n").slice(0, 8).map((l) => `  > ${l}`);
   const comments = t.comments.filter((c) => c.status === "done").map((c) => `  ${c.author === "user" ? "User" : "Claude"}: ${c.body.replace(/\n/g, "\n    ")}`);
-  return [`${path5}, ${side} ${range}`, ...snippet, ...comments].join("\n");
+  return [`${path5}, ${side} ${range}${version2}`, ...snippet, ...comments].join("\n");
 }
 var httpOnly = process.argv.indexOf("--http-only");
 if (httpOnly >= 0) {

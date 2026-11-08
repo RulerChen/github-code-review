@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { buildHunks, splitLines } from "../shared/hunks";
 import type { Block, DisplayHunk, Expansion, FileDiff } from "../shared/types";
-import { ThreadView, useComments } from "./comments";
+import { onShownVersion, ThreadView, useComments } from "./comments";
 import { DiffTable, hasLine, type OnExpand } from "./DiffTable";
 import { highlight, languageFor, type TokenLines } from "./highlight";
 
@@ -40,8 +40,10 @@ export function FileCard({ file, blocks = file.blocks, anchor, viewed = false, o
     setExpansion((e) => ({ ...e, [dir]: { ...e[dir], [id]: (e[dir][id] ?? 0) + lines } }));
 
   const lineCount = baseHunks.reduce((s, h) => s + h.lines.length, 0);
-  const { threadsFor } = useComments();
-  const unplaced = partial ? [] : threadsFor(file.path).filter((t) => !hasLine(hunks, t.anchor.side, t.anchor.end));
+  const { threadsFor, versions } = useComments();
+  const unplaced = partial
+    ? []
+    : threadsFor(file.path).filter((t) => !onShownVersion(t, versions) || !hasLine(hunks, t.anchor.side, t.anchor.end));
   const additions = partial ? countLines(hunks, "add") : file.additions;
   const deletions = partial ? countLines(hunks, "del") : file.deletions;
   const deferred = lineCount > LARGE_DIFF_LINES && !forceLoad;
@@ -83,7 +85,7 @@ export function FileCard({ file, blocks = file.blocks, anchor, viewed = false, o
             <div className="unplaced">
               <p className="file-note inline">Comments on lines not shown in this diff</p>
               {unplaced.map((t) => (
-                <ThreadView key={t.id} thread={t} />
+                <ThreadView key={t.id} thread={t} withVersion />
               ))}
             </div>
           )}
