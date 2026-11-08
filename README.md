@@ -17,7 +17,7 @@ In a git repository, run `/diff-review:review` to compare the working tree with 
 
 At the top of the page, pick other branches, tags or commits to compare, swap them, or switch between `...` and `..`. The Commits tab lists the commits in the range, and clicking one shows only its changes. Claude's topics belong to the comparison Claude opened, and the Topics tab takes you back to it.
 
-Click a line number to leave a comment. Drag across line numbers, or shift-click a second one, to comment on a range. Write `@claude` in it and Claude answers in the thread, continuing a copy of your conversation that can read files but not change them. Ask Claude in the terminal to address your review comments and it reads them from the page.
+Click a line number to leave a comment. Drag across line numbers, or shift-click a second one, to comment on a range. Write `@claude` in it and Claude answers in the thread right away, continuing a copy of your conversation that can read files but not change them. Comments without `@claude` wait in your review, marked Pending. When you have left them all, press Submit review, optionally with a comment on the whole review. Claude in the terminal is waiting for it in the background: it makes the changes, replies on each thread with what it changed, and waits for your next review. Press Refresh to see the new diff.
 
 Press the speech bubble in the top bar, or `c`, to see every conversation in one list. Answers from Claude you have not seen are marked new until their thread is on screen, and `u` jumps to the next one. Press `?` for all keyboard shortcuts: `j` and `k` move between files or topics, `n` and `p` between conversations, `r` replies and `v` marks a file viewed.
 

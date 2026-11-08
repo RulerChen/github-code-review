@@ -867,6 +867,51 @@ button {
   color: var(--accent);
 }
 
+.pending-label {
+  flex: none;
+  margin-left: 8px;
+  padding: 0 7px;
+  border: 1px solid var(--attention);
+  border-radius: 2em;
+  color: var(--attention);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 18px;
+}
+
+.review-menu {
+  position: relative;
+}
+
+.review-menu > .button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.review-menu > .button.primary .counter {
+  background: #ffffff33;
+}
+
+.review-popover {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 30;
+  width: 420px;
+  max-width: calc(100vw - 32px);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg);
+  box-shadow: var(--overlay-shadow);
+}
+
+.review-sent {
+  margin: 0;
+  padding: 12px;
+}
+
 .comment-activity {
   margin: 0;
   color: var(--fg-muted);

@@ -38,21 +38,36 @@ export async function fetchRefs(viewId: string): Promise<RefList> {
   return { branches: body.branches, tags: body.tags ?? [], commits: body.commits ?? [] };
 }
 
-async function postJson(url: string, payload: unknown): Promise<Thread> {
+async function postJson<T>(url: string, payload: unknown, ok: (body: Partial<T>) => boolean): Promise<T> {
   const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
-  const body = (await res.json().catch(() => null)) as { thread?: Thread; error?: string } | null;
-  if (!res.ok || !body?.thread) throw new ApiError(body?.error ?? `HTTP ${res.status}`, res.status);
-  return body.thread;
+  const body = (await res.json().catch(() => null)) as (Partial<T> & { error?: string }) | null;
+  if (!res.ok || !body || !ok(body)) throw new ApiError(body?.error ?? `HTTP ${res.status}`, res.status);
+  return body as T;
 }
 
-export function createThread(viewId: string, anchor: ThreadAnchor, snippet: string, body: string): Promise<Thread> {
-  return postJson(`/api/views/${encodeURIComponent(viewId)}/threads`, { anchor, snippet, body });
+const hasThread = (b: Partial<{ thread: Thread }>) => b.thread !== undefined;
+
+export async function createThread(viewId: string, anchor: ThreadAnchor, snippet: string, body: string): Promise<Thread> {
+  return (await postJson(`/api/views/${encodeURIComponent(viewId)}/threads`, { anchor, snippet, body }, hasThread)).thread;
 }
 
-export function replyToThread(viewId: string, threadId: string, body: string): Promise<Thread> {
-  return postJson(`/api/views/${encodeURIComponent(viewId)}/threads/${encodeURIComponent(threadId)}/comments`, { body });
+export async function replyToThread(viewId: string, threadId: string, body: string): Promise<Thread> {
+  const url = `/api/views/${encodeURIComponent(viewId)}/threads/${encodeURIComponent(threadId)}/comments`;
+  return (await postJson(url, { body }, hasThread)).thread;
+}
+
+export interface SubmitResult {
+  review: number;
+  /** Whether Claude was waiting for the review and has been woken to address it. */
+  delivered: boolean;
+  threads: Thread[];
+}
+
+/** Submits every draft comment, with an optional comment on the whole review. */
+export function submitReview(viewId: string, body: string): Promise<SubmitResult> {
+  return postJson<SubmitResult>(`/api/views/${encodeURIComponent(viewId)}/review`, { body }, (b) => Array.isArray(b.threads));
 }

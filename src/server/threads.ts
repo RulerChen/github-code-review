@@ -1,19 +1,28 @@
 import { randomBytes } from "node:crypto";
+import { MENTION } from "../shared/comments.js";
 import type { Thread, ThreadAnchor, ThreadComment } from "../shared/types.js";
 import { ask } from "./claude.js";
 
-const MENTION = /(^|\s)@claude\b/i;
 const EMIT_INTERVAL_MS = 100;
 
 const newId = () => randomBytes(6).toString("base64url");
 
+/** The draft comments the user submitted at once, with an optional comment on the whole review. */
+export interface Submission {
+  n: number;
+  body: string;
+  submittedAt: string;
+}
+
 export class RepoThreads {
   readonly threads: Thread[] = [];
+  readonly submissions: Submission[] = [];
   cwd: string;
   parentSession: string | null = null;
   private fork: { parent: string | null; session: string } | null = null;
   private queue: Promise<void> = Promise.resolve();
   private readonly listeners = new Set<(thread: Thread) => void>();
+  private readonly waiters = new Set<(s: Submission) => void>();
 
   constructor(cwd: string) {
     this.cwd = cwd;
@@ -38,14 +47,57 @@ export class RepoThreads {
     return thread;
   }
 
+  /** A reply from the Claude Code session that addressed the review. */
+  replyFromSession(threadId: string, body: string): boolean {
+    const thread = this.threads.find((t) => t.id === threadId);
+    if (!thread) return false;
+    thread.comments.push(comment("claude", body, "done"));
+    this.emit(thread);
+    return true;
+  }
+
+  /** Submits every draft comment as one review and wakes whoever waits for it. Null when there is nothing to submit. */
+  submit(body: string): { submission: Submission; delivered: boolean; threads: Thread[] } | null {
+    const changed = this.threads.filter((t) => t.comments.some((c) => c.draft));
+    if (!changed.length && !body) return null;
+    const submission: Submission = { n: this.submissions.length + 1, body, submittedAt: new Date().toISOString() };
+    this.submissions.push(submission);
+    for (const t of changed) {
+      for (const c of t.comments) {
+        if (!c.draft) continue;
+        c.draft = false;
+        c.review = submission.n;
+      }
+      this.emit(t);
+    }
+    const delivered = this.waiters.size > 0;
+    for (const wake of this.waiters) wake(submission);
+    this.waiters.clear();
+    return { submission, delivered, threads: changed };
+  }
+
+  /** Calls onReview once a review numbered above `after` is submitted, right away if one already is. Returns a function that stops waiting. */
+  waitForReview(after: number, onReview: (s: Submission) => void): () => void {
+    const latest = this.submissions.at(-1);
+    if (latest && latest.n > after) {
+      onReview(latest);
+      return () => {};
+    }
+    this.waiters.add(onReview);
+    return () => this.waiters.delete(onReview);
+  }
+
   private emit(thread: Thread): void {
     thread.rev++;
     for (const fn of this.listeners) fn(thread);
   }
 
   private addComment(thread: Thread, body: string): void {
-    thread.comments.push(comment("user", body, "done"));
-    if (MENTION.test(body)) this.answer(thread);
+    const asking = MENTION.test(body);
+    const c = comment("user", body, "done");
+    c.draft = !asking;
+    thread.comments.push(c);
+    if (asking) this.answer(thread);
     this.emit(thread);
   }
 
@@ -103,7 +155,7 @@ export class RepoThreads {
 }
 
 function comment(author: ThreadComment["author"], body: string, status: ThreadComment["status"]): ThreadComment {
-  return { id: newId(), author, body, status, activity: null, createdAt: new Date().toISOString() };
+  return { id: newId(), author, body, status, activity: null, createdAt: new Date().toISOString(), draft: false, review: null };
 }
 
 function buildPrompt(thread: Thread): string {

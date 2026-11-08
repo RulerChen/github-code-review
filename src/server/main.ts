@@ -5,10 +5,10 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { computeDiff, summarize } from "../engine/diff.js";
-import type { Comparison, Review, Thread, Topic } from "../shared/types.js";
+import type { Comparison, Review, Topic } from "../shared/types.js";
 import { stopAll } from "./claude.js";
 import { errorMessage, ReviewServer } from "./http.js";
-import { checkTopics, formatChanges } from "./review.js";
+import { checkTopics, formatChanges, formatReviewComments } from "./review.js";
 
 const DIST_DIR = path.dirname(fileURLToPath(import.meta.url));
 const UI_DIR = path.join(DIST_DIR, "ui");
@@ -45,7 +45,7 @@ async function openViewer(repo: string, compare: Comparison, focus?: string, top
 
   const server = await getServer();
   const view = server.addView(diff.repoRoot, compare, review, repo, session && SESSION_ID.test(session) ? session : null);
-  return `${server.url(view)}\n${summarize(diff)}${note}`;
+  return `${server.url(view)}\n${summarize(diff)}${note}\nWait for the user's review in the background with: ${server.waitCommand(view)}`;
 }
 
 async function shutdown(): Promise<never> {
@@ -157,33 +157,68 @@ async function runMcp(): Promise<void> {
     {
       title: "Get review comments",
       description:
-        "Read the comment threads the user left on lines in the diff viewer, with the selected lines and any " +
-        "answers from @claude. Use it when the user asks you to address their review comments.",
-      inputSchema: {},
+        "Read the review the user submitted in the diff viewer: their comment on the whole review and each comment " +
+        "thread with its id, the selected lines and the earlier comments, plus draft comments they have not submitted " +
+        "yet. Use it when the wait command from open_diff_viewer finishes, or when the user asks you to address their " +
+        "review comments.",
+      inputSchema: {
+        after: z
+          .number()
+          .int()
+          .min(0)
+          .optional()
+          .describe("Read every review numbered above this one, as the wait command says. Omit it for the latest review."),
+      },
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
-    async () => {
+    async (args) => {
       const server = serverPromise ? await serverPromise : null;
-      const repos = server?.allThreads().filter((r) => r.threads.length) ?? [];
-      const text = repos.length ? repos.map((r) => `${r.repo}\n\n${r.threads.map(formatThread).join("\n\n")}`).join("\n\n") : "No review comments yet.";
-      return { content: [{ type: "text", text }] };
+      const parts = (server?.repoThreads() ?? []).flatMap(({ repo, threads, view }) => {
+        const text = formatReviewComments(threads.threads, threads.submissions, args.after ?? null);
+        if (!text) return [];
+        return [
+          `${repo}\n\n${text}\n\nWhen you have addressed it, reply on each thread with reply_to_review. Then wait for the next ` +
+            `review by running this in the background: ${server!.waitCommand(view)}`,
+        ];
+      });
+      return { content: [{ type: "text", text: parts.length ? parts.join("\n\n") : "No review comments yet." }] };
+    },
+  );
+
+  mcp.registerTool(
+    "reply_to_review",
+    {
+      title: "Reply to review",
+      description:
+        "Reply on comment threads in the diff viewer after addressing the user's review, saying what you changed or " +
+        "answering the comment. The replies show in the page.",
+      inputSchema: {
+        replies: z
+          .array(
+            z.object({
+              thread: z.string().describe("A thread id from get_review_comments."),
+              body: z.string().min(1).describe("Markdown: what you changed, or your answer."),
+            }),
+          )
+          .min(1),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+    },
+    async ({ replies }) => {
+      const repos = serverPromise ? (await serverPromise).repoThreads() : [];
+      const owner = (id: string) => repos.find((r) => r.threads.threads.some((t) => t.id === id))?.threads;
+      const unknown = replies.filter((r) => !owner(r.thread)).map((r) => r.thread);
+      if (unknown.length) {
+        return { content: [{ type: "text", text: `Unknown thread ids: ${unknown.join(", ")}. Nothing was posted.` }], isError: true };
+      }
+      for (const r of replies) owner(r.thread)!.replyFromSession(r.thread, r.body.trim());
+      return { content: [{ type: "text", text: `Replied on ${replies.length} thread${replies.length === 1 ? "" : "s"}.` }] };
     },
   );
 
   mcp.server.onclose = () => void shutdown();
   process.stdin.on("end", () => void shutdown());
   await mcp.connect(new StdioServerTransport());
-}
-
-function formatThread(t: Thread): string {
-  const { path, side, start, end, commit } = t.anchor;
-  const range = start === end ? `line ${start}` : `lines ${start}-${end}`;
-  const version = commit ? ` at commit ${commit}` : side === "new" ? " in the working tree" : "";
-  const snippet = t.snippet.split("\n").slice(0, 8).map((l) => `  > ${l}`);
-  const comments = t.comments
-    .filter((c) => c.status === "done")
-    .map((c) => `  ${c.author === "user" ? "User" : "Claude"}: ${c.body.replace(/\n/g, "\n    ")}`);
-  return [`${path}, ${side} ${range}${version}`, ...snippet, ...comments].join("\n");
 }
 
 const httpOnly = process.argv.indexOf("--http-only");

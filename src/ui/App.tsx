@@ -1,6 +1,6 @@
 import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CommitInfo, Comparison, DiffResult, FileDiff, Thread, ViewData } from "../shared/types";
-import { ApiError, comparisonFromQuery, comparisonQuery, createThread, fetchRefs, fetchView, replyToThread } from "./api";
+import { ApiError, comparisonFromQuery, comparisonQuery, createThread, fetchRefs, fetchView, replyToThread, submitReview } from "./api";
 import { type CommentsApi, CommentsContext } from "./comments";
 import { CommitList, CompareControls, refLabel, sameComparison } from "./Compare";
 import { ConversationsButton, ConversationsPanel, type Place, useConversations } from "./Conversations";
@@ -8,6 +8,7 @@ import { FileCard } from "./FileCard";
 import { comparePaths, FileTree } from "./FileTree";
 import { KeyboardButton, ShortcutHelp, stepSection, toggleSection, useShortcuts } from "./keyboard";
 import { readStorage, writeStorage } from "./storage";
+import { SubmitReview } from "./SubmitReview";
 import { buildTopics, TopicList, TopicSection, topicShows, type TopicView } from "./Topics";
 
 interface Props {
@@ -107,6 +108,14 @@ export function App({ viewId }: Props) {
       },
     };
   }, [threads, viewId, oldCommit, headCommit]);
+
+  const drafts = threads.reduce((n, t) => n + t.comments.filter((c) => c.draft).length, 0);
+  const submit = async (body: string) => {
+    if (!viewId) return false;
+    const result = await submitReview(viewId, body);
+    setThreads((prev) => mergeThreads(prev, result.threads));
+    return result.delivered;
+  };
 
   const diff = data?.diff ?? null;
   const review = data?.review ?? null;
@@ -287,6 +296,7 @@ export function App({ viewId }: Props) {
           <button className="button" onClick={() => void load(requested.current)} disabled={loading} title={updatedAt ? `Updated ${updatedAt.toLocaleTimeString()}` : undefined}>
             {loading ? "Refreshing…" : "Refresh"}
           </button>
+          <SubmitReview drafts={drafts} onSubmit={submit} />
         </header>
 
         {error && <div className="banner">{error.message}</div>}

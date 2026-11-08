@@ -75,12 +75,21 @@ export class ReviewServer {
     return view;
   }
 
-  allThreads(): { repo: string; threads: Thread[] }[] {
-    return [...this.repos].map(([repo, t]) => ({ repo, threads: t.threads }));
+  /** Each repository's threads, with the newest view opened for it. */
+  repoThreads(): { repo: string; threads: RepoThreads; view: View }[] {
+    const newest = new Map<string, View>();
+    for (const v of this.views.values()) newest.set(v.repo, v);
+    return [...this.repos].map(([repo, threads]) => ({ repo, threads, view: newest.get(repo)! }));
   }
 
   url(view: View): string {
     return `http://127.0.0.1:${this.port}/v/${view.id}`;
+  }
+
+  /** A shell command that exits once the user submits a review newer than the ones submitted so far. */
+  waitCommand(view: View): string {
+    const after = this.repos.get(view.repo)?.submissions.length ?? 0;
+    return `curl -sSf "http://127.0.0.1:${this.port}/api/views/${view.id}/wait?after=${after}"`;
   }
 
   private async handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -90,7 +99,7 @@ export class ReviewServer {
     }
 
     const { pathname, searchParams } = new URL(req.url ?? "/", "http://127.0.0.1");
-    const api = /^\/api\/views\/([\w-]+)\/(diff|events|refs|threads)(?:\/([\w-]+)\/comments)?$/.exec(pathname);
+    const api = /^\/api\/views\/([\w-]+)\/(diff|events|refs|threads|review|wait)(?:\/([\w-]+)\/comments)?$/.exec(pathname);
     if (api) {
       const view = this.views.get(api[1]!);
       if (!view) return sendJson(res, 404, { error: "Unknown view. Ask Claude to open the viewer again." });
@@ -126,6 +135,24 @@ export class ReviewServer {
         const thread = threads.reply(threadId, text.trim());
         if (!thread) return sendJson(res, 404, { error: "Unknown thread" });
         return sendJson(res, 200, { thread });
+      }
+      if (req.method === "POST" && route === "review" && !threadId) {
+        if (!this.sameOrigin(req)) return sendJson(res, 403, { error: "Cross-site request refused" });
+        const { body: text } = (await readJson(req)) ?? {};
+        if (!isText(text, 20 * 1024)) return sendJson(res, 400, { error: "Invalid review" });
+        const result = threads.submit(text.trim());
+        if (!result) return sendJson(res, 400, { error: "Nothing to submit. Leave a comment first." });
+        return sendJson(res, 200, { review: result.submission.n, delivered: result.delivered, threads: result.threads });
+      }
+      // Claude runs this with curl in the background, and the response wakes it to address the review.
+      if (req.method === "GET" && route === "wait" && !threadId) {
+        const after = Number(searchParams.get("after") ?? 0);
+        if (!Number.isInteger(after) || after < 0) return sendText(res, 400, "Invalid after");
+        const stop = threads.waitForReview(after, (s) =>
+          sendText(res, 200, `The user submitted review ${s.n}. Call get_review_comments from the diff-review MCP server with after set to ${after}.\n`),
+        );
+        res.on("close", stop);
+        return;
       }
       return sendText(res, 405, "Method not allowed");
     }

@@ -1,4 +1,5 @@
 import { createContext, type FormEvent, useContext, useEffect, useRef, useState } from "react";
+import { MENTION } from "../shared/comments";
 import type { Thread, ThreadAnchor } from "../shared/types";
 import { Markdown } from "./Markdown";
 
@@ -55,6 +56,7 @@ export const onShownVersion = (thread: Thread, versions: CommentsApi["versions"]
 
 interface FormProps {
   placeholder: string;
+  /** The label when the comment mentions @claude. Other comments go into the pending review. */
   submitLabel: string;
   onSubmit: (body: string) => Promise<void>;
   onCancel: () => void;
@@ -64,6 +66,7 @@ export function CommentForm({ placeholder, submitLabel, onSubmit, onCancel }: Fo
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const asking = MENTION.test(text);
 
   const submit = async (e?: FormEvent) => {
     e?.preventDefault();
@@ -94,12 +97,14 @@ export function CommentForm({ placeholder, submitLabel, onSubmit, onCancel }: Fo
         }}
       />
       <div className="comment-form-actions">
-        <span className="comment-hint">Mention @claude to ask Claude about these lines.</span>
+        <span className="comment-hint">
+          {asking ? "Claude answers here right away." : "Goes into your review for Claude to address. Mention @claude to ask a question instead."}
+        </span>
         <button type="button" className="button" onClick={onCancel}>
           Cancel
         </button>
         <button type="submit" className="button primary" disabled={busy || !text.trim()}>
-          {submitLabel}
+          {asking ? submitLabel : "Add review comment"}
         </button>
       </div>
       {error && <p className="comment-error">{error}</p>}
@@ -145,7 +150,10 @@ export function ThreadView({ thread, withVersion = false }: { thread: Thread; wi
       <div className="thread-head">{anchorLabel(thread.anchor, withVersion)}</div>
       {thread.comments.map((c) => (
         <div key={c.id} className={`comment comment-${c.author}`}>
-          <div className="comment-author">{c.author === "claude" ? "Claude" : "You"}</div>
+          <div className="comment-author">
+            {c.author === "claude" ? "Claude" : "You"}
+            {c.draft && <span className="pending-label">Pending</span>}
+          </div>
           {c.status === "error" ? <p className="comment-error">{c.body}</p> : c.body && <Markdown text={c.body} />}
           {c.status === "pending" && <p className="comment-activity">{c.activity ? `${c.activity}…` : "Writing…"}</p>}
         </div>

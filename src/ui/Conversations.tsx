@@ -202,7 +202,8 @@ export function ConversationsPanel({ conv }: { conv: Conversations }) {
       </header>
       {ordered.length === 0 ? (
         <p className="conversations-empty">
-          No conversations yet. Click a line number to leave a comment, and mention @claude to ask Claude about the lines.
+          No conversations yet. Click a line number to leave a comment. Mention @claude to ask about the lines, or leave
+          comments for Claude to address and press Submit review.
         </p>
       ) : (
         <ul className="conversations-list">
@@ -254,6 +255,7 @@ function ConversationItem({ thread, inDiff, current, unread, onOpen }: ItemProps
         </span>
         <span className="conv-lines">{lineLabel(thread.anchor)}</span>
       </span>
+      {thread.comments.some((c) => c.draft) && <span className="pending-label">Pending</span>}
       {unread > 0 && <span className="conv-badge">{unread} new</span>}
     </span>
   );

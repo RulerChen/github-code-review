@@ -37233,16 +37233,22 @@ import path3 from "node:path";
 
 // src/server/threads.ts
 import { randomBytes } from "node:crypto";
+
+// src/shared/comments.ts
 var MENTION = /(^|\s)@claude\b/i;
+
+// src/server/threads.ts
 var EMIT_INTERVAL_MS = 100;
 var newId = () => randomBytes(6).toString("base64url");
 var RepoThreads = class {
   threads = [];
+  submissions = [];
   cwd;
   parentSession = null;
   fork = null;
   queue = Promise.resolve();
   listeners = /* @__PURE__ */ new Set();
+  waiters = /* @__PURE__ */ new Set();
   constructor(cwd) {
     this.cwd = cwd;
   }
@@ -37262,13 +37268,54 @@ var RepoThreads = class {
     this.addComment(thread, body);
     return thread;
   }
+  /** A reply from the Claude Code session that addressed the review. */
+  replyFromSession(threadId, body) {
+    const thread = this.threads.find((t) => t.id === threadId);
+    if (!thread) return false;
+    thread.comments.push(comment("claude", body, "done"));
+    this.emit(thread);
+    return true;
+  }
+  /** Submits every draft comment as one review and wakes whoever waits for it. Null when there is nothing to submit. */
+  submit(body) {
+    const changed = this.threads.filter((t) => t.comments.some((c) => c.draft));
+    if (!changed.length && !body) return null;
+    const submission = { n: this.submissions.length + 1, body, submittedAt: (/* @__PURE__ */ new Date()).toISOString() };
+    this.submissions.push(submission);
+    for (const t of changed) {
+      for (const c of t.comments) {
+        if (!c.draft) continue;
+        c.draft = false;
+        c.review = submission.n;
+      }
+      this.emit(t);
+    }
+    const delivered = this.waiters.size > 0;
+    for (const wake of this.waiters) wake(submission);
+    this.waiters.clear();
+    return { submission, delivered, threads: changed };
+  }
+  /** Calls onReview once a review numbered above `after` is submitted, right away if one already is. Returns a function that stops waiting. */
+  waitForReview(after, onReview) {
+    const latest = this.submissions.at(-1);
+    if (latest && latest.n > after) {
+      onReview(latest);
+      return () => {
+      };
+    }
+    this.waiters.add(onReview);
+    return () => this.waiters.delete(onReview);
+  }
   emit(thread) {
     thread.rev++;
     for (const fn of this.listeners) fn(thread);
   }
   addComment(thread, body) {
-    thread.comments.push(comment("user", body, "done"));
-    if (MENTION.test(body)) this.answer(thread);
+    const asking = MENTION.test(body);
+    const c = comment("user", body, "done");
+    c.draft = !asking;
+    thread.comments.push(c);
+    if (asking) this.answer(thread);
     this.emit(thread);
   }
   answer(thread) {
@@ -37321,7 +37368,7 @@ var RepoThreads = class {
   }
 };
 function comment(author, body, status) {
-  return { id: newId(), author, body, status, activity: null, createdAt: (/* @__PURE__ */ new Date()).toISOString() };
+  return { id: newId(), author, body, status, activity: null, createdAt: (/* @__PURE__ */ new Date()).toISOString(), draft: false, review: null };
 }
 function buildPrompt(thread) {
   const { path: path5, side, start, end, commit } = thread.anchor;
@@ -37399,11 +37446,19 @@ var ReviewServer = class {
     if (session) threads.parentSession = session;
     return view;
   }
-  allThreads() {
-    return [...this.repos].map(([repo, t]) => ({ repo, threads: t.threads }));
+  /** Each repository's threads, with the newest view opened for it. */
+  repoThreads() {
+    const newest = /* @__PURE__ */ new Map();
+    for (const v of this.views.values()) newest.set(v.repo, v);
+    return [...this.repos].map(([repo, threads]) => ({ repo, threads, view: newest.get(repo) }));
   }
   url(view) {
     return `http://127.0.0.1:${this.port}/v/${view.id}`;
+  }
+  /** A shell command that exits once the user submits a review newer than the ones submitted so far. */
+  waitCommand(view) {
+    const after = this.repos.get(view.repo)?.submissions.length ?? 0;
+    return `curl -sSf "http://127.0.0.1:${this.port}/api/views/${view.id}/wait?after=${after}"`;
   }
   async handle(req, res) {
     const host = req.headers.host;
@@ -37411,7 +37466,7 @@ var ReviewServer = class {
       return sendText(res, 403, "Forbidden host");
     }
     const { pathname, searchParams } = new URL(req.url ?? "/", "http://127.0.0.1");
-    const api = /^\/api\/views\/([\w-]+)\/(diff|events|refs|threads)(?:\/([\w-]+)\/comments)?$/.exec(pathname);
+    const api = /^\/api\/views\/([\w-]+)\/(diff|events|refs|threads|review|wait)(?:\/([\w-]+)\/comments)?$/.exec(pathname);
     if (api) {
       const view = this.views.get(api[1]);
       if (!view) return sendJson(res, 404, { error: "Unknown view. Ask Claude to open the viewer again." });
@@ -37446,6 +37501,25 @@ var ReviewServer = class {
         const thread = threads.reply(threadId, text.trim());
         if (!thread) return sendJson(res, 404, { error: "Unknown thread" });
         return sendJson(res, 200, { thread });
+      }
+      if (req.method === "POST" && route === "review" && !threadId) {
+        if (!this.sameOrigin(req)) return sendJson(res, 403, { error: "Cross-site request refused" });
+        const { body: text } = await readJson(req) ?? {};
+        if (!isText(text, 20 * 1024)) return sendJson(res, 400, { error: "Invalid review" });
+        const result = threads.submit(text.trim());
+        if (!result) return sendJson(res, 400, { error: "Nothing to submit. Leave a comment first." });
+        return sendJson(res, 200, { review: result.submission.n, delivered: result.delivered, threads: result.threads });
+      }
+      if (req.method === "GET" && route === "wait" && !threadId) {
+        const after = Number(searchParams.get("after") ?? 0);
+        if (!Number.isInteger(after) || after < 0) return sendText(res, 400, "Invalid after");
+        const stop = threads.waitForReview(
+          after,
+          (s) => sendText(res, 200, `The user submitted review ${s.n}. Call get_review_comments from the diff-review MCP server with after set to ${after}.
+`)
+        );
+        res.on("close", stop);
+        return;
       }
       return sendText(res, 405, "Method not allowed");
     }
@@ -37582,6 +37656,39 @@ function formatChanges(diff) {
   if (omitted) out.push("", `The lines of ${omitted} change${omitted === 1 ? " were" : "s were"} left out to keep this short. Read the files for them.`);
   return out.join("\n");
 }
+function formatReviewComments(threads, submissions, after) {
+  const reviews = after === null ? submissions.slice(-1) : submissions.filter((s) => s.n > after);
+  const numbers = new Set(reviews.map((s) => s.n));
+  const submitted = threads.filter((t) => t.comments.some((c) => c.review !== null && numbers.has(c.review)));
+  const drafts = threads.filter((t) => t.comments.some((c) => c.draft));
+  if (!reviews.length && !drafts.length) return null;
+  const out = [];
+  for (const s of reviews) {
+    out.push(`Review ${s.n}, submitted at ${new Date(s.submittedAt).toLocaleTimeString("en-GB")}.`);
+    if (s.body) out.push("  Comment on the whole review:", indent(s.body, "    "));
+  }
+  if (reviews.length) {
+    out.push(`Comments in ${submitted.length} thread${submitted.length === 1 ? "" : "s"}:`);
+    for (const t of submitted) out.push("", formatThread(t));
+  }
+  if (drafts.length) {
+    out.push("", `Draft comments the user has not submitted yet, in ${drafts.length} thread${drafts.length === 1 ? "" : "s"}:`);
+    for (const t of drafts) out.push("", formatThread(t));
+  }
+  return out.join("\n");
+}
+function formatThread(t) {
+  const { path: path5, side, start, end, commit } = t.anchor;
+  const range = start === end ? `line ${start}` : `lines ${start}-${end}`;
+  const version2 = commit ? ` at commit ${commit}` : side === "new" ? " in the working tree" : "";
+  const snippet = t.snippet.split("\n").slice(0, 8).map((l) => `  > ${l}`);
+  const comments = t.comments.filter((c) => c.status === "done").map((c) => {
+    const who = c.author === "claude" ? "Claude" : c.draft ? "User (draft)" : c.review ? `User (review ${c.review})` : "User";
+    return `  ${who}: ${indent(c.body, "    ").trimStart()}`;
+  });
+  return [`Thread ${t.id}: ${path5}, ${side} ${range}${version2}`, ...snippet, ...comments].join("\n");
+}
+var indent = (text, prefix) => text.replace(/^/gm, prefix);
 function checkTopics(diff, topics) {
   const known = new Set(diff.files.flatMap(changeIds));
   const used = new Set(topics.flatMap((t) => t.ids));
@@ -37623,7 +37730,8 @@ ${unassigned.length} change(s) are in no topic and appear under "Other changes":
   const server = await getServer();
   const view = server.addView(diff.repoRoot, compare, review, repo, session && SESSION_ID.test(session) ? session : null);
   return `${server.url(view)}
-${summarize(diff)}${note}`;
+${summarize(diff)}${note}
+Wait for the user's review in the background with: ${server.waitCommand(view)}`;
 }
 async function shutdown() {
   stopAll();
@@ -37701,30 +37809,57 @@ async function runMcp() {
     "get_review_comments",
     {
       title: "Get review comments",
-      description: "Read the comment threads the user left on lines in the diff viewer, with the selected lines and any answers from @claude. Use it when the user asks you to address their review comments.",
-      inputSchema: {},
+      description: "Read the review the user submitted in the diff viewer: their comment on the whole review and each comment thread with its id, the selected lines and the earlier comments, plus draft comments they have not submitted yet. Use it when the wait command from open_diff_viewer finishes, or when the user asks you to address their review comments.",
+      inputSchema: {
+        after: external_exports.number().int().min(0).optional().describe("Read every review numbered above this one, as the wait command says. Omit it for the latest review.")
+      },
       annotations: { readOnlyHint: true, openWorldHint: false }
     },
-    async () => {
+    async (args) => {
       const server = serverPromise ? await serverPromise : null;
-      const repos = server?.allThreads().filter((r) => r.threads.length) ?? [];
-      const text = repos.length ? repos.map((r) => `${r.repo}
+      const parts = (server?.repoThreads() ?? []).flatMap(({ repo: repo2, threads, view }) => {
+        const text = formatReviewComments(threads.threads, threads.submissions, args.after ?? null);
+        if (!text) return [];
+        return [
+          `${repo2}
 
-${r.threads.map(formatThread).join("\n\n")}`).join("\n\n") : "No review comments yet.";
-      return { content: [{ type: "text", text }] };
+${text}
+
+When you have addressed it, reply on each thread with reply_to_review. Then wait for the next review by running this in the background: ${server.waitCommand(view)}`
+        ];
+      });
+      return { content: [{ type: "text", text: parts.length ? parts.join("\n\n") : "No review comments yet." }] };
+    }
+  );
+  mcp.registerTool(
+    "reply_to_review",
+    {
+      title: "Reply to review",
+      description: "Reply on comment threads in the diff viewer after addressing the user's review, saying what you changed or answering the comment. The replies show in the page.",
+      inputSchema: {
+        replies: external_exports.array(
+          external_exports.object({
+            thread: external_exports.string().describe("A thread id from get_review_comments."),
+            body: external_exports.string().min(1).describe("Markdown: what you changed, or your answer.")
+          })
+        ).min(1)
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false }
+    },
+    async ({ replies }) => {
+      const repos = serverPromise ? (await serverPromise).repoThreads() : [];
+      const owner = (id) => repos.find((r) => r.threads.threads.some((t) => t.id === id))?.threads;
+      const unknown2 = replies.filter((r) => !owner(r.thread)).map((r) => r.thread);
+      if (unknown2.length) {
+        return { content: [{ type: "text", text: `Unknown thread ids: ${unknown2.join(", ")}. Nothing was posted.` }], isError: true };
+      }
+      for (const r of replies) owner(r.thread).replyFromSession(r.thread, r.body.trim());
+      return { content: [{ type: "text", text: `Replied on ${replies.length} thread${replies.length === 1 ? "" : "s"}.` }] };
     }
   );
   mcp.server.onclose = () => void shutdown();
   process.stdin.on("end", () => void shutdown());
   await mcp.connect(new StdioServerTransport());
-}
-function formatThread(t) {
-  const { path: path5, side, start, end, commit } = t.anchor;
-  const range = start === end ? `line ${start}` : `lines ${start}-${end}`;
-  const version2 = commit ? ` at commit ${commit}` : side === "new" ? " in the working tree" : "";
-  const snippet = t.snippet.split("\n").slice(0, 8).map((l) => `  > ${l}`);
-  const comments = t.comments.filter((c) => c.status === "done").map((c) => `  ${c.author === "user" ? "User" : "Claude"}: ${c.body.replace(/\n/g, "\n    ")}`);
-  return [`${path5}, ${side} ${range}${version2}`, ...snippet, ...comments].join("\n");
 }
 var httpOnly = process.argv.indexOf("--http-only");
 if (httpOnly >= 0) {

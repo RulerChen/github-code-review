@@ -1,6 +1,7 @@
 import { summarize } from "../engine/diff.js";
 import { changeIds, rangeHeader } from "../shared/hunks.js";
-import type { DiffResult, Topic } from "../shared/types.js";
+import type { DiffResult, Thread, Topic } from "../shared/types.js";
+import type { Submission } from "./threads.js";
 
 const MAX_CHARS = 60_000;
 const MAX_LINES_PER_CHANGE = 40;
@@ -46,6 +47,49 @@ export function formatChanges(diff: DiffResult): string {
   if (omitted) out.push("", `The lines of ${omitted} change${omitted === 1 ? " were" : "s were"} left out to keep this short. Read the files for them.`);
   return out.join("\n");
 }
+
+/**
+ * The reviews numbered above `after`, or the latest one without it, and any draft comments not
+ * submitted yet. Null when there are neither.
+ */
+export function formatReviewComments(threads: Thread[], submissions: Submission[], after: number | null): string | null {
+  const reviews = after === null ? submissions.slice(-1) : submissions.filter((s) => s.n > after);
+  const numbers = new Set(reviews.map((s) => s.n));
+  const submitted = threads.filter((t) => t.comments.some((c) => c.review !== null && numbers.has(c.review)));
+  const drafts = threads.filter((t) => t.comments.some((c) => c.draft));
+  if (!reviews.length && !drafts.length) return null;
+
+  const out: string[] = [];
+  for (const s of reviews) {
+    out.push(`Review ${s.n}, submitted at ${new Date(s.submittedAt).toLocaleTimeString("en-GB")}.`);
+    if (s.body) out.push("  Comment on the whole review:", indent(s.body, "    "));
+  }
+  if (reviews.length) {
+    out.push(`Comments in ${submitted.length} thread${submitted.length === 1 ? "" : "s"}:`);
+    for (const t of submitted) out.push("", formatThread(t));
+  }
+  if (drafts.length) {
+    out.push("", `Draft comments the user has not submitted yet, in ${drafts.length} thread${drafts.length === 1 ? "" : "s"}:`);
+    for (const t of drafts) out.push("", formatThread(t));
+  }
+  return out.join("\n");
+}
+
+function formatThread(t: Thread): string {
+  const { path, side, start, end, commit } = t.anchor;
+  const range = start === end ? `line ${start}` : `lines ${start}-${end}`;
+  const version = commit ? ` at commit ${commit}` : side === "new" ? " in the working tree" : "";
+  const snippet = t.snippet.split("\n").slice(0, 8).map((l) => `  > ${l}`);
+  const comments = t.comments
+    .filter((c) => c.status === "done")
+    .map((c) => {
+      const who = c.author === "claude" ? "Claude" : c.draft ? "User (draft)" : c.review ? `User (review ${c.review})` : "User";
+      return `  ${who}: ${indent(c.body, "    ").trimStart()}`;
+    });
+  return [`Thread ${t.id}: ${path}, ${side} ${range}${version}`, ...snippet, ...comments].join("\n");
+}
+
+const indent = (text: string, prefix: string) => text.replace(/^/gm, prefix);
 
 export function checkTopics(diff: DiffResult, topics: Topic[]): { unknown: string[]; unassigned: string[] } {
   const known = new Set(diff.files.flatMap(changeIds));

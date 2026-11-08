@@ -91,6 +91,10 @@ export interface ThreadComment {
   status: "done" | "pending" | "error";
   activity: string | null;
   createdAt: string;
+  /** A user comment without @claude waits in the pending review until the user submits the review. */
+  draft: boolean;
+  /** The number of the review the comment was submitted with. */
+  review: number | null;
 }
 
 export interface Thread {
