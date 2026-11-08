@@ -3262,8 +3262,8 @@ var require_utils = __commonJS({
       }
       return ind;
     }
-    function removeDotSegments(path4) {
-      let input2 = path4;
+    function removeDotSegments(path5) {
+      let input2 = path5;
       const output2 = [];
       let nextSlash = -1;
       let len = 0;
@@ -3337,11 +3337,11 @@ var require_utils = __commonJS({
       }
       return output2.join("");
     }
-    function removeDotSegmentsRelative(path4) {
-      if (path4 === "" || path4[0] === "/") {
-        return removeDotSegments(path4);
+    function removeDotSegmentsRelative(path5) {
+      if (path5 === "" || path5[0] === "/") {
+        return removeDotSegments(path5);
       }
-      const segments = path4.split("/");
+      const segments = path5.split("/");
       const last = segments.length - 1;
       const output2 = [];
       let trailingDirectory = false;
@@ -3704,8 +3704,8 @@ var require_schemes = __commonJS({
       }
       if (wsComponent.resourceName) {
         const queryIndex = wsComponent.resourceName.indexOf("?");
-        const path4 = queryIndex === -1 ? wsComponent.resourceName : wsComponent.resourceName.slice(0, queryIndex);
-        wsComponent.path = path4 && path4 !== "/" ? path4 : void 0;
+        const path5 = queryIndex === -1 ? wsComponent.resourceName : wsComponent.resourceName.slice(0, queryIndex);
+        wsComponent.path = path5 && path5 !== "/" ? path5 : void 0;
         wsComponent.query = queryIndex === -1 ? void 0 : wsComponent.resourceName.slice(queryIndex + 1);
         wsComponent.resourceName = void 0;
       }
@@ -7257,7 +7257,7 @@ var require_dist = __commonJS({
 
 // src/server/main.ts
 import { readFileSync } from "node:fs";
-import path3 from "node:path";
+import path4 from "node:path";
 import { fileURLToPath } from "node:url";
 
 // node_modules/zod/v3/helpers/util.js
@@ -7634,8 +7634,8 @@ function getErrorMap() {
 
 // node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
-  const { data, path: path4, errorMaps, issueData } = params;
-  const fullPath = [...path4, ...issueData.path || []];
+  const { data, path: path5, errorMaps, issueData } = params;
+  const fullPath = [...path5, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -7750,11 +7750,11 @@ var errorUtil;
 
 // node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
-  constructor(parent, value, path4, key) {
+  constructor(parent, value, path5, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path4;
+    this._path = path5;
     this._key = key;
   }
   get path() {
@@ -11709,10 +11709,10 @@ function mergeDefs(...defs) {
 function cloneDef(schema) {
   return mergeDefs(schema._zod.def);
 }
-function getElementAtPath(obj, path4) {
-  if (!path4)
+function getElementAtPath(obj, path5) {
+  if (!path5)
     return obj;
-  return path4.reduce((acc, key) => acc?.[key], obj);
+  return path5.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -12052,11 +12052,11 @@ function explicitlyAborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path4, issues) {
+function prefixIssues(path5, issues) {
   return issues.map((iss) => {
     var _a3;
     (_a3 = iss).path ?? (_a3.path = []);
-    iss.path.unshift(path4);
+    iss.path.unshift(path5);
     return iss;
   });
 }
@@ -12518,16 +12518,16 @@ function flattenError(error62, mapper = (issue2) => issue2.message) {
 }
 function formatError(error62, mapper = (issue2) => issue2.message) {
   const fieldErrors = { _errors: [] };
-  const processError = (error63, path4 = []) => {
+  const processError = (error63, path5 = []) => {
     for (const issue2 of error63.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path4, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path5, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path4, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path5, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path4, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path5, ...issue2.path]);
       } else {
-        const fullpath = [...path4, ...issue2.path];
+        const fullpath = [...path5, ...issue2.path];
         if (fullpath.length === 0) {
           fieldErrors._errors.push(mapper(issue2));
         } else {
@@ -12566,17 +12566,17 @@ function formatError(error62, mapper = (issue2) => issue2.message) {
 }
 function treeifyError(error62, mapper = (issue2) => issue2.message) {
   const result = { errors: [] };
-  const processError = (error63, path4 = []) => {
+  const processError = (error63, path5 = []) => {
     var _a3;
     for (const issue2 of error63.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path4, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path5, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path4, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path5, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path4, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path5, ...issue2.path]);
       } else {
-        const fullpath = [...path4, ...issue2.path];
+        const fullpath = [...path5, ...issue2.path];
         if (fullpath.length === 0) {
           result.errors.push(mapper(issue2));
           continue;
@@ -12615,8 +12615,8 @@ function treeifyError(error62, mapper = (issue2) => issue2.message) {
 }
 function toDotPath(_path) {
   const segs = [];
-  const path4 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
-  for (const seg of path4) {
+  const path5 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
+  for (const seg of path5) {
     if (typeof seg === "number")
       segs.push(`[${seg}]`);
     else if (typeof seg === "symbol")
@@ -28167,11 +28167,11 @@ function normalizeObjectSchema(schema) {
   }
   return void 0;
 }
-function getDotPath(path4) {
-  if (path4.length === 0) {
+function getDotPath(path5) {
+  if (path5.length === 0) {
     return "object root";
   }
-  return path4.reduce((acc, seg, index) => {
+  return path5.reduce((acc, seg, index) => {
     if (index === 0) {
       return String(seg);
     }
@@ -30398,13 +30398,13 @@ function resolveRef(ref, ctx) {
   if (!ref.startsWith("#")) {
     throw new Error("External $ref is not supported, only local refs (#/...) are allowed");
   }
-  const path4 = ref.slice(1).split("/").filter(Boolean);
-  if (path4.length === 0) {
+  const path5 = ref.slice(1).split("/").filter(Boolean);
+  if (path5.length === 0) {
     return ctx.rootSchema;
   }
   const defsKey = ctx.version === "draft-2020-12" ? "$defs" : "definitions";
-  if (path4[0] === defsKey) {
-    const key = path4[1] === void 0 ? void 0 : decodeJSONPointerSegment(path4[1]);
+  if (path5[0] === defsKey) {
+    const key = path5[1] === void 0 ? void 0 : decodeJSONPointerSegment(path5[1]);
     if (!key || !ctx.defs[key]) {
       throw new Error(`Reference not found: ${ref}`);
     }
@@ -37013,11 +37013,208 @@ async function mapLimit(items, limit, fn) {
   return out;
 }
 
+// src/server/claude.ts
+import { spawn } from "node:child_process";
+import path2 from "node:path";
+import { createInterface } from "node:readline";
+var TIMEOUT_MS = 5 * 60 * 1e3;
+var running = /* @__PURE__ */ new Set();
+function stopAll() {
+  for (const child of running) child.kill();
+}
+function ask(o) {
+  const args = [
+    "-p",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--include-partial-messages",
+    "--tools",
+    "Read,Grep,Glob",
+    "--strict-mcp-config",
+    "--mcp-config",
+    '{"mcpServers":{}}'
+  ];
+  if (o.resume) args.push("--resume", o.resume);
+  if (o.resume && o.fork) args.push("--fork-session");
+  return new Promise((resolve, reject) => {
+    const child = spawn("claude", args, { cwd: o.cwd, stdio: ["pipe", "pipe", "pipe"] });
+    running.add(child);
+    const timer = setTimeout(() => child.kill(), TIMEOUT_MS);
+    let settled = false;
+    let sessionId = null;
+    let result = null;
+    let failure2 = null;
+    let streamed = "";
+    let stderr = "";
+    const finish = (err) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      running.delete(child);
+      if (err) reject(err);
+      else if (result !== null) resolve({ sessionId, text: result });
+      else reject(new Error(failure2 ?? (stderr.trim() || "Claude stopped without an answer.")));
+    };
+    child.stderr.on("data", (d) => {
+      stderr = (stderr + d.toString("utf8")).slice(-2e3);
+    });
+    createInterface({ input: child.stdout }).on("line", (line) => {
+      let m;
+      try {
+        m = JSON.parse(line);
+      } catch {
+        return;
+      }
+      if (m.session_id) sessionId = m.session_id;
+      if (m.type === "stream_event") {
+        if (m.event?.type === "message_start") streamed = "";
+        if (m.event?.type === "content_block_delta" && m.event.delta?.type === "text_delta") {
+          streamed += m.event.delta.text ?? "";
+          o.onText(streamed);
+        }
+      } else if (m.type === "assistant") {
+        for (const c of m.message?.content ?? []) {
+          if (c.type === "tool_use") o.onActivity(describe3(o.cwd, c.name ?? "", c.input ?? {}));
+        }
+      } else if (m.type === "result") {
+        if (m.is_error || m.subtype !== "success") failure2 = m.result || `Claude stopped: ${m.subtype ?? "error"}`;
+        else result = m.result ?? streamed;
+      }
+    });
+    child.on("error", (err) => {
+      finish(new Error(err.code === "ENOENT" ? "The claude command was not found on PATH." : err.message));
+    });
+    child.on("close", () => finish(null));
+    child.stdin.end(o.prompt);
+  });
+}
+function describe3(cwd, tool, input2) {
+  const str = (k) => typeof input2[k] === "string" ? input2[k] : "";
+  if (tool === "Read") return `Reading ${path2.relative(cwd, str("file_path")) || str("file_path")}`;
+  if (tool === "Grep") return `Searching for ${str("pattern")}`;
+  if (tool === "Glob") return `Looking for ${str("pattern")}`;
+  return `Using ${tool}`;
+}
+
 // src/server/http.ts
-import { randomBytes } from "node:crypto";
+import { randomBytes as randomBytes2 } from "node:crypto";
 import { readFile as readFile2 } from "node:fs/promises";
 import { createServer } from "node:http";
-import path2 from "node:path";
+import path3 from "node:path";
+
+// src/server/threads.ts
+import { randomBytes } from "node:crypto";
+var MENTION = /(^|\s)@claude\b/i;
+var EMIT_INTERVAL_MS = 100;
+var newId = () => randomBytes(6).toString("base64url");
+var RepoThreads = class {
+  threads = [];
+  cwd;
+  parentSession = null;
+  forkSession = null;
+  queue = Promise.resolve();
+  listeners = /* @__PURE__ */ new Set();
+  constructor(cwd) {
+    this.cwd = cwd;
+  }
+  subscribe(fn) {
+    this.listeners.add(fn);
+    return () => this.listeners.delete(fn);
+  }
+  create(anchor2, snippet, body) {
+    const thread = { id: newId(), anchor: anchor2, snippet, comments: [] };
+    this.threads.push(thread);
+    this.addComment(thread, body);
+    return thread;
+  }
+  reply(threadId, body) {
+    const thread = this.threads.find((t) => t.id === threadId);
+    if (!thread) return null;
+    this.addComment(thread, body);
+    return thread;
+  }
+  emit(thread) {
+    for (const fn of this.listeners) fn(thread);
+  }
+  addComment(thread, body) {
+    thread.comments.push(comment("user", body, "done"));
+    if (MENTION.test(body)) this.answer(thread);
+    this.emit(thread);
+  }
+  answer(thread) {
+    const prompt = buildPrompt(thread);
+    const reply = comment("claude", "", "pending");
+    reply.activity = "Waiting";
+    thread.comments.push(reply);
+    this.queue = this.queue.then(() => this.run(thread, reply, prompt));
+  }
+  async run(thread, reply, prompt) {
+    reply.activity = "Thinking";
+    this.emit(thread);
+    let last = 0;
+    const onText = (text) => {
+      reply.body = text;
+      reply.activity = null;
+      if (Date.now() - last > EMIT_INTERVAL_MS) {
+        last = Date.now();
+        this.emit(thread);
+      }
+    };
+    const onActivity = (activity) => {
+      reply.activity = activity;
+      this.emit(thread);
+    };
+    try {
+      const fork = this.forkSession === null && this.parentSession !== null;
+      let note = "";
+      let res;
+      try {
+        res = await ask({ cwd: this.cwd, resume: this.forkSession ?? this.parentSession, fork, prompt, onText, onActivity });
+      } catch (err) {
+        if (!fork) throw err;
+        note = `_Answered without the original conversation, because it could not be resumed: ${errorText(err)}_
+
+`;
+        this.parentSession = null;
+        res = await ask({ cwd: this.cwd, resume: null, fork: false, prompt, onText, onActivity });
+      }
+      if (res.sessionId) this.forkSession = res.sessionId;
+      reply.body = note + res.text;
+      reply.status = "done";
+    } catch (err) {
+      reply.body = errorText(err);
+      reply.status = "error";
+    }
+    reply.activity = null;
+    this.emit(thread);
+  }
+};
+function comment(author, body, status) {
+  return { id: newId(), author, body, status, activity: null, createdAt: (/* @__PURE__ */ new Date()).toISOString() };
+}
+function buildPrompt(thread) {
+  const { path: path5, side, start, end } = thread.anchor;
+  const lines = start === end ? `line ${start}` : `lines ${start}-${end}`;
+  const history = thread.comments.filter((c) => c.status === "done").map((c) => `${c.author === "user" ? "User" : "Claude"}: ${c.body}`).join("\n\n");
+  return [
+    `The user is reviewing the code changes in a diff viewer. They selected ${lines} of the ${side} version of ${path5} and wrote in a comment thread on them.`,
+    "Answer the last comment directly and concisely, in the language it is written in, using Markdown. You can read files to check details, but do not change anything.",
+    "",
+    "Selected lines:",
+    "```",
+    thread.snippet,
+    "```",
+    "",
+    "Thread:",
+    history
+  ].join("\n");
+}
+function errorText(err) {
+  return err instanceof Error ? err.message : String(err);
+}
+
+// src/server/http.ts
 var MIME = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
@@ -37029,11 +37226,12 @@ var MIME = {
 var CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'";
 var ReviewServer = class {
   views = /* @__PURE__ */ new Map();
+  repos = /* @__PURE__ */ new Map();
   uiDir;
   server = null;
   port = 0;
   constructor(uiDir) {
-    this.uiDir = path2.resolve(uiDir);
+    this.uiDir = path3.resolve(uiDir);
   }
   async start() {
     const server = createServer((req, res) => {
@@ -37054,10 +37252,20 @@ var ReviewServer = class {
     this.server?.close();
     this.server = null;
   }
-  addView(repo, base, review) {
-    const view = { id: randomBytes(6).toString("base64url"), repo, base, review };
+  addView(repo, base, review, cwd, session) {
+    const view = { id: randomBytes2(6).toString("base64url"), repo, base, review };
     this.views.set(view.id, view);
+    let threads = this.repos.get(repo);
+    if (!threads) {
+      threads = new RepoThreads(cwd);
+      this.repos.set(repo, threads);
+    }
+    threads.cwd = cwd;
+    if (session) threads.parentSession = session;
     return view;
+  }
+  allThreads() {
+    return [...this.repos].map(([repo, t]) => ({ repo, threads: t.threads }));
   }
   url(view) {
     return `http://127.0.0.1:${this.port}/v/${view.id}`;
@@ -37067,27 +37275,70 @@ var ReviewServer = class {
     if (host !== `127.0.0.1:${this.port}` && host !== `localhost:${this.port}`) {
       return sendText(res, 403, "Forbidden host");
     }
-    if (req.method !== "GET") return sendText(res, 405, "Method not allowed");
     const { pathname } = new URL(req.url ?? "/", "http://127.0.0.1");
-    const api = /^\/api\/views\/([\w-]+)\/diff$/.exec(pathname);
+    const api = /^\/api\/views\/([\w-]+)\/(diff|events|threads)(?:\/([\w-]+)\/comments)?$/.exec(pathname);
     if (api) {
       const view = this.views.get(api[1]);
       if (!view) return sendJson(res, 404, { error: "Unknown view. Ask Claude to open the viewer again." });
-      try {
-        const diff = await computeDiff(view.repo, view.base);
-        const data = { diff, review: view.review };
-        return sendJson(res, 200, data);
-      } catch (err) {
-        return sendJson(res, 500, { error: errorMessage(err) });
+      const threads = this.repos.get(view.repo);
+      const route = api[2];
+      const threadId = api[3];
+      if (req.method === "GET" && route === "diff" && !threadId) {
+        try {
+          const diff = await computeDiff(view.repo, view.base);
+          const data = { diff, review: view.review, threads: threads.threads };
+          return sendJson(res, 200, data);
+        } catch (err) {
+          return sendJson(res, 500, { error: errorMessage(err) });
+        }
       }
+      if (req.method === "GET" && route === "events" && !threadId) return this.events(req, res, threads);
+      if (req.method === "POST" && route === "threads") {
+        if (!this.sameOrigin(req)) return sendJson(res, 403, { error: "Cross-site request refused" });
+        const { anchor: anchor2, snippet, body: text } = await readJson(req) ?? {};
+        if (!isText(text, 20 * 1024, true)) return sendJson(res, 400, { error: "Invalid comment" });
+        if (!threadId) {
+          if (!isAnchor(anchor2) || !isText(snippet, 64 * 1024)) return sendJson(res, 400, { error: "Invalid comment" });
+          return sendJson(res, 201, { thread: threads.create(anchor2, snippet, text.trim()) });
+        }
+        const thread = threads.reply(threadId, text.trim());
+        if (!thread) return sendJson(res, 404, { error: "Unknown thread" });
+        return sendJson(res, 200, { thread });
+      }
+      return sendText(res, 405, "Method not allowed");
     }
+    if (req.method !== "GET") return sendText(res, 405, "Method not allowed");
     if (/^\/v\/[\w-]+$/.test(pathname)) return this.sendFile(res, "index.html", "no-store");
     if (pathname.startsWith("/assets/")) return this.sendFile(res, pathname.slice(1), "public, max-age=31536000, immutable");
     return sendText(res, 404, "Not found");
   }
+  sameOrigin(req) {
+    const type = req.headers["content-type"] ?? "";
+    const origin = req.headers.origin;
+    const site = req.headers["sec-fetch-site"];
+    const origins = [`http://127.0.0.1:${this.port}`, `http://localhost:${this.port}`];
+    return type.startsWith("application/json") && (origin === void 0 || origins.includes(origin)) && (site === void 0 || site === "same-origin");
+  }
+  events(req, res, threads) {
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream; charset=utf-8",
+      "Cache-Control": "no-store",
+      "X-Content-Type-Options": "nosniff"
+    });
+    res.write("retry: 2000\n\n");
+    const unsubscribe = threads.subscribe((thread) => res.write(`event: thread
+data: ${JSON.stringify(thread)}
+
+`));
+    const ping = setInterval(() => res.write(": ping\n\n"), 25e3);
+    req.on("close", () => {
+      clearInterval(ping);
+      unsubscribe();
+    });
+  }
   async sendFile(res, rel, cacheControl) {
-    const abs = path2.resolve(this.uiDir, rel);
-    if (!abs.startsWith(this.uiDir + path2.sep)) return sendText(res, 404, "Not found");
+    const abs = path3.resolve(this.uiDir, rel);
+    if (!abs.startsWith(this.uiDir + path3.sep)) return sendText(res, 404, "Not found");
     let body;
     try {
       body = await readFile2(abs);
@@ -37095,7 +37346,7 @@ var ReviewServer = class {
       return sendText(res, 404, "Not found");
     }
     res.writeHead(200, {
-      "Content-Type": MIME[path2.extname(abs)] ?? "application/octet-stream",
+      "Content-Type": MIME[path3.extname(abs)] ?? "application/octet-stream",
       "Cache-Control": cacheControl,
       "Content-Security-Policy": CSP,
       "Referrer-Policy": "no-referrer",
@@ -37104,6 +37355,30 @@ var ReviewServer = class {
     res.end(body);
   }
 };
+async function readJson(req, limit = 256 * 1024) {
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > limit) return null;
+    chunks.push(chunk);
+  }
+  try {
+    const value = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    return value !== null && typeof value === "object" ? value : null;
+  } catch {
+    return null;
+  }
+}
+function isText(value, max, nonEmpty = false) {
+  return typeof value === "string" && value.length <= max && (!nonEmpty || value.trim() !== "");
+}
+function isAnchor(value) {
+  if (value === null || typeof value !== "object") return false;
+  const a = value;
+  const line = (n) => Number.isInteger(n) && n > 0;
+  return isText(a.path, 4096, true) && (a.side === "old" || a.side === "new") && line(a.start) && line(a.end) && a.start <= a.end;
+}
 function sendJson(res, status, body) {
   res.writeHead(status, {
     "Content-Type": "application/json; charset=utf-8",
@@ -37164,9 +37439,9 @@ function checkTopics(diff, topics) {
 }
 
 // src/server/main.ts
-var DIST_DIR = path3.dirname(fileURLToPath(import.meta.url));
-var UI_DIR = path3.join(DIST_DIR, "ui");
-var VERSION = JSON.parse(readFileSync(path3.join(DIST_DIR, "..", ".claude-plugin", "plugin.json"), "utf8")).version;
+var DIST_DIR = path4.dirname(fileURLToPath(import.meta.url));
+var UI_DIR = path4.join(DIST_DIR, "ui");
+var VERSION = JSON.parse(readFileSync(path4.join(DIST_DIR, "..", ".claude-plugin", "plugin.json"), "utf8")).version;
 var serverPromise = null;
 function getServer() {
   serverPromise ??= (async () => {
@@ -37176,7 +37451,8 @@ function getServer() {
   })();
   return serverPromise;
 }
-async function openViewer(repo, base, focus, topics) {
+var SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+async function openViewer(repo, base, focus, topics, session) {
   const diff = await computeDiff(repo, base);
   let review = null;
   let note = "";
@@ -37192,11 +37468,12 @@ ${unassigned.length} change(s) are in no topic and appear under "Other changes":
     review = { focus: focus?.trim() || null, topics };
   }
   const server = await getServer();
-  const view = server.addView(diff.repoRoot, base, review);
+  const view = server.addView(diff.repoRoot, base, review, repo, session && SESSION_ID.test(session) ? session : null);
   return `${server.url(view)}
 ${summarize(diff)}${note}`;
 }
 async function shutdown() {
+  stopAll();
   if (serverPromise) (await serverPromise).close();
   process.exit(0);
 }
@@ -37234,6 +37511,7 @@ async function runMcp() {
         repo,
         base,
         focus: external_exports.string().optional().describe("What the user wants to review, in their words."),
+        session: external_exports.string().optional().describe("The current Claude Code session id. @claude questions in the page continue a fork of this session."),
         topics: external_exports.array(
           external_exports.object({
             title: external_exports.string().describe("A few words naming the topic."),
@@ -37248,16 +37526,40 @@ async function runMcp() {
     async (args) => {
       try {
         const topics = args.topics?.map((t) => ({ ...t, related: t.related ?? true }));
-        const text = await openViewer(args.repo ?? process.cwd(), args.base ?? "HEAD", args.focus, topics);
+        const text = await openViewer(args.repo ?? process.cwd(), args.base ?? "HEAD", args.focus, topics, args.session);
         return { content: [{ type: "text", text }] };
       } catch (err) {
         return { content: [{ type: "text", text: `Could not open the diff viewer: ${errorMessage(err)}` }], isError: true };
       }
     }
   );
+  mcp.registerTool(
+    "get_review_comments",
+    {
+      title: "Get review comments",
+      description: "Read the comment threads the user left on lines in the diff viewer, with the selected lines and any answers from @claude. Use it when the user asks you to address their review comments.",
+      inputSchema: {},
+      annotations: { readOnlyHint: true, openWorldHint: false }
+    },
+    async () => {
+      const server = serverPromise ? await serverPromise : null;
+      const repos = server?.allThreads().filter((r) => r.threads.length) ?? [];
+      const text = repos.length ? repos.map((r) => `${r.repo}
+
+${r.threads.map(formatThread).join("\n\n")}`).join("\n\n") : "No review comments yet.";
+      return { content: [{ type: "text", text }] };
+    }
+  );
   mcp.server.onclose = () => void shutdown();
   process.stdin.on("end", () => void shutdown());
   await mcp.connect(new StdioServerTransport());
+}
+function formatThread(t) {
+  const { path: path5, side, start, end } = t.anchor;
+  const range = start === end ? `line ${start}` : `lines ${start}-${end}`;
+  const snippet = t.snippet.split("\n").slice(0, 8).map((l) => `  > ${l}`);
+  const comments = t.comments.filter((c) => c.status === "done").map((c) => `  ${c.author === "user" ? "User" : "Claude"}: ${c.body.replace(/\n/g, "\n    ")}`);
+  return [`${path5}, ${side} ${range}`, ...snippet, ...comments].join("\n");
 }
 var httpOnly = process.argv.indexOf("--http-only");
 if (httpOnly >= 0) {

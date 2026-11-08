@@ -1,12 +1,25 @@
-import { Fragment } from "react";
-import type { DiffLine, DisplayHunk } from "../shared/types";
+import { Fragment, useState } from "react";
+import type { DiffLine, DisplayHunk, Thread } from "../shared/types";
+import { CommentForm, ThreadView, useComments } from "./comments";
 import type { Token, TokenLines } from "./highlight";
 
+type Side = "old" | "new";
+
+interface Selection {
+  side: Side;
+  start: number;
+  end: number;
+  pivot: number;
+}
+
 interface Props {
+  path: string;
   hunks: DisplayHunk[];
   oldTokens: TokenLines | null;
   newTokens: TokenLines | null;
 }
+
+const MARK = { add: "+", del: "-", context: " " } as const;
 
 const stripCr = (s: string) => (s.endsWith("\r") ? s.slice(0, -1) : s);
 
@@ -35,9 +48,47 @@ function Code({ line, tokens }: { line: DiffLine; tokens: Token[] | undefined })
   );
 }
 
-const MARK = { add: "+", del: "-", context: " " } as const;
+export function DiffTable({ path, hunks, oldTokens, newTokens }: Props) {
+  const { threadsFor, create } = useComments();
+  const [selection, setSelection] = useState<Selection | null>(null);
+  const threads = threadsFor(path);
 
-export function DiffTable({ hunks, oldTokens, newTokens }: Props) {
+  const isSelected = (side: Side, no: number | null) =>
+    selection !== null && no !== null && selection.side === side && no >= selection.start && no <= selection.end;
+
+  const pick = (side: Side, no: number, extend: boolean) => {
+    if (extend && selection?.side === side) {
+      setSelection({ side, pivot: selection.pivot, start: Math.min(selection.pivot, no), end: Math.max(selection.pivot, no) });
+    } else if (selection?.side === side && selection.start === no && selection.end === no) {
+      setSelection(null);
+    } else {
+      setSelection({ side, pivot: no, start: no, end: no });
+    }
+  };
+
+  const submit = async (body: string) => {
+    if (!selection) return;
+    const { side, start, end } = selection;
+    await create({ path, side, start, end }, snippetOf(hunks, side, start, end), body);
+    setSelection(null);
+  };
+
+  const below = (side: Side, no: number | null) => (
+    <>
+      {no !== null &&
+        threads
+          .filter((t) => t.anchor.side === side && t.anchor.end === no)
+          .map((t) => <ThreadRow key={t.id} thread={t} />)}
+      {selection?.side === side && selection.end === no && (
+        <tr className="thread-row">
+          <td colSpan={4}>
+            <CommentForm placeholder="Leave a comment" submitLabel="Comment" onSubmit={submit} onCancel={() => setSelection(null)} />
+          </td>
+        </tr>
+      )}
+    </>
+  );
+
   return (
     <table className="diff">
       <colgroup>
@@ -55,12 +106,32 @@ export function DiffTable({ hunks, oldTokens, newTokens }: Props) {
                 {h.header}
               </td>
             </tr>
-            {toSplitRows(h.lines).map((row, ri) => (
-              <tr key={ri}>
-                <SplitCell line={row.left} tokens={row.left ? tokensFor(row.left, oldTokens, newTokens) : undefined} side="old" />
-                <SplitCell line={row.right} tokens={row.right ? tokensFor(row.right, oldTokens, newTokens) : undefined} side="new" />
-              </tr>
-            ))}
+            {toSplitRows(h.lines).map((row, ri) => {
+              const oldNo = row.left?.oldNo ?? null;
+              const newNo = row.right?.newNo ?? null;
+              return (
+                <Fragment key={ri}>
+                  <tr>
+                    <SplitCell
+                      line={row.left}
+                      tokens={row.left ? tokensFor(row.left, oldTokens, newTokens) : undefined}
+                      side="old"
+                      selected={isSelected("old", oldNo)}
+                      onPick={pick}
+                    />
+                    <SplitCell
+                      line={row.right}
+                      tokens={row.right ? tokensFor(row.right, oldTokens, newTokens) : undefined}
+                      side="new"
+                      selected={isSelected("new", newNo)}
+                      onPick={pick}
+                    />
+                  </tr>
+                  {below("old", oldNo)}
+                  {below("new", newNo)}
+                </Fragment>
+              );
+            })}
           </Fragment>
         ))}
       </tbody>
@@ -68,7 +139,25 @@ export function DiffTable({ hunks, oldTokens, newTokens }: Props) {
   );
 }
 
-function SplitCell({ line, tokens, side }: { line: DiffLine | null; tokens: Token[] | undefined; side: "old" | "new" }) {
+function ThreadRow({ thread }: { thread: Thread }) {
+  return (
+    <tr className="thread-row">
+      <td colSpan={4}>
+        <ThreadView thread={thread} />
+      </td>
+    </tr>
+  );
+}
+
+interface CellProps {
+  line: DiffLine | null;
+  tokens: Token[] | undefined;
+  side: Side;
+  selected: boolean;
+  onPick: (side: Side, no: number, extend: boolean) => void;
+}
+
+function SplitCell({ line, tokens, side, selected, onPick }: CellProps) {
   if (!line) {
     return (
       <>
@@ -78,14 +167,35 @@ function SplitCell({ line, tokens, side }: { line: DiffLine | null; tokens: Toke
     );
   }
   const n = side === "old" ? line.oldNo : line.newNo;
+  const sel = selected ? " is-selected" : "";
   return (
     <>
-      <td className={`num ${line.kind}`} data-n={n ?? ""} />
-      <td className={`code ${line.kind}`} data-mark={MARK[line.kind]}>
+      <td
+        className={`num ${line.kind}${sel}`}
+        data-n={n ?? ""}
+        title={n ? "Comment on this line. Shift-click another line to select a range." : undefined}
+        onClick={n ? (e) => onPick(side, n, e.shiftKey) : undefined}
+      />
+      <td className={`code ${line.kind}${sel}`} data-mark={MARK[line.kind]}>
         <Code line={line} tokens={tokens} />
       </td>
     </>
   );
+}
+
+function snippetOf(hunks: DisplayHunk[], side: Side, start: number, end: number): string {
+  return hunks
+    .flatMap((h) => h.lines)
+    .filter((l) => {
+      const no = side === "old" ? l.oldNo : l.newNo;
+      return no !== null && no >= start && no <= end;
+    })
+    .map((l) => `${MARK[l.kind]}${l.text}`)
+    .join("\n");
+}
+
+export function hasLine(hunks: DisplayHunk[], side: Side, no: number): boolean {
+  return hunks.some((h) => h.lines.some((l) => (side === "old" ? l.oldNo : l.newNo) === no));
 }
 
 interface SplitRow {

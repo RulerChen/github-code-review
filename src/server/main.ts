@@ -5,7 +5,8 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { computeDiff, summarize } from "../engine/diff.js";
-import type { Review, Topic } from "../shared/types.js";
+import type { Review, Thread, Topic } from "../shared/types.js";
+import { stopAll } from "./claude.js";
 import { errorMessage, ReviewServer } from "./http.js";
 import { checkTopics, formatChanges } from "./review.js";
 
@@ -24,7 +25,9 @@ function getServer(): Promise<ReviewServer> {
   return serverPromise;
 }
 
-async function openViewer(repo: string, base: string, focus?: string, topics?: Topic[]): Promise<string> {
+const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+async function openViewer(repo: string, base: string, focus?: string, topics?: Topic[], session?: string): Promise<string> {
   const diff = await computeDiff(repo, base);
   let review: Review | null = null;
   let note = "";
@@ -41,11 +44,12 @@ async function openViewer(repo: string, base: string, focus?: string, topics?: T
   }
 
   const server = await getServer();
-  const view = server.addView(diff.repoRoot, base, review);
+  const view = server.addView(diff.repoRoot, base, review, repo, session && SESSION_ID.test(session) ? session : null);
   return `${server.url(view)}\n${summarize(diff)}${note}`;
 }
 
 async function shutdown(): Promise<never> {
+  stopAll();
   if (serverPromise) (await serverPromise).close();
   process.exit(0);
 }
@@ -99,6 +103,10 @@ async function runMcp(): Promise<void> {
         repo,
         base,
         focus: z.string().optional().describe("What the user wants to review, in their words."),
+        session: z
+          .string()
+          .optional()
+          .describe("The current Claude Code session id. @claude questions in the page continue a fork of this session."),
         topics: z
           .array(
             z.object({
@@ -116,7 +124,7 @@ async function runMcp(): Promise<void> {
     async (args) => {
       try {
         const topics = args.topics?.map((t) => ({ ...t, related: t.related ?? true }));
-        const text = await openViewer(args.repo ?? process.cwd(), args.base ?? "HEAD", args.focus, topics);
+        const text = await openViewer(args.repo ?? process.cwd(), args.base ?? "HEAD", args.focus, topics, args.session);
         return { content: [{ type: "text", text }] };
       } catch (err) {
         return { content: [{ type: "text", text: `Could not open the diff viewer: ${errorMessage(err)}` }], isError: true };
@@ -124,9 +132,37 @@ async function runMcp(): Promise<void> {
     },
   );
 
+  mcp.registerTool(
+    "get_review_comments",
+    {
+      title: "Get review comments",
+      description:
+        "Read the comment threads the user left on lines in the diff viewer, with the selected lines and any " +
+        "answers from @claude. Use it when the user asks you to address their review comments.",
+      inputSchema: {},
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    },
+    async () => {
+      const server = serverPromise ? await serverPromise : null;
+      const repos = server?.allThreads().filter((r) => r.threads.length) ?? [];
+      const text = repos.length ? repos.map((r) => `${r.repo}\n\n${r.threads.map(formatThread).join("\n\n")}`).join("\n\n") : "No review comments yet.";
+      return { content: [{ type: "text", text }] };
+    },
+  );
+
   mcp.server.onclose = () => void shutdown();
   process.stdin.on("end", () => void shutdown());
   await mcp.connect(new StdioServerTransport());
+}
+
+function formatThread(t: Thread): string {
+  const { path, side, start, end } = t.anchor;
+  const range = start === end ? `line ${start}` : `lines ${start}-${end}`;
+  const snippet = t.snippet.split("\n").slice(0, 8).map((l) => `  > ${l}`);
+  const comments = t.comments
+    .filter((c) => c.status === "done")
+    .map((c) => `  ${c.author === "user" ? "User" : "Claude"}: ${c.body.replace(/\n/g, "\n    ")}`);
+  return [`${path}, ${side} ${range}`, ...snippet, ...comments].join("\n");
 }
 
 const httpOnly = process.argv.indexOf("--http-only");

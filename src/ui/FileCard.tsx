@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { DisplayHunk, FileDiff } from "../shared/types";
-import { DiffTable } from "./DiffTable";
+import { ThreadView, useComments } from "./comments";
+import { DiffTable, hasLine } from "./DiffTable";
 import { highlight, languageFor, type TokenLines } from "./highlight";
 
 const LARGE_DIFF_LINES = 800;
@@ -28,6 +29,8 @@ export function FileCard({ file, hunks = file.hunks, anchor, viewed = false, onT
 
   const lineCount = hunks.reduce((s, h) => s + h.lines.length, 0);
   const partial = hunks !== file.hunks;
+  const { threadsFor } = useComments();
+  const unplaced = partial ? [] : threadsFor(file.path).filter((t) => !hasLine(hunks, t.anchor.side, t.anchor.end));
   const additions = partial ? countLines(hunks, "add") : file.additions;
   const deletions = partial ? countLines(hunks, "del") : file.deletions;
   const deferred = lineCount > LARGE_DIFF_LINES && !forceLoad;
@@ -65,6 +68,14 @@ export function FileCard({ file, hunks = file.hunks, anchor, viewed = false, onT
       </header>
       {!collapsed && (
         <div className="file-body">
+          {unplaced.length > 0 && (
+            <div className="unplaced">
+              <p className="file-note inline">Comments on lines that are no longer in this diff</p>
+              {unplaced.map((t) => (
+                <ThreadView key={t.id} thread={t} />
+              ))}
+            </div>
+          )}
           <FileBody file={file} hunks={hunks} deferred={deferred} lineCount={lineCount} onLoad={() => setForceLoad(true)} tokens={tokens} />
         </div>
       )}
@@ -113,7 +124,7 @@ function FileBody({
       )}
       {file.tooLarge && <p className="file-note inline">File too large to load in full: context lines and highlighting are off.</p>}
       <div className="diff-scroll">
-        <DiffTable hunks={hunks} oldTokens={tokens.old} newTokens={tokens.new} />
+        <DiffTable path={file.path} hunks={hunks} oldTokens={tokens.old} newTokens={tokens.new} />
       </div>
     </>
   );

@@ -1,6 +1,7 @@
 import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
-import type { FileDiff, ViewData } from "../shared/types";
-import { ApiError, fetchView } from "./api";
+import type { FileDiff, Thread, ThreadAnchor, ViewData } from "../shared/types";
+import { ApiError, createThread, fetchView, replyToThread } from "./api";
+import { type CommentsApi, CommentsContext } from "./comments";
 import { FileCard } from "./FileCard";
 import { comparePaths, FileTree } from "./FileTree";
 import { readStorage, writeStorage } from "./storage";
@@ -25,6 +26,7 @@ export function App({ viewId }: Props) {
   const [active, setActive] = useState<string | null>(null);
   const [viewed, setViewed] = useState<Record<string, string>>({});
   const [viewedTopics, setViewedTopics] = useState<Record<string, string>>({});
+  const [threads, setThreads] = useState<Thread[]>([]);
 
   const load = useCallback(async () => {
     if (!viewId) return;
@@ -33,6 +35,7 @@ export function App({ viewId }: Props) {
       const result = await fetchView(viewId);
       const root = result.diff.repoRoot;
       setData(result);
+      setThreads((prev) => mergeThreads(result.threads, prev));
       setError(null);
       setUpdatedAt(new Date());
       setViewed((prev) => (Object.keys(prev).length ? prev : readStorage(`diff-review:viewed:${root}`, {})));
@@ -47,6 +50,34 @@ export function App({ viewId }: Props) {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if (!viewId) return;
+    const events = new EventSource(`/api/views/${encodeURIComponent(viewId)}/events`);
+    events.addEventListener("thread", (e) => {
+      const thread = JSON.parse((e as MessageEvent<string>).data) as Thread;
+      setThreads((prev) => mergeThreads(prev, [thread]));
+    });
+    return () => events.close();
+  }, [viewId]);
+
+  const comments = useMemo<CommentsApi>(() => {
+    const byPath = new Map<string, Thread[]>();
+    for (const t of threads) byPath.set(t.anchor.path, [...(byPath.get(t.anchor.path) ?? []), t]);
+    return {
+      threadsFor: (path) => byPath.get(path) ?? [],
+      create: async (anchor: ThreadAnchor, snippet: string, body: string) => {
+        if (!viewId) return;
+        const thread = await createThread(viewId, anchor, snippet, body);
+        setThreads((prev) => mergeThreads(prev, [thread]));
+      },
+      reply: async (threadId: string, body: string) => {
+        if (!viewId) return;
+        const thread = await replyToThread(viewId, threadId, body);
+        setThreads((prev) => mergeThreads(prev, [thread]));
+      },
+    };
+  }, [threads, viewId]);
 
   const diff = data?.diff ?? null;
   const review = data?.review ?? null;
@@ -124,104 +155,116 @@ export function App({ viewId }: Props) {
   const firstUnrelated = topics.findIndex((t) => !t.related);
 
   return (
-    <div className="app">
-      <header className="topbar">
-        <div className="topbar-title">
-          <strong>{repoName}</strong>
-          <span className="refs">
-            <code>{diff.base}</code>
-            {diff.baseCommit && <span className="sha">{diff.baseCommit.slice(0, 7)}</span>}
-            <span aria-hidden="true">←</span>
-            <code>working tree</code>
-          </span>
-        </div>
-        <div className="topbar-stats">
-          <span>
-            {diff.files.length} file{diff.files.length === 1 ? "" : "s"} changed
-          </span>
-          <span className="count-add">+{additions.toLocaleString()}</span>
-          <span className="count-del">−{deletions.toLocaleString()}</span>
-        </div>
-        <span className="spacer" />
-        <div className="viewed-progress" title={`${viewedCount} of ${total} ${unit} viewed`}>
-          <span>
-            {viewedCount} / {total} viewed
-          </span>
-          <span className="progress" aria-hidden="true">
-            <span style={{ width: `${total ? (viewedCount / total) * 100 : 0}%` }} />
-          </span>
-        </div>
-        {review && (
-          <div className="segmented" role="tablist" aria-label="Group changes by">
-            <button role="tab" aria-selected={tab === "topics"} onClick={() => setTab("topics")}>
-              Topics
-            </button>
-            <button role="tab" aria-selected={tab === "files"} onClick={() => setTab("files")}>
-              Files
-            </button>
+    <CommentsContext.Provider value={comments}>
+      <div className="app">
+        <header className="topbar">
+          <div className="topbar-title">
+            <strong>{repoName}</strong>
+            <span className="refs">
+              <code>{diff.base}</code>
+              {diff.baseCommit && <span className="sha">{diff.baseCommit.slice(0, 7)}</span>}
+              <span aria-hidden="true">←</span>
+              <code>working tree</code>
+            </span>
           </div>
-        )}
-        <ThemeToggle theme={theme} onToggle={toggleTheme} />
-        <button className="button" onClick={() => void load()} disabled={loading} title={updatedAt ? `Updated ${updatedAt.toLocaleTimeString()}` : undefined}>
-          {loading ? "Refreshing…" : "Refresh"}
-        </button>
-      </header>
-
-      {error && <div className="banner">Refresh failed: {error.message}</div>}
-
-      <div className="layout">
-        <aside className="sidebar">
-          {byTopic ? (
-            <TopicList topics={topics} active={active} isViewed={isTopicViewed} onSelect={select} />
-          ) : (
-            <>
-              <input
-                className="filter"
-                type="search"
-                placeholder="Filter files"
-                value={filter}
-                onChange={(e) => setFilter(e.target.value)}
-                aria-label="Filter files"
-              />
-              <FileTree entries={shown} active={active} isViewed={isViewed} onSelect={select} />
-            </>
+          <div className="topbar-stats">
+            <span>
+              {diff.files.length} file{diff.files.length === 1 ? "" : "s"} changed
+            </span>
+            <span className="count-add">+{additions.toLocaleString()}</span>
+            <span className="count-del">−{deletions.toLocaleString()}</span>
+          </div>
+          <span className="spacer" />
+          <div className="viewed-progress" title={`${viewedCount} of ${total} ${unit} viewed`}>
+            <span>
+              {viewedCount} / {total} viewed
+            </span>
+            <span className="progress" aria-hidden="true">
+              <span style={{ width: `${total ? (viewedCount / total) * 100 : 0}%` }} />
+            </span>
+          </div>
+          {review && (
+            <div className="segmented" role="tablist" aria-label="Group changes by">
+              <button role="tab" aria-selected={tab === "topics"} onClick={() => setTab("topics")}>
+                Topics
+              </button>
+              <button role="tab" aria-selected={tab === "files"} onClick={() => setTab("files")}>
+                Files
+              </button>
+            </div>
           )}
-        </aside>
+          <ThemeToggle theme={theme} onToggle={toggleTheme} />
+          <button className="button" onClick={() => void load()} disabled={loading} title={updatedAt ? `Updated ${updatedAt.toLocaleTimeString()}` : undefined}>
+            {loading ? "Refreshing…" : "Refresh"}
+          </button>
+        </header>
 
-        <main className="files">
-          {diff.files.length === 0 ? (
-            <Notice title="No changes">
-              The working tree matches <code>{diff.base}</code>.
-            </Notice>
-          ) : byTopic ? (
-            <>
-              {review.focus && (
-                <p className="focus">
-                  Focus: <strong>{review.focus}</strong>
-                </p>
-              )}
-              {topics.map((t, i) => (
-                <Fragment key={`${t.key}:${t.signature}`}>
-                  {i === firstUnrelated && <h2 className="topic-divider">Not related to the focus</h2>}
-                  <TopicSection topic={t} viewed={isTopicViewed(t)} onToggleViewed={() => toggleTopicViewed(t)} />
-                </Fragment>
-              ))}
-            </>
-          ) : (
-            shown.map(({ file, anchor }) => (
-              <FileCard
-                key={`${file.path}:${signature(file)}`}
-                file={file}
-                anchor={anchor}
-                viewed={isViewed(file)}
-                onToggleViewed={() => toggleViewed(file)}
-              />
-            ))
-          )}
-        </main>
+        {error && <div className="banner">Refresh failed: {error.message}</div>}
+
+        <div className="layout">
+          <aside className="sidebar">
+            {byTopic ? (
+              <TopicList topics={topics} active={active} isViewed={isTopicViewed} onSelect={select} />
+            ) : (
+              <>
+                <input
+                  className="filter"
+                  type="search"
+                  placeholder="Filter files"
+                  value={filter}
+                  onChange={(e) => setFilter(e.target.value)}
+                  aria-label="Filter files"
+                />
+                <FileTree entries={shown} active={active} isViewed={isViewed} onSelect={select} />
+              </>
+            )}
+          </aside>
+
+          <main className="files">
+            {diff.files.length === 0 ? (
+              <Notice title="No changes">
+                The working tree matches <code>{diff.base}</code>.
+              </Notice>
+            ) : byTopic ? (
+              <>
+                {review.focus && (
+                  <p className="focus">
+                    Focus: <strong>{review.focus}</strong>
+                  </p>
+                )}
+                {topics.map((t, i) => (
+                  <Fragment key={`${t.key}:${t.signature}`}>
+                    {i === firstUnrelated && <h2 className="topic-divider">Not related to the focus</h2>}
+                    <TopicSection topic={t} viewed={isTopicViewed(t)} onToggleViewed={() => toggleTopicViewed(t)} />
+                  </Fragment>
+                ))}
+              </>
+            ) : (
+              shown.map(({ file, anchor }) => (
+                <FileCard
+                  key={`${file.path}:${signature(file)}`}
+                  file={file}
+                  anchor={anchor}
+                  viewed={isViewed(file)}
+                  onToggleViewed={() => toggleViewed(file)}
+                />
+              ))
+            )}
+          </main>
+        </div>
       </div>
-    </div>
+    </CommentsContext.Provider>
   );
+}
+
+function mergeThreads(base: Thread[], updates: Thread[]): Thread[] {
+  const next = [...base];
+  for (const t of updates) {
+    const i = next.findIndex((x) => x.id === t.id);
+    if (i >= 0) next[i] = t;
+    else next.push(t);
+  }
+  return next;
 }
 
 function ThemeToggle({ theme, onToggle }: { theme: string; onToggle: () => void }) {

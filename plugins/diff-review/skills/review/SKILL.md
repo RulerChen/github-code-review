@@ -13,5 +13,5 @@ Arguments: $ARGUMENTS
    - `summary`: two to six sentences of Markdown on what changed and why, naming the files and functions involved and anything the reviewer should check closely.
    - `ids`: the ids of all changes in the topic.
    Put every id in a topic. Order the topics the way a reviewer should read them, with the ones that match the focus first, and set `related: false` on topics that have nothing to do with the focus. Write titles and summaries in the language the user writes in.
-4. Call `open_diff_viewer` once with `repo`, `base`, `focus` and `topics`. If it reports unknown ids, fix them and call it again.
-5. Reply with the URL on its own line, then the topic titles as a short list. Do not paste the diff.
+4. Call `open_diff_viewer` once with `repo`, `base`, `focus`, `topics` and `session` set to `${CLAUDE_SESSION_ID}`. If it reports unknown ids, fix them and call it again.
+5. Reply with the URL on its own line, then the topic titles as a short list. Mention that they can click line numbers in the page and write `@claude` in a comment to ask about those lines. Do not paste the diff.

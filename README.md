@@ -15,6 +15,8 @@ Requires Node.js 20 or newer and git.
 
 In a git repository, run `/diff-review:review` to compare the working tree with `HEAD`, or `/diff-review:review main` to compare with another branch, tag or commit. Add what you want to review, as in `/diff-review:review the cache eviction change`, and Claude puts the matching changes first. Claude groups the changes into topics and explains each one. Open the link Claude replies with, and press Refresh on the page after further changes.
 
+Click a line number, or shift-click a second one to select a range, to leave a comment. Write `@claude` in it and Claude answers in the thread, continuing a copy of your conversation that can read files but not change them. Ask Claude in the terminal to address your review comments and it reads them from the page.
+
 ## Update
 
 ```sh

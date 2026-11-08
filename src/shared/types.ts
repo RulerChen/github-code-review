@@ -57,9 +57,33 @@ export interface Review {
   topics: Topic[];
 }
 
+export interface ThreadAnchor {
+  path: string;
+  side: "old" | "new";
+  start: number;
+  end: number;
+}
+
+export interface ThreadComment {
+  id: string;
+  author: "user" | "claude";
+  body: string;
+  status: "done" | "pending" | "error";
+  activity: string | null;
+  createdAt: string;
+}
+
+export interface Thread {
+  id: string;
+  anchor: ThreadAnchor;
+  snippet: string;
+  comments: ThreadComment[];
+}
+
 export interface ViewData {
   diff: DiffResult;
   review: Review | null;
+  threads: Thread[];
 }
 
 export interface DiffResult {
