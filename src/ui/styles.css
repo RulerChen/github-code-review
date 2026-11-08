@@ -24,6 +24,7 @@
   --selected-num: #fae17d;
   --primary: #1f883d;
   --primary-fg: #ffffff;
+  --tree-dir-icon: #54aeff;
   --topbar-h: 56px;
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
   --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif;
@@ -55,6 +56,7 @@
   --selected-num: #ae7c1466;
   --primary: #347d39;
   --primary-fg: #ffffff;
+  --tree-dir-icon: var(--fg-muted);
 }
 
 :root[data-theme="dark"] .tok {
@@ -213,55 +215,50 @@ button {
   list-style: none;
 }
 
+/* Row layout follows Primer's TreeView: 8px per level, a 16px toggle column on
+   every row so file icons line up with folder icons, then icon, name, status. */
 .tree-dir,
 .tree-file {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   width: 100%;
-  min-height: 28px;
-  padding-right: 8px;
+  min-height: 32px;
+  padding: 0 8px 0 calc(var(--depth) * 8px);
+  border: 0;
   border-radius: 6px;
+  background: none;
+  color: var(--fg);
+  text-align: left;
   white-space: nowrap;
-}
-
-.tree-dir {
-  border: 0;
-  background: none;
-  color: var(--fg-muted);
-  text-align: left;
   cursor: pointer;
 }
 
-.tree-dir:hover {
-  background: var(--bg-subtle);
+.tree-dir::before,
+.tree-file::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: calc(var(--depth) * 8px);
+  background: repeating-linear-gradient(to right, transparent 0 7px, var(--tree-line) 7px 8px);
 }
 
-.tree-dir svg {
-  flex: none;
-  fill: currentColor;
+.tree {
+  --tree-line: var(--border-muted);
 }
 
-.tree-dir svg:first-child {
-  transition: transform 0.15s ease-out;
+@media (hover: hover) {
+  .tree {
+    --tree-line: transparent;
+  }
+  .tree:hover,
+  .tree:focus-within {
+    --tree-line: var(--border-muted);
+  }
 }
 
-[aria-expanded="false"] > .tree-dir svg:first-child {
-  transform: rotate(-90deg);
-}
-
-.tree-dir span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.tree-file {
-  border: 0;
-  background: none;
-  text-align: left;
-  cursor: pointer;
-}
-
+.tree-dir:hover,
 .tree-file:hover {
   background: var(--bg-subtle);
 }
@@ -270,24 +267,48 @@ button {
   background: var(--accent-subtle);
 }
 
-.tree-file.is-viewed .tree-name {
+.tree-toggle {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 16px;
   color: var(--fg-muted);
 }
 
+.tree-toggle svg {
+  width: 12px;
+  height: 12px;
+  fill: currentColor;
+  transition: transform 0.15s ease-out;
+}
+
+[aria-expanded="false"] > .tree-dir .tree-toggle svg {
+  transform: rotate(-90deg);
+}
+
+.tree-icon,
+.tree-status {
+  flex: none;
+  fill: currentColor;
+}
+
+.tree-icon {
+  color: var(--fg-muted);
+}
+
+.tree-dir .tree-icon {
+  color: var(--tree-dir-icon);
+}
+
 .tree-name {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.status {
-  display: inline-grid;
-  flex: none;
-  place-items: center;
-  width: 16px;
-  height: 16px;
-  border: 1px solid currentColor;
-  border-radius: 4px;
-  font: 600 11px/1 var(--mono);
+.tree-file.is-viewed .tree-name {
+  color: var(--fg-muted);
 }
 
 .status-added {
@@ -948,7 +969,7 @@ button {
 @media (prefers-reduced-motion: reduce) {
   .progress > span,
   .chevron svg,
-  .tree-dir svg:first-child {
+  .tree-toggle svg {
     transition: none;
   }
 }
