@@ -37112,7 +37112,7 @@ var RepoThreads = class {
   threads = [];
   cwd;
   parentSession = null;
-  forkSession = null;
+  fork = null;
   queue = Promise.resolve();
   listeners = /* @__PURE__ */ new Set();
   constructor(cwd) {
@@ -37123,7 +37123,7 @@ var RepoThreads = class {
     return () => this.listeners.delete(fn);
   }
   create(anchor2, snippet, body) {
-    const thread = { id: newId(), anchor: anchor2, snippet, comments: [] };
+    const thread = { id: newId(), rev: 0, anchor: anchor2, snippet, comments: [] };
     this.threads.push(thread);
     this.addComment(thread, body);
     return thread;
@@ -37135,6 +37135,7 @@ var RepoThreads = class {
     return thread;
   }
   emit(thread) {
+    thread.rev++;
     for (const fn of this.listeners) fn(thread);
   }
   addComment(thread, body) {
@@ -37166,20 +37167,21 @@ var RepoThreads = class {
       this.emit(thread);
     };
     try {
-      const fork = this.forkSession === null && this.parentSession !== null;
+      const parent = this.parentSession;
+      const resume = this.fork?.parent === parent ? this.fork.session : null;
+      const forking = resume === null && parent !== null;
       let note = "";
       let res;
       try {
-        res = await ask({ cwd: this.cwd, resume: this.forkSession ?? this.parentSession, fork, prompt, onText, onActivity });
+        res = await ask({ cwd: this.cwd, resume: resume ?? parent, fork: forking, prompt, onText, onActivity });
       } catch (err) {
-        if (!fork) throw err;
+        if (!forking) throw err;
         note = `_Answered without the original conversation, because it could not be resumed: ${errorText(err)}_
 
 `;
-        this.parentSession = null;
         res = await ask({ cwd: this.cwd, resume: null, fork: false, prompt, onText, onActivity });
       }
-      if (res.sessionId) this.forkSession = res.sessionId;
+      if (res.sessionId) this.fork = { parent, session: res.sessionId };
       reply.body = note + res.text;
       reply.status = "done";
     } catch (err) {

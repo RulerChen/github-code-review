@@ -75,6 +75,8 @@ export interface ThreadComment {
 
 export interface Thread {
   id: string;
+  /** Bumped on every change the server sends, so the page keeps the newest copy. */
+  rev: number;
   anchor: ThreadAnchor;
   snippet: string;
   comments: ThreadComment[];

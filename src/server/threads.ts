@@ -11,7 +11,7 @@ export class RepoThreads {
   readonly threads: Thread[] = [];
   cwd: string;
   parentSession: string | null = null;
-  private forkSession: string | null = null;
+  private fork: { parent: string | null; session: string } | null = null;
   private queue: Promise<void> = Promise.resolve();
   private readonly listeners = new Set<(thread: Thread) => void>();
 
@@ -25,7 +25,7 @@ export class RepoThreads {
   }
 
   create(anchor: ThreadAnchor, snippet: string, body: string): Thread {
-    const thread: Thread = { id: newId(), anchor, snippet, comments: [] };
+    const thread: Thread = { id: newId(), rev: 0, anchor, snippet, comments: [] };
     this.threads.push(thread);
     this.addComment(thread, body);
     return thread;
@@ -39,6 +39,7 @@ export class RepoThreads {
   }
 
   private emit(thread: Thread): void {
+    thread.rev++;
     for (const fn of this.listeners) fn(thread);
   }
 
@@ -75,18 +76,21 @@ export class RepoThreads {
     };
 
     try {
-      const fork = this.forkSession === null && this.parentSession !== null;
+      // A fork belongs to the parent session it came from. When a viewer is opened from another
+      // session, the old fork no longer matches and the next question forks the new parent.
+      const parent = this.parentSession;
+      const resume = this.fork?.parent === parent ? this.fork.session : null;
+      const forking = resume === null && parent !== null;
       let note = "";
       let res;
       try {
-        res = await ask({ cwd: this.cwd, resume: this.forkSession ?? this.parentSession, fork, prompt, onText, onActivity });
+        res = await ask({ cwd: this.cwd, resume: resume ?? parent, fork: forking, prompt, onText, onActivity });
       } catch (err) {
-        if (!fork) throw err;
+        if (!forking) throw err;
         note = `_Answered without the original conversation, because it could not be resumed: ${errorText(err)}_\n\n`;
-        this.parentSession = null;
         res = await ask({ cwd: this.cwd, resume: null, fork: false, prompt, onText, onActivity });
       }
-      if (res.sessionId) this.forkSession = res.sessionId;
+      if (res.sessionId) this.fork = { parent, session: res.sessionId };
       reply.body = note + res.text;
       reply.status = "done";
     } catch (err) {

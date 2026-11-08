@@ -35,7 +35,7 @@ export function App({ viewId }: Props) {
       const result = await fetchView(viewId);
       const root = result.diff.repoRoot;
       setData(result);
-      setThreads((prev) => mergeThreads(result.threads, prev));
+      setThreads((prev) => mergeThreads(prev, result.threads));
       setError(null);
       setUpdatedAt(new Date());
       setViewed((prev) => (Object.keys(prev).length ? prev : readStorage(`diff-review:viewed:${root}`, {})));
@@ -257,12 +257,15 @@ export function App({ viewId }: Props) {
   );
 }
 
+// Fetches, POST responses and events can arrive out of order, so keep whichever copy of a thread
+// is newest. On a tie the update wins: a snapshot can hold streamed text not yet sent as an event.
 function mergeThreads(base: Thread[], updates: Thread[]): Thread[] {
   const next = [...base];
   for (const t of updates) {
     const i = next.findIndex((x) => x.id === t.id);
-    if (i >= 0) next[i] = t;
-    else next.push(t);
+    const current = next[i];
+    if (!current) next.push(t);
+    else if (t.rev >= current.rev) next[i] = t;
   }
   return next;
 }
