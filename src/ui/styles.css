@@ -1,0 +1,624 @@
+/* Colors follow GitHub's Primer palette so the page reads like a pull request's "Files changed" tab. */
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --bg-subtle: #f6f8fa;
+  --bg-inset: #f6f8fa;
+  --border: #d1d9e0;
+  --border-muted: #d1d9e0b3;
+  --fg: #1f2328;
+  --fg-muted: #59636e;
+  --accent: #0969da;
+  --accent-subtle: #ddf4ff;
+  --success: #1a7f37;
+  --danger: #d1242f;
+  --attention: #9a6700;
+  --add-line: #e6ffec;
+  --add-num: #ccffd8;
+  --del-line: #ffebe9;
+  --del-num: #ffd7d5;
+  --hunk-line: #ddf4ff;
+  --hunk-num: #b6e3ff;
+  --empty-cell: #f6f8fa;
+  --bar-neutral: #d1d9e0;
+  --topbar-h: 56px;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117;
+    --bg-subtle: #151b23;
+    --bg-inset: #010409;
+    --border: #3d444d;
+    --border-muted: #3d444db3;
+    --fg: #f0f6fc;
+    --fg-muted: #9198a1;
+    --accent: #4493f8;
+    --accent-subtle: #388bfd1a;
+    --success: #3fb950;
+    --danger: #f85149;
+    --attention: #d29922;
+    --add-line: #2ea04326;
+    --add-num: #3fb9504d;
+    --del-line: #f851491a;
+    --del-num: #f851494d;
+    --hunk-line: #388bfd1a;
+    --hunk-num: #388bfd40;
+    --empty-cell: #151b23;
+    --bar-neutral: #3d444d;
+  }
+  .tok {
+    color: var(--shiki-dark) !important;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: 14px/1.5 var(--sans);
+}
+
+code {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+}
+
+/* Top bar */
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  height: var(--topbar-h);
+  padding: 0 16px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+
+.topbar-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.topbar-title strong {
+  font-size: 16px;
+  white-space: nowrap;
+}
+
+.refs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+
+.refs code {
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: var(--accent-subtle);
+  color: var(--accent);
+}
+
+.refs .sha {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.topbar-stats {
+  display: flex;
+  gap: 8px;
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+
+.count-add {
+  color: var(--success);
+  font-weight: 600;
+}
+
+.count-del {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.spacer {
+  flex: 1;
+}
+
+.viewed-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--fg-muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.progress {
+  width: 72px;
+  height: 8px;
+  overflow: hidden;
+  border-radius: 4px;
+  background: var(--bar-neutral);
+}
+
+.progress > span {
+  display: block;
+  height: 100%;
+  background: var(--success);
+  transition: width 0.2s ease-out;
+}
+
+.segmented {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.segmented button {
+  padding: 4px 12px;
+  border: 0;
+  background: var(--bg-subtle);
+  cursor: pointer;
+}
+
+.segmented button + button {
+  border-left: 1px solid var(--border);
+}
+
+.segmented button[aria-pressed="true"] {
+  background: var(--bg);
+  font-weight: 600;
+}
+
+.button {
+  padding: 4px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-subtle);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.button:disabled {
+  color: var(--fg-muted);
+  cursor: default;
+}
+
+.banner {
+  padding: 8px 16px;
+  background: var(--del-line);
+  border-bottom: 1px solid var(--border);
+}
+
+/* Layout */
+.layout {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr);
+}
+
+.sidebar {
+  position: sticky;
+  top: var(--topbar-h);
+  height: calc(100vh - var(--topbar-h));
+  overflow: auto;
+  padding: 16px 8px 16px 16px;
+  border-right: 1px solid var(--border-muted);
+}
+
+.files {
+  min-width: 0;
+  padding: 16px;
+}
+
+.filter {
+  width: 100%;
+  margin-bottom: 8px;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+}
+
+.filter:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+/* File tree */
+.tree,
+.tree ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tree-dir,
+.tree-file {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 28px;
+  padding-right: 8px;
+  border-radius: 6px;
+  white-space: nowrap;
+}
+
+.tree-dir {
+  color: var(--fg-muted);
+}
+
+.tree-dir svg {
+  flex: none;
+  fill: currentColor;
+}
+
+.tree-dir span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tree-file {
+  border: 0;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tree-file:hover {
+  background: var(--bg-subtle);
+}
+
+.tree-file.is-active {
+  background: var(--accent-subtle);
+}
+
+.tree-file.is-viewed .tree-name {
+  color: var(--fg-muted);
+}
+
+.tree-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.status {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  font: 600 11px/1 var(--mono);
+}
+
+.status-added {
+  color: var(--success);
+}
+
+.status-deleted {
+  color: var(--danger);
+}
+
+.status-modified {
+  color: var(--attention);
+}
+
+.status-renamed {
+  color: var(--fg-muted);
+}
+
+.tree-empty {
+  color: var(--fg-muted);
+  padding: 8px;
+}
+
+/* File card */
+.file {
+  margin-bottom: 16px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  scroll-margin-top: calc(var(--topbar-h) + 8px);
+}
+
+.file-header {
+  position: sticky;
+  top: var(--topbar-h);
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 6px 8px 6px 4px;
+  background: var(--bg-subtle);
+  border-bottom: 1px solid var(--border);
+  border-radius: 6px 6px 0 0;
+}
+
+.file:has(.chevron[aria-expanded="false"]) .file-header {
+  border-bottom: 0;
+  border-radius: 6px;
+}
+
+.file-path {
+  overflow: hidden;
+  min-width: 0;
+  font: 600 12px var(--mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.old-path {
+  color: var(--fg-muted);
+  font-weight: 400;
+}
+
+.icon-button {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+
+.icon-button:hover {
+  background: var(--border-muted);
+  color: var(--fg);
+}
+
+.icon-button svg {
+  fill: currentColor;
+}
+
+.chevron svg {
+  transition: transform 0.15s ease-out;
+}
+
+.chevron[aria-expanded="false"] svg {
+  transform: rotate(-90deg);
+}
+
+.diffstat {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  font: 12px var(--mono);
+}
+
+.bars {
+  display: inline-flex;
+  gap: 1px;
+  margin-left: 2px;
+}
+
+.bar {
+  width: 8px;
+  height: 8px;
+  border-radius: 1px;
+  background: var(--bar-neutral);
+}
+
+.bar-add {
+  background: var(--success);
+}
+
+.bar-del {
+  background: var(--danger);
+}
+
+.viewed-toggle {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.file.is-viewed .viewed-toggle {
+  border-color: var(--accent);
+  background: var(--accent-subtle);
+}
+
+.file-note {
+  margin: 0;
+  padding: 16px;
+  color: var(--fg-muted);
+  text-align: center;
+}
+
+.file-note.inline {
+  padding: 8px 16px;
+  text-align: left;
+  border-bottom: 1px solid var(--border-muted);
+}
+
+.link-button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.link-button:hover {
+  text-decoration: underline;
+}
+
+/* Diff table */
+.diff-scroll {
+  overflow-x: auto;
+  border-radius: 0 0 6px 6px;
+}
+
+.diff {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font: 12px/20px var(--mono);
+  tab-size: 4;
+}
+
+.col-num {
+  width: 52px;
+}
+
+.diff td {
+  padding: 0;
+  vertical-align: top;
+}
+
+.diff .num {
+  padding: 0 10px;
+  color: var(--fg-muted);
+  text-align: right;
+  user-select: none;
+}
+
+/* Numbers and +/- markers come from CSS so copying code does not pick them up. */
+.diff .num::before {
+  content: attr(data-n);
+}
+
+.diff .code {
+  padding: 0 10px 0 22px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  position: relative;
+}
+
+.diff .code::before {
+  content: attr(data-mark);
+  position: absolute;
+  left: 8px;
+  user-select: none;
+}
+
+.unified tr.add .num,
+.split .num.add {
+  background: var(--add-num);
+}
+
+.unified tr.add .code,
+.split .code.add {
+  background: var(--add-line);
+}
+
+.unified tr.del .num,
+.split .num.del {
+  background: var(--del-num);
+}
+
+.unified tr.del .code,
+.split .code.del {
+  background: var(--del-line);
+}
+
+.split .code.context + .num,
+.split .code + .num {
+  border-left: 1px solid var(--border-muted);
+}
+
+.split .empty {
+  background: var(--empty-cell);
+}
+
+.hunk td {
+  background: var(--hunk-line);
+  color: var(--fg-muted);
+}
+
+.hunk .num {
+  background: var(--hunk-num);
+}
+
+.hunk-text {
+  padding: 4px 10px !important;
+  white-space: pre;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.noeol {
+  margin-left: 4px;
+  color: var(--danger);
+  user-select: none;
+}
+
+/* Full-page notices */
+.notice {
+  max-width: 640px;
+  margin: 64px auto;
+  padding: 0 16px;
+}
+
+.notice h1 {
+  font-size: 20px;
+  margin: 0 0 8px;
+}
+
+@media (max-width: 900px) {
+  .viewed-progress,
+  .topbar-stats {
+    display: none;
+  }
+}
+
+@media (max-width: 768px) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .sidebar {
+    display: none;
+  }
+  .refs {
+    display: none;
+  }
+  .files {
+    padding: 8px;
+  }
+  .split .num {
+    padding: 0 4px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .progress > span,
+  .chevron svg {
+    transition: none;
+  }
+}

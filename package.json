@@ -1,0 +1,28 @@
+{
+  "name": "github-code-review",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "npm run build:ui && npm run build:server",
+    "build:ui": "vite build --config src/ui/vite.config.ts",
+    "build:server": "node scripts/build-server.mjs",
+    "dev:server": "node scripts/build-server.mjs && node plugins/diff-review/dist/server.mjs --http-only",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p src/ui/tsconfig.json"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "@types/node": "^26.6.6",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.2.1",
+    "esbuild": "^0.28.2",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "shiki": "^4.6.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.6",
+    "vitest": "^5.1.0",
+    "zod": "^4.6.7"
+  }
+}

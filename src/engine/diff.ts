@@ -1,0 +1,401 @@
+import { createHash } from "node:crypto";
+import { lstat, readFile, readlink } from "node:fs/promises";
+import path from "node:path";
+import type { Block, DiffLine, DiffResult, DisplayHunk, FileDiff, FileStatus } from "../shared/types.js";
+import { git } from "./git.js";
+
+export type { Block, DiffLine, DiffResult, DisplayHunk, FileDiff, FileStatus };
+
+/** Unchanged lines shown around each change, as in plain `git diff`. */
+export const CONTEXT_LINES = 3;
+/** Larger files are still diffed, but their full text is not loaded (no context, no highlighting). */
+export const MAX_CONTENT_BYTES = 1024 * 1024;
+const EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+
+/** Diff the working tree (tracked and untracked files) against `base`. */
+export async function computeDiff(repo: string, base = "HEAD"): Promise<DiffResult> {
+  if (base.startsWith("-")) throw new Error(`Invalid git ref: ${base}`);
+  const repoRoot = (await git(repo, ["rev-parse", "--show-toplevel"])).toString("utf8").trim();
+  const baseCommit = await resolveBase(repoRoot, base);
+  const treeish = baseCommit ?? EMPTY_TREE;
+
+  const diffArgs = ["diff", "--no-color", "--no-ext-diff", "--no-textconv", "--submodule=short", "--find-renames"];
+  const [nameStatus, patch, untracked] = await Promise.all([
+    git(repoRoot, [...diffArgs, "--name-status", "-z", treeish, "--"]),
+    git(repoRoot, [...diffArgs, "-U0", treeish, "--"]),
+    git(repoRoot, ["ls-files", "--others", "--exclude-standard", "-z"]),
+  ]);
+
+  const entries = parseNameStatus(nameStatus);
+  let sections: (string[] | undefined)[] = splitSections(patch.toString("utf8"));
+  // Both commands use the same flags, so files come out in the same order.
+  // If that ever fails to hold, diff each file on its own instead of guessing.
+  if (sections.length !== entries.length) sections = [];
+
+  const tracked = await mapLimit(entries.map((e, i) => [e, sections[i]] as const), 8, ([entry, section]) =>
+    buildTrackedFile(repoRoot, diffArgs, treeish, baseCommit, entry, section),
+  );
+  const untrackedPaths = untracked.toString("utf8").split("\0").filter(Boolean);
+  const added = (await mapLimit(untrackedPaths, 8, (p) => buildUntrackedFile(repoRoot, p))).filter(
+    (f): f is FileDiff => f !== null,
+  );
+
+  const files = [...tracked, ...added].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  return { repoRoot, base, baseCommit, files };
+}
+
+export function summarize(result: DiffResult): string {
+  const add = result.files.reduce((s, f) => s + f.additions, 0);
+  const del = result.files.reduce((s, f) => s + f.deletions, 0);
+  const n = result.files.length;
+  return `${n} file${n === 1 ? "" : "s"} changed, +${add} -${del} against ${result.base}`;
+}
+
+async function resolveBase(repoRoot: string, base: string): Promise<string | null> {
+  try {
+    return (await git(repoRoot, ["rev-parse", "--verify", "--quiet", `${base}^{commit}`])).toString("utf8").trim();
+  } catch {
+    // An unborn branch has no HEAD commit yet: everything counts as added.
+    if (base === "HEAD") return null;
+    throw new Error(`Unknown git ref: ${base}`);
+  }
+}
+
+interface NameStatusEntry {
+  code: string;
+  path: string;
+  oldPath: string | null;
+}
+
+function parseNameStatus(buf: Buffer): NameStatusEntry[] {
+  const parts = buf.toString("utf8").split("\0");
+  const out: NameStatusEntry[] = [];
+  let i = 0;
+  while (i < parts.length - 1) {
+    const code = parts[i++]!;
+    if (code.startsWith("R") || code.startsWith("C")) {
+      const oldPath = parts[i++]!;
+      out.push({ code: code[0]!, path: parts[i++]!, oldPath });
+    } else {
+      out.push({ code: code[0]!, path: parts[i++]!, oldPath: null });
+    }
+  }
+  return out;
+}
+
+function statusOf(code: string): FileStatus {
+  if (code === "A") return "added";
+  if (code === "D") return "deleted";
+  if (code === "R") return "renamed";
+  return "modified";
+}
+
+/** Split a multi-file patch into one line array per "diff --git" section. */
+function splitSections(patch: string): string[][] {
+  const sections: string[][] = [];
+  let cur: string[] | null = null;
+  for (const line of patch.split("\n")) {
+    // Content lines always start with ' ', '+', '-' or '\', so this cannot match file content.
+    if (line.startsWith("diff --git ")) {
+      cur = [];
+      sections.push(cur);
+    }
+    cur?.push(line);
+  }
+  return sections;
+}
+
+const HUNK_RE = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)$/;
+
+type RawBlock = Omit<Block, "id">;
+
+interface ParsedSection {
+  binary: boolean;
+  modeChange: { from: string; to: string } | null;
+  blocks: RawBlock[];
+}
+
+function parseSection(lines: string[]): ParsedSection {
+  let binary = false;
+  let oldMode: string | null = null;
+  let newMode: string | null = null;
+  const blocks: RawBlock[] = [];
+  let cur: RawBlock | null = null;
+  let lastSide: "del" | "add" | null = null;
+
+  for (const line of lines) {
+    if (line.startsWith("@@")) {
+      const m = HUNK_RE.exec(line);
+      if (!m) throw new Error(`Unparseable hunk header: ${line}`);
+      const oldCount = m[2] === undefined ? 1 : Number(m[2]);
+      const newCount = m[4] === undefined ? 1 : Number(m[4]);
+      // In a unified diff a zero-length side gives the line *before* the change.
+      cur = {
+        oldStart: oldCount === 0 ? Number(m[1]) : Number(m[1]) - 1,
+        oldCount,
+        newStart: newCount === 0 ? Number(m[3]) : Number(m[3]) - 1,
+        newCount,
+        del: [],
+        add: [],
+        oldNoEol: false,
+        newNoEol: false,
+        section: m[5]!.trim(),
+      };
+      blocks.push(cur);
+      lastSide = null;
+    } else if (!cur) {
+      if (line.startsWith("Binary files ") || line === "GIT binary patch") binary = true;
+      else if (line.startsWith("old mode ")) oldMode = line.slice("old mode ".length);
+      else if (line.startsWith("new mode ")) newMode = line.slice("new mode ".length);
+    } else if (line.startsWith("-")) {
+      cur.del.push(line.slice(1));
+      lastSide = "del";
+    } else if (line.startsWith("+")) {
+      cur.add.push(line.slice(1));
+      lastSide = "add";
+    } else if (line.startsWith("\\")) {
+      if (lastSide === "del") cur.oldNoEol = true;
+      else if (lastSide === "add") cur.newNoEol = true;
+    }
+  }
+
+  for (const b of blocks) {
+    if (b.del.length !== b.oldCount || b.add.length !== b.newCount) {
+      throw new Error(`Hunk line count mismatch at -${b.oldStart} +${b.newStart}`);
+    }
+  }
+  const modeChange = oldMode && newMode ? { from: oldMode, to: newMode } : null;
+  return { binary, modeChange, blocks };
+}
+
+function assignIds(filePath: string, raws: RawBlock[]): Block[] {
+  const seen = new Map<string, number>();
+  return raws.map((r) => {
+    const h = createHash("sha256")
+      .update(filePath)
+      .update("\0")
+      .update(r.del.join("\n"))
+      .update("\0")
+      .update(r.add.join("\n"))
+      .update(`\0${r.oldNoEol ? 1 : 0}${r.newNoEol ? 1 : 0}`)
+      .digest("hex")
+      .slice(0, 12);
+    // Identical changes in one file (e.g. the same line edited twice) get an ordinal suffix.
+    const n = (seen.get(h) ?? 0) + 1;
+    seen.set(h, n);
+    return { id: n === 1 ? h : `${h}-${n}`, ...r };
+  });
+}
+
+type Content = { kind: "text"; text: string } | { kind: "binary" } | { kind: "tooLarge" } | { kind: "absent" };
+
+function classify(buf: Buffer): Content {
+  if (buf.length > MAX_CONTENT_BYTES) return { kind: "tooLarge" };
+  // Same heuristic as git: a NUL byte in the first 8000 bytes means binary.
+  if (buf.subarray(0, 8000).includes(0)) return { kind: "binary" };
+  return { kind: "text", text: buf.toString("utf8") };
+}
+
+async function readBase(repoRoot: string, commit: string, filePath: string): Promise<Content> {
+  try {
+    return classify(await git(repoRoot, ["cat-file", "blob", `${commit}:${filePath}`]));
+  } catch {
+    return { kind: "absent" };
+  }
+}
+
+async function readWorkTree(repoRoot: string, filePath: string): Promise<Content> {
+  const abs = path.join(repoRoot, filePath);
+  try {
+    const st = await lstat(abs);
+    // git stores a symlink as its target path, so compare against that.
+    if (st.isSymbolicLink()) return { kind: "text", text: await readlink(abs) };
+    if (!st.isFile()) return { kind: "absent" };
+    if (st.size > MAX_CONTENT_BYTES) return { kind: "tooLarge" };
+    return classify(await readFile(abs));
+  } catch {
+    return { kind: "absent" };
+  }
+}
+
+function splitLines(text: string): string[] {
+  if (text === "") return [];
+  const lines = text.split("\n");
+  if (lines[lines.length - 1] === "") lines.pop();
+  return lines;
+}
+
+const stripCr = (s: string) => (s.endsWith("\r") ? s.slice(0, -1) : s);
+
+/** True when every block's lines appear at its claimed position in `lines`. */
+function matchesBlocks(lines: string[], blocks: Block[], side: "old" | "new"): boolean {
+  return blocks.every((b) => {
+    const [start, want] = side === "old" ? [b.oldStart, b.del] : [b.newStart, b.add];
+    return want.every((t, k) => {
+      const got = lines[start + k];
+      return got !== undefined && stripCr(got) === stripCr(t);
+    });
+  });
+}
+
+async function buildTrackedFile(
+  repoRoot: string,
+  diffArgs: string[],
+  treeish: string,
+  baseCommit: string | null,
+  entry: NameStatusEntry,
+  section: string[] | undefined,
+): Promise<FileDiff> {
+  const status = statusOf(entry.code);
+  if (!section) {
+    const paths = entry.oldPath ? [entry.oldPath, entry.path] : [entry.path];
+    const one = await git(repoRoot, [...diffArgs, "-U0", treeish, "--", ...paths]);
+    section = splitSections(one.toString("utf8"))[0] ?? [];
+  }
+  const parsed = parseSection(section);
+  const blocks = assignIds(entry.path, parsed.blocks);
+
+  const [oldC, newC] = await Promise.all([
+    status === "added" || !baseCommit ? Promise.resolve<Content>({ kind: "absent" }) : readBase(repoRoot, baseCommit, entry.oldPath ?? entry.path),
+    status === "deleted" ? Promise.resolve<Content>({ kind: "absent" }) : readWorkTree(repoRoot, entry.path),
+  ]);
+  const binary = parsed.binary || oldC.kind === "binary" || newC.kind === "binary";
+
+  let oldLines = oldC.kind === "text" ? splitLines(oldC.text) : null;
+  let newLines = newC.kind === "text" ? splitLines(newC.text) : null;
+  // The working tree can change between `git diff` and the read (Claude may be editing).
+  // Context taken from a file that no longer matches the diff would be wrong, so drop it.
+  if (oldLines && !matchesBlocks(oldLines, blocks, "old")) oldLines = null;
+  if (newLines && !matchesBlocks(newLines, blocks, "new")) newLines = null;
+
+  return {
+    path: entry.path,
+    oldPath: status === "renamed" ? entry.oldPath : null,
+    status,
+    binary,
+    tooLarge: oldC.kind === "tooLarge" || newC.kind === "tooLarge",
+    modeChange: parsed.modeChange,
+    additions: blocks.reduce((s, b) => s + b.newCount, 0),
+    deletions: blocks.reduce((s, b) => s + b.oldCount, 0),
+    blocks: binary ? [] : blocks,
+    hunks: binary ? [] : buildHunks(blocks, oldLines, newLines),
+    oldContent: oldLines && oldC.kind === "text" ? oldC.text : null,
+    newContent: newLines && newC.kind === "text" ? newC.text : null,
+  };
+}
+
+async function buildUntrackedFile(repoRoot: string, filePath: string): Promise<FileDiff | null> {
+  const c = await readWorkTree(repoRoot, filePath);
+  if (c.kind === "absent") return null; // a directory (nested repository) or already gone
+  const base: FileDiff = {
+    path: filePath,
+    oldPath: null,
+    status: "added",
+    binary: c.kind === "binary",
+    tooLarge: c.kind === "tooLarge",
+    modeChange: null,
+    additions: 0,
+    deletions: 0,
+    blocks: [],
+    hunks: [],
+    oldContent: null,
+    newContent: null,
+  };
+  if (c.kind !== "text") return base;
+  const lines = splitLines(c.text);
+  if (lines.length === 0) return base;
+  const blocks = assignIds(filePath, [
+    {
+      oldStart: 0,
+      oldCount: 0,
+      newStart: 0,
+      newCount: lines.length,
+      del: [],
+      add: lines,
+      oldNoEol: false,
+      newNoEol: !c.text.endsWith("\n"),
+      section: "",
+    },
+  ]);
+  return { ...base, additions: lines.length, blocks, hunks: buildHunks(blocks, null, lines), newContent: c.text };
+}
+
+function rangeHeader(start0: number, count: number): string {
+  if (count === 0) return `${start0},0`;
+  if (count === 1) return `${start0 + 1}`;
+  return `${start0 + 1},${count}`;
+}
+
+/**
+ * Merge blocks into display hunks with CONTEXT_LINES of context, the way git
+ * does: blocks whose gap is at most twice the context share one hunk. Context
+ * comes from the new file when available, otherwise from the old file; without
+ * either, each block is shown bare.
+ */
+export function buildHunks(blocks: Block[], oldLines: string[] | null, newLines: string[] | null): DisplayHunk[] {
+  if (blocks.length === 0) return [];
+  const hasCtx = newLines !== null || oldLines !== null;
+  const C = hasCtx ? CONTEXT_LINES : 0;
+  // Unchanged lines between blocks are identical on both sides, so either coordinate system works.
+  const total = newLines ? newLines.length : oldLines ? oldLines.length : 0;
+  const endOf = (b: Block) => (newLines ? b.newStart + b.newCount : b.oldStart + b.oldCount);
+  const startOf = (b: Block) => (newLines ? b.newStart : b.oldStart);
+  const ctxText = (o: number, n: number) => (newLines ? newLines[n] : oldLines?.[o]) ?? "";
+
+  const groups: Block[][] = [];
+  for (const b of blocks) {
+    const g = groups[groups.length - 1];
+    const prev = g?.[g.length - 1];
+    if (g && prev && hasCtx && startOf(b) - endOf(prev) <= 2 * C) g.push(b);
+    else groups.push([b]);
+  }
+
+  return groups.map((g, gi) => {
+    const first = g[0]!;
+    const last = g[g.length - 1]!;
+    const prevGroup = groups[gi - 1];
+    const prevEnd = prevGroup ? endOf(prevGroup[prevGroup.length - 1]!) : 0;
+    const nextStart = groups[gi + 1] ? startOf(groups[gi + 1]![0]!) : total;
+    const before = Math.min(C, startOf(first) - prevEnd);
+    const after = Math.max(0, Math.min(C, nextStart - endOf(last)));
+
+    let o = first.oldStart - before;
+    let n = first.newStart - before;
+    const startO = o;
+    const startN = n;
+    const lines: DiffLine[] = [];
+    const context = (count: number) => {
+      for (let k = 0; k < count; k++, o++, n++) {
+        lines.push({ kind: "context", oldNo: o + 1, newNo: n + 1, text: ctxText(o, n), blockId: null, noEol: false });
+      }
+    };
+
+    context(before);
+    for (const b of g) {
+      context(b.newStart - n);
+      b.del.forEach((text, k) => {
+        lines.push({ kind: "del", oldNo: ++o, newNo: null, text, blockId: b.id, noEol: b.oldNoEol && k === b.del.length - 1 });
+      });
+      b.add.forEach((text, k) => {
+        lines.push({ kind: "add", oldNo: null, newNo: ++n, text, blockId: b.id, noEol: b.newNoEol && k === b.add.length - 1 });
+      });
+    }
+    context(after);
+
+    const header = `@@ -${rangeHeader(startO, o - startO)} +${rangeHeader(startN, n - startN)} @@${first.section ? ` ${first.section}` : ""}`;
+    return { header, lines };
+  });
+}
+
+async function mapLimit<T, R>(items: readonly T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const out = new Array<R>(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const i = next++;
+      out[i] = await fn(items[i]!);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return out;
+}

@@ -1,0 +1,16 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "github-code-review",
+  "description": "Claude Code plugins for reviewing the code changes Claude makes, in a GitHub-style browser UI.",
+  "owner": {
+    "name": "RulerChen"
+  },
+  "plugins": [
+    {
+      "name": "diff-review",
+      "description": "GitHub-style browser diff viewer for the changes Claude made in your repository.",
+      "category": "development",
+      "source": "./plugins/diff-review"
+    }
+  ]
+}
