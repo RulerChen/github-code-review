@@ -1,17 +1,20 @@
 import { createContext, type FormEvent, useContext, useEffect, useRef, useState } from "react";
 import { MENTION } from "../shared/comments";
-import type { Thread, ThreadAnchor } from "../shared/types";
+import type { FileAnchor, LineAnchor, Thread, ThreadAnchor } from "../shared/types";
 import { Markdown } from "./Markdown";
 
 export interface RevealRequest {
   thread: Thread;
 }
 
+/** An anchor before the page fills in the commit it is on. */
+export type NewAnchor = Omit<LineAnchor, "commit"> | Omit<FileAnchor, "commit">;
+
 export interface CommentsApi {
   /** The commit each side of the diff comes from, or null for the working tree. */
-  versions: Record<ThreadAnchor["side"], string | null>;
+  versions: Record<LineAnchor["side"], string | null>;
   threadsFor: (path: string) => Thread[];
-  create: (anchor: Omit<ThreadAnchor, "commit">, snippet: string, body: string) => Promise<void>;
+  create: (anchor: NewAnchor, snippet: string, body: string) => Promise<void>;
   reply: (threadId: string, body: string) => Promise<void>;
   unread: (thread: Thread) => number;
   markRead: (thread: Thread) => void;
@@ -38,6 +41,7 @@ export const CommentsContext = createContext<CommentsApi>({
 export const useComments = () => useContext(CommentsContext);
 
 export function anchorLabel(anchor: ThreadAnchor, withVersion = false): string {
+  if (anchor.side === null) return "Whole file";
   const side = anchor.side === "old" ? "Old" : "New";
   const lines = anchor.start === anchor.end ? `${side} line ${anchor.start}` : `${side} lines ${anchor.start}–${anchor.end}`;
   if (!withVersion) return lines;
@@ -50,8 +54,9 @@ export function readableCount(thread: Thread): number {
   return i < 0 ? thread.comments.length : i;
 }
 
-/** Whether a thread's lines come from the version of the file shown on its side of the diff. */
-export const onShownVersion = (thread: Thread, versions: CommentsApi["versions"]) => thread.anchor.commit === versions[thread.anchor.side];
+/** Whether a thread's lines come from the version of the file shown on its side of the diff. A comment on the whole file always does. */
+export const onShownVersion = (thread: Thread, versions: CommentsApi["versions"]) =>
+  thread.anchor.side === null || thread.anchor.commit === versions[thread.anchor.side];
 
 interface FormProps {
   placeholder: string;
@@ -111,6 +116,33 @@ export function CommentForm({ placeholder, submitLabel, onSubmit, onCancel }: Fo
   );
 }
 
+const READER_INPUT = ["wheel", "touchstart", "keydown", "mousedown"] as const;
+
+/**
+ * Scrolls an element to the middle of the screen and keeps it there for a second, until the reader scrolls. Files
+ * above it mount once they come near the screen, and when they turn out taller than estimated they push it down,
+ * often off screen, since the browser's scroll anchoring does not always make up for it.
+ */
+function holdCentered(el: HTMLElement): () => void {
+  el.scrollIntoView({ block: "center" });
+  const top = el.getBoundingClientRect().top;
+  const until = performance.now() + 1000;
+  let frame = 0;
+  const stop = () => {
+    cancelAnimationFrame(frame);
+    for (const type of READER_INPUT) window.removeEventListener(type, stop, true);
+  };
+  const step = () => {
+    const drift = el.getBoundingClientRect().top - top;
+    if (Math.abs(drift) >= 1) window.scrollBy(0, drift);
+    if (performance.now() < until) frame = requestAnimationFrame(step);
+    else stop();
+  };
+  for (const type of READER_INPUT) window.addEventListener(type, stop, { capture: true, passive: true });
+  frame = requestAnimationFrame(step);
+  return stop;
+}
+
 export function ThreadView({ thread, withVersion = false }: { thread: Thread; withVersion?: boolean }) {
   const { reply, unread, markRead, current, revealSeq, takeReveal } = useComments();
   const [replying, setReplying] = useState(false);
@@ -118,9 +150,9 @@ export function ThreadView({ thread, withVersion = false }: { thread: Thread; wi
   const unreadCount = unread(thread);
 
   useEffect(() => {
-    const request = takeReveal(thread.id);
-    if (!request) return;
-    ref.current?.scrollIntoView({ block: "center" });
+    const el = ref.current;
+    if (!takeReveal(thread.id) || !el) return;
+    return holdCentered(el);
   }, [revealSeq]);
 
   // An answer counts as read once its thread is on screen while the page is in front.

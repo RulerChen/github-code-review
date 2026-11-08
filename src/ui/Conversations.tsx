@@ -81,8 +81,8 @@ export function useConversations({ repoRoot, threads, place, show }: Options): C
         return (
           (ra === rb ? 0 : ra - rb) ||
           comparePaths(a.anchor.path, b.anchor.path) ||
-          a.anchor.end - b.anchor.end ||
-          a.anchor.start - b.anchor.start
+          (a.anchor.end ?? 0) - (b.anchor.end ?? 0) ||
+          (a.anchor.start ?? 0) - (b.anchor.start ?? 0)
         );
       }),
     [threads, placeOf],
@@ -147,6 +147,7 @@ function CloseIcon() {
 }
 
 function lineLabel(anchor: ThreadAnchor): string {
+  if (anchor.side === null) return "file";
   const lines = anchor.start === anchor.end ? `L${anchor.start}` : `L${anchor.start}–${anchor.end}`;
   return anchor.side === "old" ? `old ${lines}` : lines;
 }
@@ -198,8 +199,9 @@ export function ConversationsPanel({ conv }: { conv: Conversations }) {
       </header>
       {ordered.length === 0 ? (
         <p className="conversations-empty">
-          No conversations yet. Click a line number to leave a comment. Mention @claude to ask about the lines, or leave
-          comments for Claude to address and press Submit review.
+          No conversations yet. Click a line number to comment on lines, or the comment button in a file's header to
+          comment on the whole file. Mention @claude to ask a question, or leave comments for Claude to address and press
+          Submit review.
         </p>
       ) : (
         <ul className="conversations-list">

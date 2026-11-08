@@ -136,7 +136,7 @@ export function App({ viewId }: Props) {
       threadsFor: (path) => byPath.get(path) ?? [],
       create: async (anchor, snippet, body) => {
         if (!viewId) return;
-        const thread = await createThread(viewId, { ...anchor, commit: versions[anchor.side] }, snippet, body);
+        const thread = await createThread(viewId, { ...anchor, commit: versions[anchor.side ?? "new"] }, snippet, body);
         setThreads((prev) => mergeThreads(prev, [thread]));
       },
       reply: async (threadId: string, body: string) => {

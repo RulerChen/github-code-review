@@ -75,12 +75,24 @@ export interface Review {
   topics: Topic[];
 }
 
-export interface ThreadAnchor {
+export type ThreadAnchor = LineAnchor | FileAnchor;
+
+export interface LineAnchor {
   path: string;
   side: "old" | "new";
   start: number;
   end: number;
   /** The commit the lines come from, or null for the working tree. */
+  commit: string | null;
+}
+
+/** A comment on the whole file. It stays on the file whichever versions the page compares. */
+export interface FileAnchor {
+  path: string;
+  side: null;
+  start: null;
+  end: null;
+  /** The commit of the new side when the comment was written, or null for the working tree. */
   commit: string | null;
 }
 

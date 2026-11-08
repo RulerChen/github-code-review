@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { buildHunks, splitLines } from "../shared/hunks";
 import type { Block, DisplayHunk, Expansion, FileDiff } from "../shared/types";
-import { onShownVersion, ThreadView, useComments } from "./comments";
+import { CommentForm, onShownVersion, ThreadView, useComments } from "./comments";
 import { DiffTable, hasLine, type OnExpand, splitRowCount } from "./DiffTable";
 import { highlight, languageFor, type TokenLines } from "./highlight";
 import { keepHeaderInPlace } from "./keyboard";
@@ -54,11 +54,20 @@ export function ChevronIcon() {
   );
 }
 
+function CommentIcon() {
+  return (
+    <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+      <path d="M1 2.75C1 1.784 1.784 1 2.75 1h10.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 13.25 12H9.06l-2.573 2.573A1.458 1.458 0 0 1 4 13.543V12H2.75A1.75 1.75 0 0 1 1 10.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h2a.75.75 0 0 1 .75.75v2.19l2.72-2.72a.749.749 0 0 1 .53-.22h4.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z" />
+    </svg>
+  );
+}
+
 export function FileCard({ file: next, blocks: nextBlocks = next.blocks, anchor, viewed = false, onToggleViewed }: Props) {
   const [collapsed, setCollapsed] = useState(viewed);
   const [forceLoad, setForceLoad] = useState(false);
   const [expansion, setExpansion] = useState(NO_EXPANSION);
   const [near, setNear] = useState(false);
+  const [commenting, setCommenting] = useState(false);
   useEffect(() => setCollapsed(viewed), [viewed]);
 
   const { lineCount, charCount } = useMemo(() => sizeOf(baseHunksOf(next, nextBlocks)), [next, nextBlocks]);
@@ -76,19 +85,23 @@ export function FileCard({ file: next, blocks: nextBlocks = next.blocks, anchor,
   const ref = useRef<HTMLElement>(null);
   const header = useRef<HTMLElement>(null);
   useEffect(() => (near || !ref.current ? undefined : whenNear(ref.current, () => setNear(true))), [near]);
-  const { threadsFor, versions, revealSeq, peekReveal } = useComments();
+  const { threadsFor, create, versions, revealSeq, peekReveal } = useComments();
   useEffect(() => {
     const thread = peekReveal()?.thread;
     if (!thread || thread.anchor.path !== file.path) return;
-    const placed = onShownVersion(thread, versions) && hasLine(hunks, thread.anchor.side, thread.anchor.end);
+    const { anchor } = thread;
+    const placed = anchor.side === null || (onShownVersion(thread, versions) && hasLine(hunks, anchor.side, anchor.end));
     if (!placed && partial) return;
     setCollapsed(false);
     setNear(true);
-    if (placed) setForceLoad(true);
+    if (placed && anchor.side !== null) setForceLoad(true);
   }, [revealSeq]);
+  const threads = threadsFor(file.path);
+  // Comments on the whole file show on every card of the file, since a topic can show part of it.
+  const fileThreads = threads.filter((t) => t.anchor.side === null);
   const unplaced = partial
     ? []
-    : threadsFor(file.path).filter((t) => !onShownVersion(t, versions) || !hasLine(hunks, t.anchor.side, t.anchor.end));
+    : threads.filter((t) => t.anchor.side !== null && (!onShownVersion(t, versions) || !hasLine(hunks, t.anchor.side, t.anchor.end)));
   const additions = partial ? countLines(hunks, "add") : file.additions;
   const deletions = partial ? countLines(hunks, "del") : file.deletions;
 
@@ -115,6 +128,18 @@ export function FileCard({ file: next, blocks: nextBlocks = next.blocks, anchor,
         </span>
         <CopyButton text={file.path} />
         <span className="spacer" />
+        <button
+          className="icon-button"
+          aria-label="Comment on this file"
+          title="Comment on this file"
+          onClick={() => {
+            setCollapsed(false);
+            setNear(true);
+            setCommenting(true);
+          }}
+        >
+          <CommentIcon />
+        </button>
         {onToggleViewed && (
           <label className="viewed-toggle">
             <input
@@ -136,6 +161,24 @@ export function FileCard({ file: next, blocks: nextBlocks = next.blocks, anchor,
       )}
       {!collapsed && near && (
         <div className="file-body">
+          {(fileThreads.length > 0 || commenting) && (
+            <div className="file-threads">
+              {fileThreads.map((t) => (
+                <ThreadView key={t.id} thread={t} />
+              ))}
+              {commenting && (
+                <CommentForm
+                  placeholder="Comment on this file"
+                  submitLabel="Comment"
+                  onSubmit={async (body) => {
+                    await create({ path: file.path, side: null, start: null, end: null }, "", body);
+                    setCommenting(false);
+                  }}
+                  onCancel={() => setCommenting(false)}
+                />
+              )}
+            </div>
+          )}
           {unplaced.length > 0 && (
             <div className="unplaced">
               <p className="file-note inline">Comments on lines not shown in this diff</p>

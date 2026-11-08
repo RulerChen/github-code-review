@@ -76,17 +76,20 @@ export function formatReviewComments(threads: Thread[], submissions: Submission[
 }
 
 function formatThread(t: Thread): string {
-  const { path, side, start, end, commit } = t.anchor;
-  const range = start === end ? `line ${start}` : `lines ${start}-${end}`;
-  const version = commit ? ` at commit ${commit}` : side === "new" ? " in the working tree" : "";
-  const snippet = t.snippet.split("\n").slice(0, 8).map((l) => `  > ${l}`);
+  const { anchor } = t;
+  const version = anchor.commit ? ` at commit ${anchor.commit}` : anchor.side !== "old" ? " in the working tree" : "";
+  const where =
+    anchor.side === null
+      ? "the whole file"
+      : `${anchor.side} ${anchor.start === anchor.end ? `line ${anchor.start}` : `lines ${anchor.start}-${anchor.end}`}`;
+  const snippet = anchor.side === null ? [] : t.snippet.split("\n").slice(0, 8).map((l) => `  > ${l}`);
   const comments = t.comments
     .filter((c) => c.status === "done")
     .map((c) => {
       const who = c.author === "claude" ? "Claude" : c.draft ? "User (draft)" : c.review ? `User (review ${c.review})` : "User";
       return `  ${who}: ${indent(c.body, "    ").trimStart()}`;
     });
-  return [`Thread ${t.id}: ${path}, ${side} ${range}${version}`, ...snippet, ...comments].join("\n");
+  return [`Thread ${t.id}: ${anchor.path}, ${where}${version}`, ...snippet, ...comments].join("\n");
 }
 
 const indent = (text: string, prefix: string) => text.replace(/^/gm, prefix);

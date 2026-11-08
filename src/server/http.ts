@@ -246,14 +246,10 @@ function isAnchor(value: unknown): value is ThreadAnchor {
   if (value === null || typeof value !== "object") return false;
   const a = value as Record<string, unknown>;
   const line = (n: unknown) => Number.isInteger(n) && (n as number) > 0;
-  return (
-    isText(a.path, 4096, true) &&
-    (a.side === "old" || a.side === "new") &&
-    line(a.start) &&
-    line(a.end) &&
-    (a.start as number) <= (a.end as number) &&
-    (a.commit === null || (typeof a.commit === "string" && /^[0-9a-f]{40,64}$/.test(a.commit)))
-  );
+  if (!isText(a.path, 4096, true)) return false;
+  if (a.commit !== null && !(typeof a.commit === "string" && /^[0-9a-f]{40,64}$/.test(a.commit))) return false;
+  if (a.side === null) return a.start === null && a.end === null;
+  return (a.side === "old" || a.side === "new") && line(a.start) && line(a.end) && (a.start as number) <= (a.end as number);
 }
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {

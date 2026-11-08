@@ -159,20 +159,30 @@ function comment(author: ThreadComment["author"], body: string, status: ThreadCo
 }
 
 function buildPrompt(thread: Thread): string {
-  const { path, side, start, end, commit } = thread.anchor;
-  const lines = start === end ? `line ${start}` : `lines ${start}-${end}`;
-  const version = commit
-    ? ` as of commit ${commit}. The files on disk are the working tree and can differ from that commit`
-    : side === "new"
+  const { anchor } = thread;
+  const version = anchor.commit
+    ? ` as of commit ${anchor.commit}. The files on disk are the working tree and can differ from that commit`
+    : anchor.side !== "old"
       ? " in the working tree"
       : "";
   const history = thread.comments
     .filter((c) => c.status === "done")
     .map((c) => `${c.author === "user" ? "User" : "Claude"}: ${c.body}`)
     .join("\n\n");
+  const answer = "Answer the last comment directly and concisely, in the language it is written in, using Markdown. You can read files to check details, but do not change anything.";
+  if (anchor.side === null) {
+    return [
+      `The user is reviewing the code changes in a diff viewer. They wrote in a comment thread on the whole file ${anchor.path}${version}, not on particular lines.`,
+      answer,
+      "",
+      "Thread:",
+      history,
+    ].join("\n");
+  }
+  const lines = anchor.start === anchor.end ? `line ${anchor.start}` : `lines ${anchor.start}-${anchor.end}`;
   return [
-    `The user is reviewing the code changes in a diff viewer. They selected ${lines} of the ${side} version of ${path}${version}. They wrote in a comment thread on these lines.`,
-    "Answer the last comment directly and concisely, in the language it is written in, using Markdown. You can read files to check details, but do not change anything.",
+    `The user is reviewing the code changes in a diff viewer. They selected ${lines} of the ${anchor.side} version of ${anchor.path}${version}. They wrote in a comment thread on these lines.`,
+    answer,
     "",
     "Selected lines:",
     "```",

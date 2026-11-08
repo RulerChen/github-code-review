@@ -890,7 +890,8 @@ button {
   background: var(--bg);
 }
 
-.unplaced {
+.unplaced,
+.file-threads {
   display: grid;
   gap: 8px;
   padding: 8px 12px 12px;
@@ -1002,7 +1003,8 @@ button {
   padding: 8px 12px 10px;
 }
 
-.thread-row .comment-form {
+.thread-row .comment-form,
+.file-threads .comment-form {
   padding: 0;
 }
 

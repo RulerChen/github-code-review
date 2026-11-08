@@ -37417,13 +37417,23 @@ function comment(author, body, status) {
   return { id: newId(), author, body, status, activity: null, createdAt: (/* @__PURE__ */ new Date()).toISOString(), draft: false, review: null };
 }
 function buildPrompt(thread) {
-  const { path: path5, side, start, end, commit } = thread.anchor;
-  const lines = start === end ? `line ${start}` : `lines ${start}-${end}`;
-  const version2 = commit ? ` as of commit ${commit}. The files on disk are the working tree and can differ from that commit` : side === "new" ? " in the working tree" : "";
+  const { anchor: anchor2 } = thread;
+  const version2 = anchor2.commit ? ` as of commit ${anchor2.commit}. The files on disk are the working tree and can differ from that commit` : anchor2.side !== "old" ? " in the working tree" : "";
   const history = thread.comments.filter((c) => c.status === "done").map((c) => `${c.author === "user" ? "User" : "Claude"}: ${c.body}`).join("\n\n");
+  const answer = "Answer the last comment directly and concisely, in the language it is written in, using Markdown. You can read files to check details, but do not change anything.";
+  if (anchor2.side === null) {
+    return [
+      `The user is reviewing the code changes in a diff viewer. They wrote in a comment thread on the whole file ${anchor2.path}${version2}, not on particular lines.`,
+      answer,
+      "",
+      "Thread:",
+      history
+    ].join("\n");
+  }
+  const lines = anchor2.start === anchor2.end ? `line ${anchor2.start}` : `lines ${anchor2.start}-${anchor2.end}`;
   return [
-    `The user is reviewing the code changes in a diff viewer. They selected ${lines} of the ${side} version of ${path5}${version2}. They wrote in a comment thread on these lines.`,
-    "Answer the last comment directly and concisely, in the language it is written in, using Markdown. You can read files to check details, but do not change anything.",
+    `The user is reviewing the code changes in a diff viewer. They selected ${lines} of the ${anchor2.side} version of ${anchor2.path}${version2}. They wrote in a comment thread on these lines.`,
+    answer,
     "",
     "Selected lines:",
     "```",
@@ -37653,7 +37663,10 @@ function isAnchor(value) {
   if (value === null || typeof value !== "object") return false;
   const a = value;
   const line = (n) => Number.isInteger(n) && n > 0;
-  return isText(a.path, 4096, true) && (a.side === "old" || a.side === "new") && line(a.start) && line(a.end) && a.start <= a.end && (a.commit === null || typeof a.commit === "string" && /^[0-9a-f]{40,64}$/.test(a.commit));
+  if (!isText(a.path, 4096, true)) return false;
+  if (a.commit !== null && !(typeof a.commit === "string" && /^[0-9a-f]{40,64}$/.test(a.commit))) return false;
+  if (a.side === null) return a.start === null && a.end === null;
+  return (a.side === "old" || a.side === "new") && line(a.start) && line(a.end) && a.start <= a.end;
 }
 function sendJson(res, status, body) {
   res.writeHead(status, {
@@ -37733,15 +37746,15 @@ function formatReviewComments(threads, submissions, after) {
   return out.join("\n");
 }
 function formatThread(t) {
-  const { path: path5, side, start, end, commit } = t.anchor;
-  const range = start === end ? `line ${start}` : `lines ${start}-${end}`;
-  const version2 = commit ? ` at commit ${commit}` : side === "new" ? " in the working tree" : "";
-  const snippet = t.snippet.split("\n").slice(0, 8).map((l) => `  > ${l}`);
+  const { anchor: anchor2 } = t;
+  const version2 = anchor2.commit ? ` at commit ${anchor2.commit}` : anchor2.side !== "old" ? " in the working tree" : "";
+  const where = anchor2.side === null ? "the whole file" : `${anchor2.side} ${anchor2.start === anchor2.end ? `line ${anchor2.start}` : `lines ${anchor2.start}-${anchor2.end}`}`;
+  const snippet = anchor2.side === null ? [] : t.snippet.split("\n").slice(0, 8).map((l) => `  > ${l}`);
   const comments = t.comments.filter((c) => c.status === "done").map((c) => {
     const who = c.author === "claude" ? "Claude" : c.draft ? "User (draft)" : c.review ? `User (review ${c.review})` : "User";
     return `  ${who}: ${indent(c.body, "    ").trimStart()}`;
   });
-  return [`Thread ${t.id}: ${path5}, ${side} ${range}${version2}`, ...snippet, ...comments].join("\n");
+  return [`Thread ${t.id}: ${anchor2.path}, ${where}${version2}`, ...snippet, ...comments].join("\n");
 }
 var indent = (text, prefix) => text.replace(/^/gm, prefix);
 function checkTopics(diff, topics) {
@@ -37864,7 +37877,7 @@ async function runMcp() {
     "get_review_comments",
     {
       title: "Get review comments",
-      description: "Read the review the user submitted in the diff viewer: their comment on the whole review and each comment thread with its id, the selected lines and the earlier comments, plus draft comments they have not submitted yet. Use it when the wait command from open_diff_viewer finishes, or when the user asks you to address their review comments.",
+      description: "Read the review the user submitted in the diff viewer: their comment on the whole review and each comment thread with its id, the selected lines (or the whole file) and the earlier comments, plus draft comments they have not submitted yet. Use it when the wait command from open_diff_viewer finishes, or when the user asks you to address their review comments.",
       inputSchema: {
         after: external_exports.number().int().min(0).optional().describe("Read every review numbered above this one, as the wait command says. Omit it for the latest review.")
       },

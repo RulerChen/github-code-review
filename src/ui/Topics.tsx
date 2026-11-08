@@ -23,6 +23,8 @@ export interface TopicView {
   changeCount: number;
   stale: number;
   signature: string;
+  /** The files this topic is the first to show. A comment on a whole file belongs to the first topic with the file. */
+  firstFor: Set<string>;
 }
 
 export function buildTopics(review: Review, files: FileDiff[]): TopicView[] {
@@ -50,6 +52,7 @@ export function buildTopics(review: Review, files: FileDiff[]): TopicView[] {
       changeCount: present.length,
       stale: ids.length - present.length,
       signature: present.join(","),
+      firstFor: new Set(),
     };
   };
 
@@ -59,23 +62,35 @@ export function buildTopics(review: Review, files: FileDiff[]): TopicView[] {
     ? [make("other", views.length, "Other changes", "Changes that are in no topic, including any edited after Claude grouped them.", true, rest)]
     : [];
 
-  return [...views.filter((v) => v.related), ...other, ...views.filter((v) => !v.related)];
+  const ordered = [...views.filter((v) => v.related), ...other, ...views.filter((v) => !v.related)];
+  const seen = new Set<string>();
+  for (const t of ordered) {
+    for (const { file } of t.parts) {
+      if (!seen.has(file.path)) t.firstFor.add(file.path);
+      seen.add(file.path);
+    }
+  }
+  return ordered;
 }
 
 const partHunks = new WeakMap<TopicPart, DisplayHunk[]>();
 
-/** Whether a thread's line is in the topic's diff before any expanding. */
+/**
+ * Whether a thread belongs to the topic: its line is in the topic's diff before any expanding, or it is a comment on
+ * a whole file and the topic is the first with the file.
+ */
 export function topicShows(topic: TopicView, thread: Thread, versions: CommentsApi["versions"]): boolean {
+  const { anchor } = thread;
+  if (anchor.side === null) return topic.firstFor.has(anchor.path);
   if (!onShownVersion(thread, versions)) return false;
-  const { path, side, end } = thread.anchor;
   return topic.parts.some((p) => {
-    if (p.file.path !== path) return false;
+    if (p.file.path !== anchor.path) return false;
     let hunks = partHunks.get(p);
     if (!hunks) {
       hunks = hunksOf(p.file, p.blocks, null);
       partHunks.set(p, hunks);
     }
-    return hasLine(hunks, side, end);
+    return hasLine(hunks, anchor.side, anchor.end);
   });
 }
 

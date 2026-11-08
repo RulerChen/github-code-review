@@ -75,7 +75,7 @@ export function DiffTable({ path, hunks, oldTokens, newTokens, onExpand }: Props
   const threadsAt = useMemo(() => {
     const at = new Map<string, Thread[]>();
     for (const t of threads) {
-      if (!onShownVersion(t, versions)) continue;
+      if (t.anchor.side === null || !onShownVersion(t, versions)) continue;
       const key = `${t.anchor.side}:${t.anchor.end}`;
       at.set(key, [...(at.get(key) ?? []), t]);
     }
