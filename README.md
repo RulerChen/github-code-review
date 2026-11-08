@@ -4,7 +4,7 @@ A Claude Code plugin that shows your uncommitted changes in a GitHub-style diff 
 
 ## Screenshots
 
-...
+![The Topics view: Claude's topics in the sidebar, then each topic's summary above the split diff of its files](docs/screenshot.png)
 
 ## Setup
 
@@ -12,6 +12,8 @@ A Claude Code plugin that shows your uncommitted changes in a GitHub-style diff 
 claude plugin marketplace add RulerChen/github-code-review
 claude plugin install diff-review@github-code-review
 ```
+
+Requires Node.js 20 or newer and git.
 
 ```sh
 claude plugin update diff-review@github-code-review
