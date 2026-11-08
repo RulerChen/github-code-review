@@ -38186,7 +38186,8 @@ async function runMcp() {
       const server = serverPromise ? await serverPromise : null;
       const all = server?.repoThreads() ?? [];
       const wanted = args.repo ? path4.resolve(args.repo) : null;
-      const repos = wanted ? all.filter((r) => wanted === r.repo || wanted.startsWith(r.repo + path4.sep)) : all;
+      const containing = wanted ? all.filter((r) => wanted === r.repo || wanted.startsWith(r.repo + path4.sep)) : all;
+      const repos = wanted ? containing.filter((r) => !containing.some((o) => o.repo.length > r.repo.length)) : all;
       if (args.after !== void 0 && !wanted && repos.filter((r) => r.threads.submissions.length).length > 1) {
         const text = "Several repositories have reviews, numbered separately. Set repo to the one the wait command named.";
         return { content: [{ type: "text", text }], isError: true };

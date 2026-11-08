@@ -186,7 +186,10 @@ async function runMcp(): Promise<void> {
       const server = serverPromise ? await serverPromise : null;
       const all = server?.repoThreads() ?? [];
       const wanted = args.repo ? path.resolve(args.repo) : null;
-      const repos = wanted ? all.filter((r) => wanted === r.repo || wanted.startsWith(r.repo + path.sep)) : all;
+      const containing = wanted ? all.filter((r) => wanted === r.repo || wanted.startsWith(r.repo + path.sep)) : all;
+      // Repositories nest, such as a submodule or a repository cloned inside another, so a path in the inner one
+      // belongs to it alone.
+      const repos = wanted ? containing.filter((r) => !containing.some((o) => o.repo.length > r.repo.length)) : all;
       // Each repository numbers its reviews from 1, so one after number cannot serve several.
       if (args.after !== undefined && !wanted && repos.filter((r) => r.threads.submissions.length).length > 1) {
         const text = "Several repositories have reviews, numbered separately. Set repo to the one the wait command named.";
