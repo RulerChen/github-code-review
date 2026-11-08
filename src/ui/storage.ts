@@ -1,6 +1,5 @@
 import { useCallback, useState } from "react";
 
-// localStorage can be missing or throw (private windows, blocked site data); the UI must work without it.
 export function readStorage<T>(key: string, fallback: T): T {
   try {
     const raw = localStorage.getItem(key);
@@ -13,9 +12,7 @@ export function readStorage<T>(key: string, fallback: T): T {
 export function writeStorage(key: string, value: unknown): void {
   try {
     localStorage.setItem(key, JSON.stringify(value));
-  } catch {
-    // Not persisting is acceptable.
-  }
+  } catch {}
 }
 
 export function usePersistentState<T>(key: string, initial: T): [T, (value: T) => void] {

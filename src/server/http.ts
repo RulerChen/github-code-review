@@ -22,20 +22,10 @@ const MIME: Record<string, string> = {
   ".woff2": "font/woff2",
 };
 
-// Shiki emits inline style attributes for token colors, hence 'unsafe-inline' for styles only.
 const CSP =
   "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; " +
   "connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'";
 
-/**
- * Local web server for the review UI.
- *
- * Anything that can reach this port can read the repository, so: it binds to
- * 127.0.0.1 only, the API requires a per-process token in a custom header (a
- * cross-site page cannot send one without a CORS preflight, which is never
- * answered), and the Host header must name this server (blocks DNS rebinding).
- * The token travels in the URL fragment, which browsers do not send to servers.
- */
 export class ReviewServer {
   readonly token = randomBytes(24).toString("base64url");
   private readonly views = new Map<string, View>();

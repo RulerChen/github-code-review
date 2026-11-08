@@ -6,13 +6,10 @@ import { git } from "./git.js";
 
 export type { Block, DiffLine, DiffResult, DisplayHunk, FileDiff, FileStatus };
 
-/** Unchanged lines shown around each change, as in plain `git diff`. */
 export const CONTEXT_LINES = 3;
-/** Larger files are still diffed, but their full text is not loaded (no context, no highlighting). */
 export const MAX_CONTENT_BYTES = 1024 * 1024;
 const EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 
-/** Diff the working tree (tracked and untracked files) against `base`. */
 export async function computeDiff(repo: string, base = "HEAD"): Promise<DiffResult> {
   if (base.startsWith("-")) throw new Error(`Invalid git ref: ${base}`);
   const repoRoot = (await git(repo, ["rev-parse", "--show-toplevel"])).toString("utf8").trim();
@@ -28,8 +25,7 @@ export async function computeDiff(repo: string, base = "HEAD"): Promise<DiffResu
 
   const entries = parseNameStatus(nameStatus);
   let sections: (string[] | undefined)[] = splitSections(patch.toString("utf8"));
-  // Both commands use the same flags, so files come out in the same order.
-  // If that ever fails to hold, diff each file on its own instead of guessing.
+
   if (sections.length !== entries.length) sections = [];
 
   const tracked = await mapLimit(entries.map((e, i) => [e, sections[i]] as const), 8, ([entry, section]) =>
@@ -55,7 +51,6 @@ async function resolveBase(repoRoot: string, base: string): Promise<string | nul
   try {
     return (await git(repoRoot, ["rev-parse", "--verify", "--quiet", `${base}^{commit}`])).toString("utf8").trim();
   } catch {
-    // An unborn branch has no HEAD commit yet: everything counts as added.
     if (base === "HEAD") return null;
     throw new Error(`Unknown git ref: ${base}`);
   }
@@ -90,12 +85,10 @@ function statusOf(code: string): FileStatus {
   return "modified";
 }
 
-/** Split a multi-file patch into one line array per "diff --git" section. */
 function splitSections(patch: string): string[][] {
   const sections: string[][] = [];
   let cur: string[] | null = null;
   for (const line of patch.split("\n")) {
-    // Content lines always start with ' ', '+', '-' or '\', so this cannot match file content.
     if (line.startsWith("diff --git ")) {
       cur = [];
       sections.push(cur);
@@ -129,7 +122,7 @@ function parseSection(lines: string[]): ParsedSection {
       if (!m) throw new Error(`Unparseable hunk header: ${line}`);
       const oldCount = m[2] === undefined ? 1 : Number(m[2]);
       const newCount = m[4] === undefined ? 1 : Number(m[4]);
-      // In a unified diff a zero-length side gives the line *before* the change.
+
       cur = {
         oldStart: oldCount === 0 ? Number(m[1]) : Number(m[1]) - 1,
         oldCount,
@@ -180,7 +173,7 @@ function assignIds(filePath: string, raws: RawBlock[]): Block[] {
       .update(`\0${r.oldNoEol ? 1 : 0}${r.newNoEol ? 1 : 0}`)
       .digest("hex")
       .slice(0, 12);
-    // Identical changes in one file (e.g. the same line edited twice) get an ordinal suffix.
+
     const n = (seen.get(h) ?? 0) + 1;
     seen.set(h, n);
     return { id: n === 1 ? h : `${h}-${n}`, ...r };
@@ -191,7 +184,6 @@ type Content = { kind: "text"; text: string } | { kind: "binary" } | { kind: "to
 
 function classify(buf: Buffer): Content {
   if (buf.length > MAX_CONTENT_BYTES) return { kind: "tooLarge" };
-  // Same heuristic as git: a NUL byte in the first 8000 bytes means binary.
   if (buf.subarray(0, 8000).includes(0)) return { kind: "binary" };
   return { kind: "text", text: buf.toString("utf8") };
 }
@@ -208,7 +200,6 @@ async function readWorkTree(repoRoot: string, filePath: string): Promise<Content
   const abs = path.join(repoRoot, filePath);
   try {
     const st = await lstat(abs);
-    // git stores a symlink as its target path, so compare against that.
     if (st.isSymbolicLink()) return { kind: "text", text: await readlink(abs) };
     if (!st.isFile()) return { kind: "absent" };
     if (st.size > MAX_CONTENT_BYTES) return { kind: "tooLarge" };
@@ -227,7 +218,6 @@ function splitLines(text: string): string[] {
 
 const stripCr = (s: string) => (s.endsWith("\r") ? s.slice(0, -1) : s);
 
-/** True when every block's lines appear at its claimed position in `lines`. */
 function matchesBlocks(lines: string[], blocks: Block[], side: "old" | "new"): boolean {
   return blocks.every((b) => {
     const [start, want] = side === "old" ? [b.oldStart, b.del] : [b.newStart, b.add];
@@ -263,8 +253,7 @@ async function buildTrackedFile(
 
   let oldLines = oldC.kind === "text" ? splitLines(oldC.text) : null;
   let newLines = newC.kind === "text" ? splitLines(newC.text) : null;
-  // The working tree can change between `git diff` and the read (Claude may be editing).
-  // Context taken from a file that no longer matches the diff would be wrong, so drop it.
+
   if (oldLines && !matchesBlocks(oldLines, blocks, "old")) oldLines = null;
   if (newLines && !matchesBlocks(newLines, blocks, "new")) newLines = null;
 
@@ -286,7 +275,7 @@ async function buildTrackedFile(
 
 async function buildUntrackedFile(repoRoot: string, filePath: string): Promise<FileDiff | null> {
   const c = await readWorkTree(repoRoot, filePath);
-  if (c.kind === "absent") return null; // a directory (nested repository) or already gone
+  if (c.kind === "absent") return null;
   const base: FileDiff = {
     path: filePath,
     oldPath: null,
@@ -326,17 +315,11 @@ function rangeHeader(start0: number, count: number): string {
   return `${start0 + 1},${count}`;
 }
 
-/**
- * Merge blocks into display hunks with CONTEXT_LINES of context, the way git
- * does: blocks whose gap is at most twice the context share one hunk. Context
- * comes from the new file when available, otherwise from the old file; without
- * either, each block is shown bare.
- */
 export function buildHunks(blocks: Block[], oldLines: string[] | null, newLines: string[] | null): DisplayHunk[] {
   if (blocks.length === 0) return [];
   const hasCtx = newLines !== null || oldLines !== null;
   const C = hasCtx ? CONTEXT_LINES : 0;
-  // Unchanged lines between blocks are identical on both sides, so either coordinate system works.
+
   const total = newLines ? newLines.length : oldLines ? oldLines.length : 0;
   const endOf = (b: Block) => (newLines ? b.newStart + b.newCount : b.oldStart + b.oldCount);
   const startOf = (b: Block) => (newLines ? b.newStart : b.oldStart);

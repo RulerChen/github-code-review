@@ -11,7 +11,6 @@ interface Props {
   viewId: string | null;
 }
 
-/** A file counts as viewed only while its changes are the ones that were marked, as on GitHub. */
 const signature = (f: FileDiff) => (f.blocks.length ? f.blocks.map((b) => b.id).join(",") : `${f.status}:${f.binary}`);
 
 export function App({ token, viewId }: Props) {
@@ -44,7 +43,6 @@ export function App({ token, viewId }: Props) {
     void load();
   }, [load]);
 
-  // Same order as the sidebar tree, so scrolling down the page walks the tree top to bottom.
   const entries = useMemo(
     () =>
       [...(diff?.files ?? [])]

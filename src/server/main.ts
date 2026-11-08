@@ -7,12 +7,11 @@ import { computeDiff, summarize } from "../engine/diff.js";
 import { errorMessage, ReviewServer } from "./http.js";
 
 const VERSION = "0.1.0";
-// The bundle lives at dist/server.mjs and the built UI at dist/ui.
+
 const UI_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "ui");
 
 let serverPromise: Promise<ReviewServer> | null = null;
 
-/** Start the web server on first use, so sessions that never open the viewer never open a port. */
 function getServer(): Promise<ReviewServer> {
   serverPromise ??= (async () => {
     const s = new ReviewServer(UI_DIR);
@@ -23,7 +22,6 @@ function getServer(): Promise<ReviewServer> {
 }
 
 async function openViewer(repo: string, base: string): Promise<{ url: string; summary: string }> {
-  // Computing the diff up front validates the repository and the ref before handing out a URL.
   const diff = await computeDiff(repo, base);
   const server = await getServer();
   const view = server.addView(diff.repoRoot, base);
@@ -73,7 +71,6 @@ async function runMcp(): Promise<void> {
     },
   );
 
-  // Claude Code closes stdin when the session ends; take the web server down with it.
   mcp.server.onclose = () => void shutdown();
   process.stdin.on("end", () => void shutdown());
   await mcp.connect(new StdioServerTransport());

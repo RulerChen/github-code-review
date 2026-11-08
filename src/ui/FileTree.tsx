@@ -25,7 +25,6 @@ function buildTree(entries: { file: FileDiff; anchor: string }[]): DirNode {
   return compress(root);
 }
 
-/** Join chains of single-child directories ("src" → "engine" becomes "src/engine"). */
 function compress(node: DirNode): DirNode {
   for (const [key, child] of node.dirs) {
     let c = child;
@@ -38,7 +37,6 @@ function compress(node: DirNode): DirNode {
   return node;
 }
 
-/** Tree order: at each level directories come before files, then names compare by locale. */
 export function comparePaths(a: string, b: string): number {
   const pa = a.split("/");
   const pb = b.split("/");

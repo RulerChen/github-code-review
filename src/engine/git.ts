@@ -9,10 +9,6 @@ export class GitError extends Error {
   }
 }
 
-/**
- * Run git and return stdout as raw bytes. Exit codes listed in `okCodes` are
- * treated as success (e.g. `git diff --no-index` exits 1 when files differ).
- */
 export function git(cwd: string, args: string[], okCodes: readonly number[] = [0]): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     execFile(
@@ -22,7 +18,6 @@ export function git(cwd: string, args: string[], okCodes: readonly number[] = [0
         cwd,
         encoding: "buffer",
         maxBuffer: 512 * 1024 * 1024,
-        // Never take index.lock: Claude may be running git in the same repo.
         env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" },
       },
       (err, stdout, stderr) => {

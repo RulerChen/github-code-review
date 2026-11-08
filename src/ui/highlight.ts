@@ -7,7 +7,6 @@ export interface Token {
 }
 export type TokenLines = Token[][];
 
-// Explicit loaders so the bundle only contains these grammars, each in its own lazily loaded chunk.
 const LANGS = {
   astro: () => import("@shikijs/langs/astro"),
   c: () => import("@shikijs/langs/c"),
@@ -151,7 +150,6 @@ export function languageFor(filePath: string): Lang | null {
   return dot > 0 ? (BY_EXTENSION[name.slice(dot + 1).toLowerCase()] ?? null) : null;
 }
 
-/** Above this size highlighting is skipped; plain text keeps the page responsive. */
 const MAX_HIGHLIGHT_CHARS = 400_000;
 
 let highlighter: Promise<HighlighterCore> | null = null;

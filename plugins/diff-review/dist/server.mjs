@@ -36681,7 +36681,6 @@ function git(cwd, args, okCodes = [0]) {
         cwd,
         encoding: "buffer",
         maxBuffer: 512 * 1024 * 1024,
-        // Never take index.lock: Claude may be running git in the same repo.
         env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" }
       },
       (err, stdout, stderr) => {

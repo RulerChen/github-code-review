@@ -3,7 +3,6 @@ import type { FileDiff } from "../shared/types";
 import { DiffTable, type Mode } from "./DiffTable";
 import { highlight, languageFor, type TokenLines } from "./highlight";
 
-/** Diffs longer than this start collapsed, like GitHub's "Load diff". */
 const LARGE_DIFF_LINES = 800;
 
 interface Props {
@@ -122,9 +121,7 @@ function useHighlight(file: FileDiff, enabled: boolean): { old: TokenLines | nul
       .then(([o, n]) => {
         if (!cancelled) setTokens({ old: o, new: n });
       })
-      .catch(() => {
-        // Highlighting is decoration; plain text is a fine fallback.
-      });
+      .catch(() => {});
     return () => {
       cancelled = true;
     };

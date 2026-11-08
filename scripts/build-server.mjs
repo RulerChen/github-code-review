@@ -8,7 +8,6 @@ await build({
   target: "node20",
   format: "esm",
   legalComments: "none",
-  // Some bundled dependencies are CommonJS and call require() on Node builtins.
   banner: { js: "import { createRequire as __createRequire } from 'node:module'; const require = __createRequire(import.meta.url);" },
   logLevel: "info",
 });

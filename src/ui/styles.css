@@ -1,4 +1,3 @@
-/* Colors follow GitHub's Primer palette so the page reads like a pull request's "Files changed" tab. */
 :root {
   color-scheme: light dark;
   --bg: #ffffff;
@@ -76,7 +75,6 @@ button {
   color: inherit;
 }
 
-/* Top bar */
 .topbar {
   position: sticky;
   top: 0;
@@ -210,7 +208,6 @@ button {
   border-bottom: 1px solid var(--border);
 }
 
-/* Layout */
 .layout {
   display: grid;
   grid-template-columns: 300px minmax(0, 1fr);
@@ -246,7 +243,6 @@ button {
   outline-offset: -1px;
 }
 
-/* File tree */
 .tree,
 .tree ul {
   margin: 0;
@@ -336,7 +332,6 @@ button {
   padding: 8px;
 }
 
-/* File card */
 .file {
   margin-bottom: 16px;
   border: 1px solid var(--border);
@@ -479,7 +474,6 @@ button {
   text-decoration: underline;
 }
 
-/* Diff table */
 .diff-scroll {
   overflow-x: auto;
   border-radius: 0 0 6px 6px;
@@ -509,7 +503,6 @@ button {
   user-select: none;
 }
 
-/* Numbers and +/- markers come from CSS so copying code does not pick them up. */
 .diff .num::before {
   content: attr(data-n);
 }
@@ -579,7 +572,6 @@ button {
   user-select: none;
 }
 
-/* Full-page notices */
 .notice {
   max-width: 640px;
   margin: 64px auto;

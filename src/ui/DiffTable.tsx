@@ -21,7 +21,6 @@ function tokensFor(line: DiffLine, oldTokens: TokenLines | null, newTokens: Toke
 
 function Code({ line, tokens }: { line: DiffLine; tokens: Token[] | undefined }) {
   const text = stripCr(line.text);
-  // Fall back to plain text if the highlighted line does not match (e.g. contents changed underneath).
   const usable = tokens && stripCr(tokens.map((t) => t.content).join("")) === text;
   return (
     <>
@@ -124,7 +123,6 @@ interface SplitRow {
   right: DiffLine | null;
 }
 
-/** Pair each run of removed lines with the added lines that follow it, side by side. */
 export function toSplitRows(lines: DiffLine[]): SplitRow[] {
   const rows: SplitRow[] = [];
   let i = 0;
