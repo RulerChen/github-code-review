@@ -12,5 +12,5 @@
     "isolatedModules": true,
     "verbatimModuleSyntax": true
   },
-  "include": ["src/engine", "src/server", "src/shared", "test"]
+  "include": ["src/engine", "src/server", "src/shared"]
 }

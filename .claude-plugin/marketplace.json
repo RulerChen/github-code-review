@@ -1,5 +1,5 @@
 {
-  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
   "name": "github-code-review",
   "description": "Claude Code plugins for reviewing the code changes Claude makes, in a GitHub-style browser UI.",
   "owner": {

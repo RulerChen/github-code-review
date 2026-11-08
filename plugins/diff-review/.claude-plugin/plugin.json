@@ -1,9 +1,15 @@
 {
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "diff-review",
   "description": "GitHub-style browser diff viewer for the changes Claude made in your repository.",
   "version": "0.1.0",
   "author": {
     "name": "RulerChen"
   },
-  "keywords": ["diff", "code-review", "git", "mcp"]
+  "keywords": [
+    "diff",
+    "code-review",
+    "git",
+    "mcp"
+  ]
 }

@@ -7,7 +7,6 @@
     "build:ui": "vite build --config src/ui/vite.config.ts",
     "build:server": "node scripts/build-server.mjs",
     "dev:server": "node scripts/build-server.mjs && node plugins/diff-review/dist/server.mjs --http-only",
-    "test": "vitest run",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p src/ui/tsconfig.json"
   },
   "devDependencies": {
@@ -22,7 +21,6 @@
     "shiki": "^4.6.0",
     "typescript": "^7.0.2",
     "vite": "^8.3.6",
-    "vitest": "^5.1.0",
     "zod": "^4.6.7"
   }
 }

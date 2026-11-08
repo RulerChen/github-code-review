@@ -31,7 +31,6 @@ The link carries a random token in its `#fragment`, which never leaves the brows
 
 ```sh
 npm install
-npm test            # engine and HTTP tests (vitest)
 npm run typecheck   # server and UI
 npm run build       # UI (Vite) and server (esbuild) into plugins/diff-review/dist
 npm run dev:server  # serve the current repository's diff and print the link, without MCP
