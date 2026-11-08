@@ -1,4 +1,5 @@
 import { summarize } from "../engine/diff.js";
+import { describeComparison } from "../shared/comparison.js";
 import { changeIds, rangeHeader } from "../shared/hunks.js";
 import type { DiffResult, Thread, Topic } from "../shared/types.js";
 import type { Submission } from "./threads.js";
@@ -93,7 +94,8 @@ function formatThread(t: Thread, withDrafts: boolean): string {
   if (anchor.path === null) {
     // The snippet of a topic thread starts with the topic's files.
     const files = t.snippet.split("\n", 1)[0] ?? "";
-    return [`Thread ${t.id}: the topic "${anchor.topic}" as a whole`, ...(files ? [`  ${files}`] : []), ...comments].join("\n");
+    const title = `Thread ${t.id}: the topic "${anchor.topic}" of ${describeComparison(anchor.compare)} as a whole`;
+    return [title, ...(files ? [`  ${files}`] : []), ...comments].join("\n");
   }
   const version = anchor.commit ? ` at commit ${anchor.commit}` : anchor.side !== "old" ? " in the working tree" : "";
   const where =

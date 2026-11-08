@@ -37301,6 +37301,182 @@ function comparisonFromQuery(params) {
   const base = params.get("base");
   return base ? { base, head: params.get("head") || null, threeDot: params.get("dots") !== "2" } : null;
 }
+var sameComparison = (a, b) => a.base === b.base && a.head === b.head && a.threeDot === b.threeDot;
+function describeComparison(c) {
+  return `${c.base}${c.threeDot ? "..." : ".."}${c.head ?? "the working tree"}`;
+}
+
+// src/server/review.ts
+var MAX_CHARS = 6e4;
+var MAX_LINES_PER_CHANGE = 40;
+var MAX_LINE_CHARS = 300;
+var MAX_COMMITS_LISTED = 100;
+function formatChanges(diff) {
+  const count = diff.files.reduce((n, f) => n + changeIds(f).length, 0);
+  const out = [`${summarize(diff)}, ${count} change${count === 1 ? "" : "s"}. Each change starts with its id.`];
+  let size = 0;
+  let omitted = 0;
+  if (diff.commits.length) {
+    const shown = diff.commits.slice(-MAX_COMMITS_LISTED);
+    out.push("", diff.commitCount > shown.length ? `Commits (newest ${shown.length} of ${diff.commitCount}, oldest first):` : "Commits, oldest first:");
+    for (const c of shown) out.push(`  ${c.sha.slice(0, 7)} ${c.subject}`);
+  }
+  for (const f of diff.files) {
+    const stat = f.binary ? "binary" : `+${f.additions} -${f.deletions}${f.diffTooLarge ? ", too large to list its lines" : ""}`;
+    out.push("", `${f.oldPath ? `${f.oldPath} -> ` : ""}${f.path} (${f.status}, ${stat})`);
+    if (f.blocks.length === 0) {
+      out.push(`  file:${f.path}`);
+      continue;
+    }
+    for (const b of f.blocks) {
+      out.push(`  ${b.id}  @@ -${rangeHeader(b.oldStart, b.oldCount)} +${rangeHeader(b.newStart, b.newCount)} @@${b.section ? ` ${b.section}` : ""}`);
+      if (size > MAX_CHARS) {
+        omitted++;
+        continue;
+      }
+      const lines = [...b.del.map((l) => `-${l}`), ...b.add.map((l) => `+${l}`)];
+      for (const l of lines.slice(0, MAX_LINES_PER_CHANGE)) {
+        const line = l.length > MAX_LINE_CHARS ? `${l.slice(0, MAX_LINE_CHARS)}\u2026` : l;
+        out.push(`    ${line}`);
+        size += line.length + 5;
+      }
+      if (lines.length > MAX_LINES_PER_CHANGE) out.push(`    \u2026 ${lines.length - MAX_LINES_PER_CHANGE} more lines`);
+    }
+  }
+  if (omitted) out.push("", `The lines of ${omitted} change${omitted === 1 ? " were" : "s were"} left out to keep this short. Read the files for them.`);
+  return out.join("\n");
+}
+function formatReviewComments(threads, submissions, after) {
+  const withDrafts = after === null;
+  const reviews = after === null ? submissions.slice(-1) : submissions.filter((s) => s.n > after);
+  const numbers = new Set(reviews.map((s) => s.n));
+  const submitted = threads.filter((t) => t.comments.some((c) => c.review !== null && numbers.has(c.review)));
+  const drafts = withDrafts ? threads.filter((t) => !submitted.includes(t) && t.comments.some((c) => c.draft)) : [];
+  const asked = withDrafts ? threads.filter((t) => t.comments.every((c) => c.author !== "user" || !c.draft && c.review === null)) : [];
+  if (!reviews.length && !drafts.length && !asked.length) return null;
+  const out = [];
+  for (const s of reviews) {
+    out.push(`Review ${s.n}, submitted at ${new Date(s.submittedAt).toLocaleTimeString("en-GB")}.`);
+    if (s.body) out.push("  Comment on the whole review:", indent(s.body, "    "));
+  }
+  if (reviews.length) {
+    out.push(`Comments in ${submitted.length} thread${submitted.length === 1 ? "" : "s"}:`);
+    for (const t of submitted) out.push("", formatThread(t, withDrafts));
+  }
+  if (drafts.length) {
+    out.push("", `Draft comments the user has not submitted yet, in ${drafts.length} thread${drafts.length === 1 ? "" : "s"}:`);
+    for (const t of drafts) out.push("", formatThread(t, true));
+  }
+  if (asked.length) {
+    out.push("", `Questions the user asked @claude, answered in the page, in ${asked.length} thread${asked.length === 1 ? "" : "s"}:`);
+    for (const t of asked) out.push("", formatThread(t, true));
+  }
+  return out.join("\n");
+}
+function formatThread(t, withDrafts) {
+  const { anchor: anchor2 } = t;
+  const comments = t.comments.filter((c) => c.status === "done" && (withDrafts || !c.draft)).map((c) => {
+    const who = c.author === "claude" ? "Claude" : c.draft ? "User (draft)" : c.review ? `User (review ${c.review})` : "User";
+    return `  ${who}: ${indent(c.body, "    ").trimStart()}`;
+  });
+  if (anchor2.path === null) {
+    const files = t.snippet.split("\n", 1)[0] ?? "";
+    const title = `Thread ${t.id}: the topic "${anchor2.topic}" of ${describeComparison(anchor2.compare)} as a whole`;
+    return [title, ...files ? [`  ${files}`] : [], ...comments].join("\n");
+  }
+  const version2 = anchor2.commit ? ` at commit ${anchor2.commit}` : anchor2.side !== "old" ? " in the working tree" : "";
+  const where = anchor2.side === null ? "the whole file" : `${anchor2.side} ${anchor2.start === anchor2.end ? `line ${anchor2.start}` : `lines ${anchor2.start}-${anchor2.end}`}`;
+  const snippet = anchor2.side === null ? [] : t.snippet.split("\n").slice(0, 8).map((l) => `  > ${l}`);
+  return [`Thread ${t.id}: ${anchor2.path}, ${where}${version2}`, ...snippet, ...comments].join("\n");
+}
+var indent = (text, prefix) => text.replace(/^/gm, prefix);
+function checkTopics(diff, topics) {
+  const known = new Set(diff.files.flatMap(changeIds));
+  const used = new Set(topics.flatMap((t) => t.ids));
+  return {
+    unknown: [...used].filter((id) => !known.has(id)),
+    unassigned: [...known].filter((id) => !used.has(id))
+  };
+}
+
+// src/server/group.ts
+async function groupChanges(o) {
+  const run = (resume, fork, prompt2) => ask({ cwd: o.cwd, resume, fork, prompt: prompt2, onText: () => {
+  }, onActivity: o.onActivity });
+  const prompt = buildPrompt(o.diff, o.focus);
+  let res;
+  try {
+    res = await run(o.session, true, prompt);
+  } catch (err) {
+    if (o.session === null) throw err;
+    res = await run(null, false, prompt);
+  }
+  let topics = parseTopics(res.text);
+  const problem = typeof topics === "string" ? topics : unknownIds(o.diff, topics);
+  if (problem && res.sessionId) {
+    o.onActivity("Correcting its answer");
+    res = await run(res.sessionId, false, `${problem} Reply again with only the corrected JSON object.`);
+    topics = parseTopics(res.text);
+  }
+  if (typeof topics === "string") throw new Error(`Claude's answer could not be used. ${topics}`);
+  const known = new Set(o.diff.files.flatMap(changeIds));
+  const kept = topics.map((t) => ({ ...t, ids: t.ids.filter((id) => known.has(id)) })).filter((t) => t.ids.length > 0);
+  if (!kept.length) throw new Error("Claude's answer put no change of this comparison in a topic.");
+  return kept;
+}
+function buildPrompt(diff, focus) {
+  return [
+    `The user is reviewing code changes in a diff viewer and asked, from the page, for them to be grouped into topics${focus ? `, with this focus: ${JSON.stringify(focus)}` : ""}.`,
+    "A topic is one feature, fix or purpose, and can span files. Use what you know about why the changes were made, and the commit messages for the why. You can read files to check details, but do not change anything.",
+    "For each topic give:",
+    '- "title": a few words.',
+    '- "summary": two to six sentences of Markdown on what changed and why, naming the files and functions involved and anything the reviewer should check closely.',
+    '- "ids": the ids of all changes in the topic, exactly as listed below.',
+    '- "related": false if the topic has nothing to do with the focus, otherwise true.',
+    "Put every id in a topic. Order the topics the way a reviewer should read them, with the ones that match the focus first. Write titles and summaries in the language the user writes in.",
+    'Reply with only a JSON object and no other text: {"topics": [{"title": "...", "summary": "...", "ids": ["..."], "related": true}]}',
+    "",
+    formatChanges(diff)
+  ].join("\n");
+}
+function parseTopics(text) {
+  const value = parseJson(text);
+  if (value === void 0) return "The answer was not a JSON object.";
+  const list = Array.isArray(value) ? value : isRecord(value) ? value.topics : void 0;
+  if (!Array.isArray(list) || list.length === 0) return 'The answer had no "topics" array.';
+  const topics = list.map(toTopic);
+  if (topics.some((t) => t === null)) {
+    return 'Each topic needs a "title" and a "summary" string, an "ids" array of strings and an optional "related" boolean.';
+  }
+  return topics;
+}
+function toTopic(t) {
+  if (!isRecord(t)) return null;
+  const { title, summary, ids, related } = t;
+  if (typeof title !== "string" || !title.trim() || typeof summary !== "string") return null;
+  if (!Array.isArray(ids) || !ids.every((id) => typeof id === "string")) return null;
+  if (related !== void 0 && typeof related !== "boolean") return null;
+  return { title: title.trim(), summary: summary.trim(), ids, related: related ?? true };
+}
+function parseJson(text) {
+  const fenced = /```(?:json)?[ \t]*\n([\s\S]*?)\n[ \t]*```/.exec(text)?.[1];
+  const braced = text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1);
+  for (const candidate of [text.trim(), fenced, braced]) {
+    if (!candidate) continue;
+    try {
+      return JSON.parse(candidate);
+    } catch {
+    }
+  }
+  return void 0;
+}
+function unknownIds(diff, topics) {
+  const { unknown: unknown2 } = checkTopics(diff, topics);
+  return unknown2.length ? `These ids are not in the list of changes: ${unknown2.join(", ")}.` : null;
+}
+function isRecord(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
 
 // src/server/threads.ts
 import { randomBytes } from "node:crypto";
@@ -37434,7 +37610,7 @@ var RepoThreads = class {
     this.emit(thread);
   }
   answer(thread) {
-    const prompt = buildPrompt(thread);
+    const prompt = buildPrompt2(thread);
     const reply = comment("claude", "", "pending");
     reply.activity = "Waiting";
     thread.comments.push(reply);
@@ -37487,14 +37663,14 @@ var RepoThreads = class {
 function comment(author, body, status) {
   return { id: newId(), author, body, status, activity: null, createdAt: (/* @__PURE__ */ new Date()).toISOString(), draft: false, review: null, editedAt: null };
 }
-function buildPrompt(thread) {
+function buildPrompt2(thread) {
   const { anchor: anchor2 } = thread;
   const version2 = anchor2.commit ? ` as of commit ${anchor2.commit}. The files on disk are the working tree and can differ from that commit` : anchor2.side !== "old" ? " in the working tree" : "";
   const history = thread.comments.filter((c) => c.status === "done").map((c) => `${c.author === "user" ? "User" : "Claude"}: ${c.body}`).join("\n\n");
   const answer = "Answer the last comment directly and concisely, in the language it is written in, using Markdown. You can read files to check details, but do not change anything.";
   if (anchor2.path === null) {
     return [
-      `The user is reviewing the code changes in a diff viewer, where you grouped the changes into topics. They wrote in a comment thread on the topic "${anchor2.topic}" as a whole.`,
+      `The user is reviewing the code changes in a diff viewer, where you grouped the changes into topics. They wrote in a comment thread on the topic "${anchor2.topic}" of ${describeComparison(anchor2.compare)} as a whole.`,
       answer,
       "",
       "The topic:",
@@ -37544,6 +37720,10 @@ var CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inlin
 var ReviewServer = class {
   views = /* @__PURE__ */ new Map();
   repos = /* @__PURE__ */ new Map();
+  reviews = [];
+  groupings = [];
+  // Each open page's event stream.
+  pages = /* @__PURE__ */ new Set();
   uiDir;
   server = null;
   port = 0;
@@ -37569,12 +37749,17 @@ var ReviewServer = class {
     this.server?.close();
     this.server = null;
   }
-  addView(repo, compare, review, cwd, session) {
+  /** Whether a page is open, so it shows each view Claude opens instead of the user opening its URL. */
+  get pageOpen() {
+    return this.pages.size > 0;
+  }
+  /** A view for Claude's comparison, with its topics when it grouped the changes. Open pages switch to it. */
+  addView(repo, compare, grouped, cwd, session) {
     let id;
     do
       id = Array.from({ length: 8 }, () => String.fromCharCode(97 + randomInt(26))).join("");
     while (this.views.has(id));
-    const view = { id, repo, compare, review };
+    const view = { id, repo, compare };
     this.views.set(view.id, view);
     let threads = this.repos.get(repo);
     if (!threads) {
@@ -37583,7 +37768,49 @@ var ReviewServer = class {
     }
     threads.cwd = cwd;
     if (session) threads.parentSession = session;
+    if (grouped) this.addReview(view, compare, grouped.focus, grouped.topics);
+    this.broadcast("view", { view: view.id, repo, compare });
     return view;
+  }
+  // A newer review of the same comparison replaces the older one.
+  addReview(view, compare, focus, topics) {
+    const same = (r) => r.repo === view.repo && sameComparison(r.compare, compare);
+    const old = this.reviews.findIndex(same);
+    if (old >= 0) this.reviews.splice(old, 1);
+    this.reviews.push({ repo: view.repo, compare, focus, topics, createdAt: (/* @__PURE__ */ new Date()).toISOString(), view: view.id });
+    const failed = this.groupings.findIndex((g) => same(g) && g.error !== null);
+    if (failed >= 0) this.groupings.splice(failed, 1);
+    this.broadcast("reviews", this.reviews);
+    this.broadcast("groupings", this.groupings);
+  }
+  /** Asks Claude to group the comparison into topics, unless it is already at it. Progress and the review reach the pages as events. */
+  group(view, compare, focus, threads) {
+    const i = this.groupings.findIndex((g) => g.repo === view.repo && sameComparison(g.compare, compare));
+    if (i >= 0 && this.groupings[i].error === null) return;
+    if (i >= 0) this.groupings.splice(i, 1);
+    const job = { repo: view.repo, compare, focus, activity: "Starting", error: null };
+    this.groupings.push(job);
+    this.broadcast("groupings", this.groupings);
+    void (async () => {
+      try {
+        const diff = await computeDiff(view.repo, compare);
+        if (!diff.files.length) throw new Error("This comparison has no changes to group.");
+        const onActivity = (activity) => {
+          job.activity = activity;
+          this.broadcast("groupings", this.groupings);
+        };
+        const topics = await groupChanges({ diff, focus, cwd: threads.cwd, session: threads.parentSession, onActivity });
+        this.groupings.splice(this.groupings.indexOf(job), 1);
+        this.addReview(view, compare, focus, topics);
+      } catch (err) {
+        job.activity = null;
+        job.error = errorMessage(err);
+        this.broadcast("groupings", this.groupings);
+      }
+    })();
+  }
+  broadcast(event, data) {
+    for (const send of this.pages) send(event, data);
   }
   /** Each repository's threads, with the newest view opened for it. */
   repoThreads() {
@@ -37605,7 +37832,7 @@ var ReviewServer = class {
       return sendText(res, 403, "Forbidden host");
     }
     const { pathname, searchParams } = new URL(req.url ?? "/", "http://127.0.0.1");
-    const api = /^\/api\/views\/([\w-]+)\/(diff|events|refs|threads|review|wait|version)(?:\/([\w-]+)\/comments(?:\/([\w-]+))?)?$/.exec(pathname);
+    const api = /^\/api\/views\/([\w-]+)\/(diff|events|refs|threads|review|wait|version|topics)(?:\/([\w-]+)\/comments(?:\/([\w-]+))?)?$/.exec(pathname);
     if (api) {
       const view = this.views.get(api[1]);
       if (!view) return sendJson(res, 404, { error: "Unknown view. Ask Claude to open the viewer again." });
@@ -37622,7 +37849,8 @@ var ReviewServer = class {
             diff,
             version: version2,
             opened: view.compare,
-            review: view.review,
+            reviews: this.reviews,
+            groupings: this.groupings,
             threads: threads.threads,
             listening: threads.listening
           };
@@ -37646,6 +37874,13 @@ var ReviewServer = class {
         }
       }
       if (req.method === "GET" && route === "events" && !threadId) return this.events(req, res, threads);
+      if (req.method === "POST" && route === "topics" && !threadId) {
+        if (!this.sameOrigin(req)) return sendJson(res, 403, { error: "Cross-site request refused" });
+        const { focus } = await readJson(req) ?? {};
+        if (focus !== void 0 && focus !== null && !isText(focus, 2e3)) return sendJson(res, 400, { error: "Invalid focus" });
+        this.group(view, comparisonFromQuery(searchParams) ?? view.compare, focus?.trim() || null, threads);
+        return sendJson(res, 202, { groupings: this.groupings });
+      }
       if (route === "threads" && threadId && commentId && (req.method === "PATCH" || req.method === "DELETE")) {
         if (!this.sameOrigin(req)) return sendJson(res, 403, { error: "Cross-site request refused" });
         if (req.method === "DELETE") {
@@ -37713,21 +37948,22 @@ var ReviewServer = class {
       "X-Content-Type-Options": "nosniff"
     });
     res.write("retry: 2000\n\n");
-    const unsubscribe = threads.subscribe((thread) => res.write(`event: thread
-data: ${JSON.stringify(thread)}
-
-`));
-    const listening = (on) => res.write(`event: listening
-data: ${on}
+    const send = (event, data) => res.write(`event: ${event}
+data: ${JSON.stringify(data)}
 
 `);
-    listening(threads.listening);
-    const unlisten = threads.subscribeListening(listening);
+    const unsubscribe = threads.subscribe((thread) => send("thread", thread));
+    send("listening", threads.listening);
+    send("reviews", this.reviews);
+    send("groupings", this.groupings);
+    const unlisten = threads.subscribeListening((on) => send("listening", on));
+    this.pages.add(send);
     const ping = setInterval(() => res.write(": ping\n\n"), 25e3);
     req.on("close", () => {
       clearInterval(ping);
       unsubscribe();
       unlisten();
+      this.pages.delete(send);
     });
   }
   async sendFile(res, rel, cacheControl) {
@@ -37771,11 +38007,18 @@ function isAnchor(value) {
   if (value === null || typeof value !== "object") return false;
   const a = value;
   const line = (n) => Number.isInteger(n) && n > 0;
-  if (a.path === null) return isText(a.topic, 1024, true) && a.side === null && a.start === null && a.end === null && a.commit === null;
+  if (a.path === null) {
+    return isText(a.topic, 1024, true) && isComparison(a.compare) && a.side === null && a.start === null && a.end === null && a.commit === null;
+  }
   if (!isText(a.path, 4096, true)) return false;
   if (a.commit !== null && !(typeof a.commit === "string" && /^[0-9a-f]{40,64}$/.test(a.commit))) return false;
   if (a.side === null) return a.start === null && a.end === null;
   return (a.side === "old" || a.side === "new") && line(a.start) && line(a.end) && a.start <= a.end;
+}
+function isComparison(value) {
+  if (value === null || typeof value !== "object") return false;
+  const c = value;
+  return isText(c.base, 1024, true) && (c.head === null || isText(c.head, 1024, true)) && typeof c.threeDot === "boolean";
 }
 function sendJson(res, status, body) {
   res.writeHead(status, {
@@ -37791,98 +38034,6 @@ function sendText(res, status, body) {
 }
 function errorMessage(err) {
   return err instanceof Error ? err.message : String(err);
-}
-
-// src/server/review.ts
-var MAX_CHARS = 6e4;
-var MAX_LINES_PER_CHANGE = 40;
-var MAX_LINE_CHARS = 300;
-var MAX_COMMITS_LISTED = 100;
-function formatChanges(diff) {
-  const count = diff.files.reduce((n, f) => n + changeIds(f).length, 0);
-  const out = [`${summarize(diff)}, ${count} change${count === 1 ? "" : "s"}. Each change starts with its id.`];
-  let size = 0;
-  let omitted = 0;
-  if (diff.commits.length) {
-    const shown = diff.commits.slice(-MAX_COMMITS_LISTED);
-    out.push("", diff.commitCount > shown.length ? `Commits (newest ${shown.length} of ${diff.commitCount}, oldest first):` : "Commits, oldest first:");
-    for (const c of shown) out.push(`  ${c.sha.slice(0, 7)} ${c.subject}`);
-  }
-  for (const f of diff.files) {
-    const stat = f.binary ? "binary" : `+${f.additions} -${f.deletions}${f.diffTooLarge ? ", too large to list its lines" : ""}`;
-    out.push("", `${f.oldPath ? `${f.oldPath} -> ` : ""}${f.path} (${f.status}, ${stat})`);
-    if (f.blocks.length === 0) {
-      out.push(`  file:${f.path}`);
-      continue;
-    }
-    for (const b of f.blocks) {
-      out.push(`  ${b.id}  @@ -${rangeHeader(b.oldStart, b.oldCount)} +${rangeHeader(b.newStart, b.newCount)} @@${b.section ? ` ${b.section}` : ""}`);
-      if (size > MAX_CHARS) {
-        omitted++;
-        continue;
-      }
-      const lines = [...b.del.map((l) => `-${l}`), ...b.add.map((l) => `+${l}`)];
-      for (const l of lines.slice(0, MAX_LINES_PER_CHANGE)) {
-        const line = l.length > MAX_LINE_CHARS ? `${l.slice(0, MAX_LINE_CHARS)}\u2026` : l;
-        out.push(`    ${line}`);
-        size += line.length + 5;
-      }
-      if (lines.length > MAX_LINES_PER_CHANGE) out.push(`    \u2026 ${lines.length - MAX_LINES_PER_CHANGE} more lines`);
-    }
-  }
-  if (omitted) out.push("", `The lines of ${omitted} change${omitted === 1 ? " were" : "s were"} left out to keep this short. Read the files for them.`);
-  return out.join("\n");
-}
-function formatReviewComments(threads, submissions, after) {
-  const withDrafts = after === null;
-  const reviews = after === null ? submissions.slice(-1) : submissions.filter((s) => s.n > after);
-  const numbers = new Set(reviews.map((s) => s.n));
-  const submitted = threads.filter((t) => t.comments.some((c) => c.review !== null && numbers.has(c.review)));
-  const drafts = withDrafts ? threads.filter((t) => !submitted.includes(t) && t.comments.some((c) => c.draft)) : [];
-  const asked = withDrafts ? threads.filter((t) => t.comments.every((c) => c.author !== "user" || !c.draft && c.review === null)) : [];
-  if (!reviews.length && !drafts.length && !asked.length) return null;
-  const out = [];
-  for (const s of reviews) {
-    out.push(`Review ${s.n}, submitted at ${new Date(s.submittedAt).toLocaleTimeString("en-GB")}.`);
-    if (s.body) out.push("  Comment on the whole review:", indent(s.body, "    "));
-  }
-  if (reviews.length) {
-    out.push(`Comments in ${submitted.length} thread${submitted.length === 1 ? "" : "s"}:`);
-    for (const t of submitted) out.push("", formatThread(t, withDrafts));
-  }
-  if (drafts.length) {
-    out.push("", `Draft comments the user has not submitted yet, in ${drafts.length} thread${drafts.length === 1 ? "" : "s"}:`);
-    for (const t of drafts) out.push("", formatThread(t, true));
-  }
-  if (asked.length) {
-    out.push("", `Questions the user asked @claude, answered in the page, in ${asked.length} thread${asked.length === 1 ? "" : "s"}:`);
-    for (const t of asked) out.push("", formatThread(t, true));
-  }
-  return out.join("\n");
-}
-function formatThread(t, withDrafts) {
-  const { anchor: anchor2 } = t;
-  const comments = t.comments.filter((c) => c.status === "done" && (withDrafts || !c.draft)).map((c) => {
-    const who = c.author === "claude" ? "Claude" : c.draft ? "User (draft)" : c.review ? `User (review ${c.review})` : "User";
-    return `  ${who}: ${indent(c.body, "    ").trimStart()}`;
-  });
-  if (anchor2.path === null) {
-    const files = t.snippet.split("\n", 1)[0] ?? "";
-    return [`Thread ${t.id}: the topic "${anchor2.topic}" as a whole`, ...files ? [`  ${files}`] : [], ...comments].join("\n");
-  }
-  const version2 = anchor2.commit ? ` at commit ${anchor2.commit}` : anchor2.side !== "old" ? " in the working tree" : "";
-  const where = anchor2.side === null ? "the whole file" : `${anchor2.side} ${anchor2.start === anchor2.end ? `line ${anchor2.start}` : `lines ${anchor2.start}-${anchor2.end}`}`;
-  const snippet = anchor2.side === null ? [] : t.snippet.split("\n").slice(0, 8).map((l) => `  > ${l}`);
-  return [`Thread ${t.id}: ${anchor2.path}, ${where}${version2}`, ...snippet, ...comments].join("\n");
-}
-var indent = (text, prefix) => text.replace(/^/gm, prefix);
-function checkTopics(diff, topics) {
-  const known = new Set(diff.files.flatMap(changeIds));
-  const used = new Set(topics.flatMap((t) => t.ids));
-  return {
-    unknown: [...used].filter((id) => !known.has(id)),
-    unassigned: [...known].filter((id) => !used.has(id))
-  };
 }
 
 // src/server/main.ts
@@ -37901,7 +38052,7 @@ function getServer() {
 var SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 async function openViewer(repo, compare, focus, topics, session) {
   const diff = await computeDiff(repo, compare);
-  let review = null;
+  let grouped = null;
   let note = "";
   if (topics) {
     const { unknown: unknown2, unassigned } = checkTopics(diff, topics);
@@ -37912,12 +38063,13 @@ async function openViewer(repo, compare, focus, topics, session) {
       note = `
 ${unassigned.length} change(s) are in no topic and appear under "Other changes": ${unassigned.join(", ")}`;
     }
-    review = { focus: focus?.trim() || null, topics };
+    grouped = { focus: focus?.trim() || null, topics };
   }
   const server = await getServer();
-  const view = server.addView(diff.repoRoot, compare, review, repo, session && SESSION_ID.test(session) ? session : null);
+  const view = server.addView(diff.repoRoot, compare, grouped, repo, session && SESSION_ID.test(session) ? session : null);
+  const shown = server.pageOpen ? "\nThe viewer page already open in the user's browser has switched to this comparison, so they do not need to open the URL again." : "";
   return `${server.url(view)}
-${summarize(diff)}${note}
+${summarize(diff)}${note}${shown}
 Wait for the user's review in the background with: ${server.waitCommand(view)}`;
 }
 async function shutdown() {

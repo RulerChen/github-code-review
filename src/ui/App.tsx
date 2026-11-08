@@ -1,14 +1,26 @@
 import { Fragment, type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { comparisonFromQuery, comparisonQuery } from "../shared/comparison";
-import type { CommitInfo, Comparison, DiffResult, FileDiff, Thread, ThreadAnchor, ViewData } from "../shared/types";
-import { ApiError, createThread, deleteComment, editComment, fetchRefs, fetchVersion, fetchView, replyToThread, submitReview } from "./api";
+import { comparisonFromQuery, comparisonQuery, sameComparison } from "../shared/comparison";
+import type { CommitInfo, Comparison, DiffResult, FileDiff, Grouping, Review, Thread, ThreadAnchor, ViewData } from "../shared/types";
+import {
+  ApiError,
+  createThread,
+  deleteComment,
+  editComment,
+  fetchRefs,
+  fetchVersion,
+  fetchView,
+  groupTopics,
+  replyToThread,
+  submitReview,
+} from "./api";
 import { type CommentsApi, CommentsContext } from "./comments";
-import { CommitList, CompareControls, refLabel, sameComparison } from "./Compare";
+import { CommitList, CompareControls, refLabel } from "./Compare";
 import { ConversationsButton, ConversationsPanel, type Place, useConversations } from "./Conversations";
 import { FileCard } from "./FileCard";
 import { comparePaths, FileTree } from "./FileTree";
 import { scrollToTop, startAnchoring } from "./anchor";
 import { go, KeyboardButton, ShortcutHelp, stepSection, useShortcuts } from "./keyboard";
+import { ReviewBar } from "./ReviewBar";
 import { readStorage, writeStorage } from "./storage";
 import { SubmitReview } from "./SubmitReview";
 import { buildTopics, TopicList, TopicSection, topicShows, type TopicView } from "./Topics";
@@ -25,6 +37,16 @@ const POLL_MS = 2000;
 const signature = (f: FileDiff) => (f.blocks.length ? f.blocks.map((b) => b.id).join(",") : `${f.status}:${f.binary}`);
 
 const sameTarget = (a: Comparison | null, b: Comparison | null) => a === b || (a !== null && b !== null && sameComparison(a, b));
+
+// The review or grouping of a repository's comparison.
+const matches = (repo: string, c: Comparison) => (r: { repo: string; compare: Comparison }) => r.repo === repo && sameComparison(r.compare, c);
+
+/** What Claude sends when it opens a view, so the open page shows it. */
+interface Opened {
+  view: string;
+  repo: string;
+  compare: Comparison;
+}
 
 export function App({ viewId }: Props) {
   const [data, setData] = useState<ViewData | null>(null);
@@ -48,6 +70,8 @@ export function App({ viewId }: Props) {
   const [viewed, setViewed] = useState<Record<string, string>>({});
   const [viewedTopics, setViewedTopics] = useState<Record<string, string>>({});
   const [threads, setThreads] = useState<Thread[]>([]);
+  const [reviews, setReviews] = useState<Review[]>([]);
+  const [groupings, setGroupings] = useState<Grouping[]>([]);
   // The comparison in the page URL, or null for the one Claude opened the viewer with.
   const requested = useRef<Comparison | null>(comparisonFromQuery(new URLSearchParams(location.search)));
   const seq = useRef(0);
@@ -59,7 +83,8 @@ export function App({ viewId }: Props) {
   const resetScroll = useRef(false);
 
   // A different comparison keeps the old one on screen, dimmed, until it arrives, then shows `nextTab` from the
-  // top. Switching tabs first would show the old comparison's files in the new tab for a moment.
+  // top. Switching tabs first would show the old comparison's files in the new tab for a moment. A comparison
+  // that arrives without topics shows Files instead of an empty Topics tab, unless the user goes there.
   const load = useCallback(async (target: Comparison | null, push = false, nextTab?: Tab) => {
     if (!viewId) return;
     const n = ++seq.current;
@@ -70,15 +95,25 @@ export function App({ viewId }: Props) {
       const result = await fetchView(viewId, target);
       if (n !== seq.current) return;
       const root = result.diff.repoRoot;
+      const fresh = other || version.current === null;
       requested.current = target;
       version.current = result.version;
-      if (push) history.pushState(null, "", target ? `?${comparisonQuery(target)}` : location.pathname);
+      if (push && other) history.pushState(null, "", target ? `?${comparisonQuery(target)}` : location.pathname);
       if (other) {
         scrolls.current = {};
         resetScroll.current = true;
       }
-      if (nextTab) setTab(nextTab);
+      if (nextTab || fresh) {
+        const mine = matches(root, result.diff);
+        const topical = result.reviews.some(mine) || result.groupings.some((g) => mine(g) && g.error === null);
+        setTab((t) => {
+          const want = nextTab ?? t;
+          return want === "topics" && !topical ? "files" : want;
+        });
+      }
       setData(result);
+      setReviews(result.reviews);
+      setGroupings(result.groupings);
       setThreads((prev) => mergeThreads(prev, result.threads));
       setListening(result.listening);
       setError(null);
@@ -140,19 +175,33 @@ export function App({ viewId }: Props) {
 
   const viewCommit = (c: CommitInfo) => compareWith({ base: c.parents[0]!, head: c.sha, threeDot: false }, "files");
 
+  // A review in another repository is another view's page, opened in place of this one.
+  const showReview = (r: { view: string; repo: string; compare: Comparison }) => {
+    if (!data) return;
+    if (r.repo === data.diff.repoRoot) compareWith(r.compare, "topics");
+    else location.assign(`/v/${encodeURIComponent(r.view)}?${comparisonQuery(r.compare)}`);
+  };
+  const onOpened = useRef(showReview);
+  onOpened.current = showReview;
+
   useEffect(() => {
     if (!viewId) return;
     const events = new EventSource(`/api/views/${encodeURIComponent(viewId)}/events`);
-    events.addEventListener("thread", (e) => {
-      const thread = JSON.parse((e as MessageEvent<string>).data) as Thread;
-      setThreads((prev) => mergeThreads(prev, [thread]));
-    });
-    events.addEventListener("listening", (e) => setListening((e as MessageEvent<string>).data === "true"));
+    const on = <T,>(name: string, fn: (data: T) => void) =>
+      events.addEventListener(name, (e) => fn(JSON.parse((e as MessageEvent<string>).data) as T));
+    on<Thread>("thread", (thread) => setThreads((prev) => mergeThreads(prev, [thread])));
+    on<boolean>("listening", setListening);
+    on<Review[]>("reviews", setReviews);
+    on<Grouping[]>("groupings", setGroupings);
+    // Not "open", which EventSource fires itself on connecting.
+    on<Opened>("view", (o) => onOpened.current(o));
     return () => events.close();
   }, [viewId]);
 
-  const oldCommit = data?.diff.oldCommit ?? null;
-  const headCommit = data?.diff.headCommit ?? null;
+  const diff = data?.diff ?? null;
+  const current = useMemo<Comparison | null>(() => diff && { base: diff.base, head: diff.head, threeDot: diff.threeDot }, [diff]);
+  const oldCommit = diff?.oldCommit ?? null;
+  const headCommit = diff?.headCommit ?? null;
   // A deleted thread stays in `threads` with no comments, so an older copy arriving late cannot bring it back.
   const live = useMemo(() => threads.filter((t) => t.comments.length > 0), [threads]);
   const comments = useMemo<Pick<CommentsApi, "versions" | "threadsFor" | "threadsForTopic" | "create" | "reply" | "edit" | "remove">>(() => {
@@ -160,8 +209,8 @@ export function App({ viewId }: Props) {
     const byTopic = new Map<string, Thread[]>();
     for (const t of live) {
       const { anchor } = t;
-      if (anchor.path === null) byTopic.set(anchor.topic, [...(byTopic.get(anchor.topic) ?? []), t]);
-      else byPath.set(anchor.path, [...(byPath.get(anchor.path) ?? []), t]);
+      if (anchor.path !== null) byPath.set(anchor.path, [...(byPath.get(anchor.path) ?? []), t]);
+      else if (current && sameComparison(anchor.compare, current)) byTopic.set(anchor.topic, [...(byTopic.get(anchor.topic) ?? []), t]);
     }
     const versions = { old: oldCommit, new: headCommit };
     const update = (thread: Thread) => setThreads((prev) => mergeThreads(prev, [thread]));
@@ -170,8 +219,8 @@ export function App({ viewId }: Props) {
       threadsFor: (path) => byPath.get(path) ?? [],
       threadsForTopic: (title) => byTopic.get(title) ?? [],
       create: async (anchor, snippet, body) => {
-        if (!viewId) return;
-        const full: ThreadAnchor = anchor.path === null ? anchor : { ...anchor, commit: versions[anchor.side ?? "new"] };
+        if (!viewId || !current) return;
+        const full: ThreadAnchor = anchor.path === null ? { ...anchor, compare: current } : { ...anchor, commit: versions[anchor.side ?? "new"] };
         update(await createThread(viewId, full, snippet, body));
       },
       reply: async (threadId, body) => {
@@ -184,7 +233,7 @@ export function App({ viewId }: Props) {
         if (viewId) update(await deleteComment(viewId, threadId, commentId));
       },
     };
-  }, [live, viewId, oldCommit, headCommit]);
+  }, [live, viewId, oldCommit, headCommit, current]);
 
   const drafts = live.reduce((n, t) => n + t.comments.filter((c) => c.draft).length, 0);
   const submit = async (body: string) => {
@@ -194,9 +243,11 @@ export function App({ viewId }: Props) {
     return result.delivered;
   };
 
-  const diff = data?.diff ?? null;
-  const review = data?.review ?? null;
-  const isOpened = data !== null && sameComparison(data.diff, data.opened);
+  const review = useMemo(() => (diff ? (reviews.find(matches(diff.repoRoot, diff)) ?? null) : null), [reviews, diff]);
+  const grouping = diff ? (groupings.find(matches(diff.repoRoot, diff)) ?? null) : null;
+  const group = async (focus: string) => {
+    if (viewId && current) setGroupings(await groupTopics(viewId, current, focus));
+  };
 
   const entries = useMemo(
     () =>
@@ -209,13 +260,10 @@ export function App({ viewId }: Props) {
     const q = filter.trim().toLowerCase();
     return q ? entries.filter((e) => e.file.path.toLowerCase().includes(q)) : entries;
   }, [entries, filter]);
-  const topics = useMemo(
-    () => (review && isOpened ? buildTopics(review, entries.map((e) => e.file)) : []),
-    [review, isOpened, entries],
-  );
+  const topics = useMemo(() => (review ? buildTopics(review, entries.map((e) => e.file)) : []), [review, entries]);
 
-  const topicTab = review !== null && isOpened && tab === "topics";
-  const view: Tab = topicTab ? "topics" : tab === "commits" && diff?.commits.length ? "commits" : "files";
+  const view: Tab = tab === "topics" ? "topics" : tab === "commits" && diff?.commits.length ? "commits" : "files";
+  const topicTab = view === "topics" && topics.length > 0;
 
   useEffect(() => (diff !== null ? startAnchoring() : undefined), [diff !== null]);
 
@@ -251,6 +299,7 @@ export function App({ viewId }: Props) {
       const { anchor } = t;
       if (anchor.path === null) {
         // A topic's own thread shows only in the Topics tab. In the list it comes before the files.
+        if (!current || !sameComparison(anchor.compare, current)) return null;
         const i = topics.findIndex((topic) => topic.title === anchor.topic);
         return i < 0 ? null : { tab: "topics", rank: topicTab ? i : i - topics.length };
       }
@@ -260,7 +309,7 @@ export function App({ viewId }: Props) {
       const topicIndex = topics.findIndex((topic) => topicShows(topic, t, comments.versions));
       return topicIndex >= 0 ? { tab: "topics", rank: topicIndex } : { tab: "files", rank: topics.length + fileIndex };
     },
-    [entries, topics, topicTab, comments.versions],
+    [entries, topics, topicTab, comments.versions, current],
   );
   const conv = useConversations({
     repoRoot: diff?.repoRoot ?? null,
@@ -373,29 +422,20 @@ export function App({ viewId }: Props) {
               <span style={{ width: `${total ? (viewedCount / total) * 100 : 0}%` }} />
             </span>
           </div>
-          {(review || diff.commits.length > 0) && (
-            <div className="segmented" role="tablist" aria-label="Show">
-              <SlidingIndicator selected={view} />
-              {review && (
-                <button
-                  role="tab"
-                  aria-selected={view === "topics"}
-                  title={isOpened ? undefined : `Claude's topics are for ${describe(data!.opened)}. Go back to it.`}
-                  onClick={() => (isOpened ? setTab("topics") : compareWith(data!.opened, "topics"))}
-                >
-                  <TabLabel text="Topics" />
-                </button>
-              )}
-              <button role="tab" aria-selected={view === "files"} onClick={() => setTab("files")}>
-                <TabLabel text="Files" />
+          <div className="segmented" role="tablist" aria-label="Show">
+            <SlidingIndicator selected={view} />
+            <button role="tab" aria-selected={view === "topics"} onClick={() => setTab("topics")}>
+              <TabLabel text="Topics" />
+            </button>
+            <button role="tab" aria-selected={view === "files"} onClick={() => setTab("files")}>
+              <TabLabel text="Files" />
+            </button>
+            {diff.commits.length > 0 && (
+              <button role="tab" aria-selected={view === "commits"} onClick={() => setTab("commits")}>
+                <TabLabel text="Commits" /> <span className="counter">{diff.commitCount.toLocaleString()}</span>
               </button>
-              {diff.commits.length > 0 && (
-                <button role="tab" aria-selected={view === "commits"} onClick={() => setTab("commits")}>
-                  <TabLabel text="Commits" /> <span className="counter">{diff.commitCount.toLocaleString()}</span>
-                </button>
-              )}
-            </div>
-          )}
+            )}
+          </div>
           <ConversationsButton conv={conv} />
           <KeyboardButton onClick={() => setHelp(true)} />
           <ThemeToggle theme={theme} onToggle={toggleTheme} />
@@ -428,13 +468,17 @@ export function App({ viewId }: Props) {
 
           <main className={`files${switching ? " is-switching" : ""}`}>
             {view !== "commits" && diff.files.length === 0 && <Notice title="No changes">{noChanges(diff)}</Notice>}
-            {visited.current.has("topics") && review && isOpened && diff.files.length > 0 && (
+            {visited.current.has("topics") && (
               <div className="view" hidden={view !== "topics"}>
-                {review.focus && (
-                  <p className="focus">
-                    Focus: <strong>{review.focus}</strong>
-                  </p>
-                )}
+                <ReviewBar
+                  reviews={reviews}
+                  review={review}
+                  grouping={grouping}
+                  repoRoot={diff.repoRoot}
+                  hasChanges={diff.files.length > 0}
+                  onPick={showReview}
+                  onGroup={group}
+                />
                 {topics.map((t, i) => (
                   <Fragment key={t.key}>
                     {i === firstUnrelated && <h2 className="topic-divider">Not related to the focus</h2>}
@@ -481,10 +525,6 @@ function mergeThreads(base: Thread[], updates: Thread[]): Thread[] {
     else if (t.rev >= current.rev) next[i] = t;
   }
   return next;
-}
-
-function describe(c: Comparison): string {
-  return `${refLabel(c.base)}${c.threeDot ? "..." : ".."}${refLabel(c.head)}`;
 }
 
 function noChanges(d: DiffResult): ReactNode {

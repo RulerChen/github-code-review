@@ -1,5 +1,5 @@
 import { comparisonQuery } from "../shared/comparison";
-import type { Comparison, RefList, Thread, ThreadAnchor, ViewData } from "../shared/types";
+import type { Comparison, Grouping, RefList, Thread, ThreadAnchor, ViewData } from "../shared/types";
 
 export class ApiError extends Error {
   constructor(
@@ -20,7 +20,8 @@ export async function fetchView(viewId: string, compare: Comparison | null): Pro
     diff: body.diff,
     version: body.version ?? "",
     opened: body.opened,
-    review: body.review ?? null,
+    reviews: body.reviews ?? [],
+    groupings: body.groupings ?? [],
     threads: body.threads ?? [],
     listening: body.listening ?? false,
   };
@@ -74,6 +75,12 @@ export async function editComment(viewId: string, threadId: string, commentId: s
 /** Deletes a comment. The thread comes back without it, or with no comments when the thread went with it. */
 export async function deleteComment(viewId: string, threadId: string, commentId: string): Promise<Thread> {
   return (await postJson(commentUrl(viewId, threadId, commentId), {}, hasThread, "DELETE")).thread;
+}
+
+/** Asks Claude to group the comparison's changes into topics. It runs in the background and reports through the events. */
+export async function groupTopics(viewId: string, compare: Comparison, focus: string): Promise<Grouping[]> {
+  const url = `/api/views/${encodeURIComponent(viewId)}/topics?${comparisonQuery(compare)}`;
+  return (await postJson<{ groupings: Grouping[] }>(url, { focus }, (b) => Array.isArray(b.groupings))).groupings;
 }
 
 export interface SubmitResult {

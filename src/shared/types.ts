@@ -70,9 +70,27 @@ export interface Topic {
   related: boolean;
 }
 
+/** Every change of one comparison grouped into topics by Claude, from the terminal or from the page. */
 export interface Review {
+  /** The repository root. */
+  repo: string;
+  compare: Comparison;
   focus: string | null;
   topics: Topic[];
+  createdAt: string;
+  /** A view of the repository, for a page showing another repository to switch to. */
+  view: string;
+}
+
+/** Claude grouping a comparison's changes into topics, asked from the page. It goes once the review arrives. */
+export interface Grouping {
+  repo: string;
+  compare: Comparison;
+  focus: string | null;
+  /** What Claude is doing while it runs. */
+  activity: string | null;
+  /** Why it failed, once it has. */
+  error: string | null;
 }
 
 export type ThreadAnchor = LineAnchor | FileAnchor | TopicAnchor;
@@ -100,6 +118,8 @@ export interface FileAnchor {
 export interface TopicAnchor {
   /** The topic's title. */
   topic: string;
+  /** The comparison the review grouped, since reviews of other comparisons can have a topic with the same title. */
+  compare: Comparison;
   path: null;
   side: null;
   start: null;
@@ -135,9 +155,11 @@ export interface ViewData {
   diff: DiffResult;
   /** Changes whenever the diff may have changed. The page polls it to show that newer changes exist. */
   version: string;
-  /** The comparison Claude opened the viewer with. The review's topics belong to it. */
+  /** The comparison Claude opened the viewer with, shown when the page names none. */
   opened: Comparison;
-  review: Review | null;
+  /** Every review in this session, oldest first: at most one per repository and comparison. */
+  reviews: Review[];
+  groupings: Grouping[];
   threads: Thread[];
   /** Whether Claude is waiting for a review right now, so submitting one starts it at once. */
   listening: boolean;

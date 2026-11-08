@@ -9,7 +9,7 @@ export interface RevealRequest {
 }
 
 /** An anchor before the page fills in the commit it is on. A topic has no commit. */
-export type NewAnchor = Omit<LineAnchor, "commit"> | Omit<FileAnchor, "commit"> | TopicAnchor;
+export type NewAnchor = Omit<LineAnchor, "commit"> | Omit<FileAnchor, "commit"> | Omit<TopicAnchor, "compare">;
 
 export interface CommentsApi {
   /** The commit each side of the diff comes from, or null for the working tree. */

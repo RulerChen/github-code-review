@@ -5,7 +5,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { computeDiff, summarize } from "../engine/diff.js";
-import type { Comparison, Review, Topic } from "../shared/types.js";
+import type { Comparison, Topic } from "../shared/types.js";
 import { stopAll } from "./claude.js";
 import { errorMessage, ReviewServer } from "./http.js";
 import { checkTopics, formatChanges, formatReviewComments } from "./review.js";
@@ -29,7 +29,7 @@ const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
 
 async function openViewer(repo: string, compare: Comparison, focus?: string, topics?: Topic[], session?: string): Promise<string> {
   const diff = await computeDiff(repo, compare);
-  let review: Review | null = null;
+  let grouped: { focus: string | null; topics: Topic[] } | null = null;
   let note = "";
 
   if (topics) {
@@ -40,12 +40,15 @@ async function openViewer(repo: string, compare: Comparison, focus?: string, top
     if (unassigned.length) {
       note = `\n${unassigned.length} change(s) are in no topic and appear under "Other changes": ${unassigned.join(", ")}`;
     }
-    review = { focus: focus?.trim() || null, topics };
+    grouped = { focus: focus?.trim() || null, topics };
   }
 
   const server = await getServer();
-  const view = server.addView(diff.repoRoot, compare, review, repo, session && SESSION_ID.test(session) ? session : null);
-  return `${server.url(view)}\n${summarize(diff)}${note}\nWait for the user's review in the background with: ${server.waitCommand(view)}`;
+  const view = server.addView(diff.repoRoot, compare, grouped, repo, session && SESSION_ID.test(session) ? session : null);
+  const shown = server.pageOpen
+    ? "\nThe viewer page already open in the user's browser has switched to this comparison, so they do not need to open the URL again."
+    : "";
+  return `${server.url(view)}\n${summarize(diff)}${note}${shown}\nWait for the user's review in the background with: ${server.waitCommand(view)}`;
 }
 
 async function shutdown(): Promise<never> {

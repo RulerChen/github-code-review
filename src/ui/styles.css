@@ -809,6 +809,120 @@ button {
   color: var(--fg);
 }
 
+.review-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.review-bar:empty {
+  display: none;
+}
+
+.review-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.review-bar-row .focus {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.group-card {
+  margin: 0;
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-subtle);
+}
+
+.group-card p {
+  margin: 0;
+}
+
+.group-form p {
+  margin-bottom: 10px;
+}
+
+.group-form-row {
+  display: flex;
+  gap: 8px;
+}
+
+.group-form-row .filter {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+}
+
+.group-status {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.group-spinner {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .group-spinner {
+    animation: none;
+  }
+}
+
+.group-card .group-activity {
+  margin-top: 4px;
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+
+.group-error {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.review-picker .picker-menu {
+  width: 380px;
+}
+
+.picker-list .review-item {
+  align-items: flex-start;
+}
+
+.review-item:hover {
+  background: var(--bg-subtle);
+}
+
+.review-item-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.review-item-detail {
+  overflow: hidden;
+  color: var(--fg-muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .topic {
   margin-bottom: 24px;
 }
@@ -1546,15 +1660,17 @@ button {
   }
 }
 
-/* A form or confirmation fades in where it opens. */
+/* A form, confirmation or status fades in where it opens. */
 .comment-form,
-.comment-confirm {
+.comment-confirm,
+.group-card {
   transition: opacity 150ms var(--ease-out);
 }
 
 @starting-style {
   .comment-form,
-  .comment-confirm {
+  .comment-confirm,
+  .group-card {
     opacity: 0;
   }
 }

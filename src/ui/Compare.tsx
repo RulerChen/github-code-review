@@ -5,9 +5,9 @@ import { focusInPlace } from "./anchor";
 const SHA = /^[0-9a-f]{40,64}$/;
 const MAX_ITEMS = 100;
 
-export const sameComparison = (a: Comparison, b: Comparison) => a.base === b.base && a.head === b.head && a.threeDot === b.threeDot;
-
 export const refLabel = (ref: string | null) => (ref === null ? "working tree" : SHA.test(ref) ? ref.slice(0, 7) : ref);
+
+export const comparisonLabel = (c: Comparison) => `${refLabel(c.base)}${c.threeDot ? "..." : ".."}${refLabel(c.head)}`;
 
 interface CompareProps {
   diff: DiffResult;

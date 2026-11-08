@@ -1,0 +1,215 @@
+import { useEffect, useRef, useState } from "react";
+import type { Grouping, Review } from "../shared/types";
+import { focusInPlace } from "./anchor";
+import { comparisonLabel } from "./Compare";
+
+interface Props {
+  /** Every review in this session. */
+  reviews: Review[];
+  /** The review of the comparison on screen. */
+  review: Review | null;
+  /** Claude grouping the comparison on screen, or its failed attempt. */
+  grouping: Grouping | null;
+  repoRoot: string;
+  hasChanges: boolean;
+  onPick: (review: Review) => void;
+  onGroup: (focus: string) => Promise<void>;
+}
+
+/** The top of the Topics tab: which review shows, and asking Claude to group the comparison on screen. */
+export function ReviewBar({ reviews, review, grouping, repoRoot, hasChanges, onPick, onGroup }: Props) {
+  const [regrouping, setRegrouping] = useState(false);
+  // Each event brings new copies of the reviews, so only a different review closes the form.
+  useEffect(() => setRegrouping(false), [review?.createdAt]);
+  const running = grouping !== null && grouping.error === null;
+  const form = hasChanges && !running && (review === null || regrouping);
+
+  return (
+    <div className="review-bar">
+      {(reviews.length > 0 || review) && (
+        <div className="review-bar-row">
+          {reviews.length > 0 && <ReviewPicker reviews={reviews} current={review} repoRoot={repoRoot} onPick={onPick} />}
+          {review?.focus && (
+            <p className="focus" title={review.focus}>
+              Focus: <strong>{review.focus}</strong>
+            </p>
+          )}
+          <span className="spacer" />
+          {review && hasChanges && !running && !regrouping && (
+            <button className="button" onClick={() => setRegrouping(true)}>
+              Group again
+            </button>
+          )}
+        </div>
+      )}
+      {running && (
+        <div className="group-card group-status" role="status">
+          <span className="group-spinner" aria-hidden="true" />
+          <div>
+            <p>
+              Claude is grouping the changes into topics
+              {grouping.focus && (
+                <>
+                  {" "}
+                  with the focus <strong>{grouping.focus}</strong>
+                </>
+              )}
+              . This can take a few minutes, and you can keep reviewing meanwhile.
+            </p>
+            <p className="group-activity">{grouping.activity ?? "Working"}…</p>
+          </div>
+        </div>
+      )}
+      {grouping?.error && !running && (
+        <p className="group-card group-error" role="alert">
+          Could not group the changes: {grouping.error}
+        </p>
+      )}
+      {form && (
+        <GroupForm
+          initial={regrouping ? (review?.focus ?? "") : (grouping?.focus ?? "")}
+          explain={review === null}
+          autoFocus={regrouping}
+          onSubmit={async (focus) => {
+            await onGroup(focus);
+            setRegrouping(false);
+          }}
+          onCancel={review ? () => setRegrouping(false) : null}
+        />
+      )}
+    </div>
+  );
+}
+
+interface FormProps {
+  initial: string;
+  explain: boolean;
+  autoFocus: boolean;
+  onSubmit: (focus: string) => Promise<void>;
+  onCancel: (() => void) | null;
+}
+
+function GroupForm({ initial, explain, autoFocus, onSubmit, onCancel }: FormProps) {
+  const [focus, setFocus] = useState(initial);
+  const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState<string | null>(null);
+  return (
+    <form
+      className="group-card group-form"
+      onSubmit={async (e) => {
+        e.preventDefault();
+        setBusy(true);
+        setFailed(null);
+        try {
+          await onSubmit(focus.trim());
+        } catch (err) {
+          setFailed(err instanceof Error ? err.message : String(err));
+        } finally {
+          setBusy(false);
+        }
+      }}
+    >
+      {explain && <p>Claude has not grouped this comparison into topics. It can do that now and explain each topic.</p>}
+      <div className="group-form-row">
+        <input
+          className="filter"
+          type="text"
+          ref={autoFocus ? focusInPlace : undefined}
+          placeholder="Focus, optional: what you want to review"
+          aria-label="Focus"
+          value={focus}
+          onChange={(e) => setFocus(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Escape" && onCancel) onCancel();
+          }}
+        />
+        <button className="button primary" type="submit" disabled={busy}>
+          Group into topics
+        </button>
+        {onCancel && (
+          <button className="button" type="button" onClick={onCancel}>
+            Cancel
+          </button>
+        )}
+      </div>
+      {failed && <p className="comment-error">{failed}</p>}
+    </form>
+  );
+}
+
+interface PickerProps {
+  reviews: Review[];
+  current: Review | null;
+  repoRoot: string;
+  onPick: (review: Review) => void;
+}
+
+function ReviewPicker({ reviews, current, repoRoot, onPick }: PickerProps) {
+  const [open, setOpen] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const away = (e: MouseEvent) => {
+      if (!root.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const escape = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", away);
+    document.addEventListener("keydown", escape);
+    return () => {
+      document.removeEventListener("mousedown", away);
+      document.removeEventListener("keydown", escape);
+    };
+  }, [open]);
+
+  const otherRepos = reviews.some((r) => r.repo !== repoRoot);
+  const newest = [...reviews].reverse();
+  return (
+    <div className="picker review-picker" ref={root}>
+      <button className="picker-button" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(!open)}>
+        <span className="picker-value">Reviews</span>
+        <span className="counter">{reviews.length}</span>
+        <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+          <path d="m4.427 7.427 3.396 3.396a.25.25 0 0 0 .354 0l3.396-3.396A.25.25 0 0 0 11.396 7H4.604a.25.25 0 0 0-.177.427Z" />
+        </svg>
+      </button>
+      {open && (
+        <div className="picker-menu" role="dialog" aria-label="Reviews in this session">
+          <div className="picker-title">Reviews in this session</div>
+          <ul className="picker-list" role="listbox" aria-label="Reviews in this session">
+            {newest.map((r) => {
+              const selected = r === current;
+              const topics = `${r.topics.length} topic${r.topics.length === 1 ? "" : "s"}`;
+              const time = new Date(r.createdAt).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+              return (
+                <li key={`${r.repo}\n${r.createdAt}`} role="option" aria-selected={selected}>
+                  <button
+                    className="review-item"
+                    onClick={() => {
+                      setOpen(false);
+                      if (!selected) onPick(r);
+                    }}
+                  >
+                    <svg className="picker-check" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+                      {selected && (
+                        <path d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.75.75 0 0 1 1.06-1.06L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z" />
+                      )}
+                    </svg>
+                    <span className="review-item-text">
+                      <span className="picker-item-label">{r.focus ?? "No focus"}</span>
+                      <span className="review-item-detail">
+                        {otherRepos && `${r.repo.split("/").pop()} · `}
+                        <code>{comparisonLabel(r.compare)}</code> · {topics} · {time}
+                      </span>
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}

@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { MENTION } from "../shared/comments.js";
+import { describeComparison } from "../shared/comparison.js";
 import type { Thread, ThreadAnchor, ThreadComment } from "../shared/types.js";
 import { ask } from "./claude.js";
 
@@ -226,7 +227,7 @@ function buildPrompt(thread: Thread): string {
   const answer = "Answer the last comment directly and concisely, in the language it is written in, using Markdown. You can read files to check details, but do not change anything.";
   if (anchor.path === null) {
     return [
-      `The user is reviewing the code changes in a diff viewer, where you grouped the changes into topics. They wrote in a comment thread on the topic "${anchor.topic}" as a whole.`,
+      `The user is reviewing the code changes in a diff viewer, where you grouped the changes into topics. They wrote in a comment thread on the topic "${anchor.topic}" of ${describeComparison(anchor.compare)} as a whole.`,
       answer,
       "",
       "The topic:",

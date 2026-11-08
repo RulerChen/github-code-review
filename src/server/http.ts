@@ -4,15 +4,15 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { AddressInfo } from "node:net";
 import path from "node:path";
 import { computeDiff, diffVersion, listRefs } from "../engine/diff.js";
-import { comparisonFromQuery } from "../shared/comparison.js";
-import type { Comparison, Review, Thread, ThreadAnchor, ViewData } from "../shared/types.js";
+import { comparisonFromQuery, sameComparison } from "../shared/comparison.js";
+import type { Comparison, Grouping, Review, Thread, ThreadAnchor, Topic, ViewData } from "../shared/types.js";
+import { groupChanges } from "./group.js";
 import { RepoThreads } from "./threads.js";
 
 export interface View {
   id: string;
   repo: string;
   compare: Comparison;
-  review: Review | null;
 }
 
 const MIME: Record<string, string> = {
@@ -31,6 +31,10 @@ const CSP =
 export class ReviewServer {
   private readonly views = new Map<string, View>();
   private readonly repos = new Map<string, RepoThreads>();
+  private readonly reviews: Review[] = [];
+  private readonly groupings: Grouping[] = [];
+  // Each open page's event stream.
+  private readonly pages = new Set<(event: string, data: unknown) => void>();
   private readonly uiDir: string;
   private server: Server | null = null;
   private port = 0;
@@ -60,11 +64,17 @@ export class ReviewServer {
     this.server = null;
   }
 
-  addView(repo: string, compare: Comparison, review: Review | null, cwd: string, session: string | null): View {
+  /** Whether a page is open, so it shows each view Claude opens instead of the user opening its URL. */
+  get pageOpen(): boolean {
+    return this.pages.size > 0;
+  }
+
+  /** A view for Claude's comparison, with its topics when it grouped the changes. Open pages switch to it. */
+  addView(repo: string, compare: Comparison, grouped: { focus: string | null; topics: Topic[] } | null, cwd: string, session: string | null): View {
     let id: string;
     do id = Array.from({ length: 8 }, () => String.fromCharCode(97 + randomInt(26))).join("");
     while (this.views.has(id));
-    const view = { id, repo, compare, review };
+    const view = { id, repo, compare };
     this.views.set(view.id, view);
     let threads = this.repos.get(repo);
     if (!threads) {
@@ -73,7 +83,53 @@ export class ReviewServer {
     }
     threads.cwd = cwd;
     if (session) threads.parentSession = session;
+    if (grouped) this.addReview(view, compare, grouped.focus, grouped.topics);
+    this.broadcast("view", { view: view.id, repo, compare });
     return view;
+  }
+
+  // A newer review of the same comparison replaces the older one.
+  private addReview(view: View, compare: Comparison, focus: string | null, topics: Topic[]): void {
+    const same = (r: { repo: string; compare: Comparison }) => r.repo === view.repo && sameComparison(r.compare, compare);
+    const old = this.reviews.findIndex(same);
+    if (old >= 0) this.reviews.splice(old, 1);
+    this.reviews.push({ repo: view.repo, compare, focus, topics, createdAt: new Date().toISOString(), view: view.id });
+    // A failed attempt at grouping the comparison is moot once it has a review.
+    const failed = this.groupings.findIndex((g) => same(g) && g.error !== null);
+    if (failed >= 0) this.groupings.splice(failed, 1);
+    this.broadcast("reviews", this.reviews);
+    this.broadcast("groupings", this.groupings);
+  }
+
+  /** Asks Claude to group the comparison into topics, unless it is already at it. Progress and the review reach the pages as events. */
+  private group(view: View, compare: Comparison, focus: string | null, threads: RepoThreads): void {
+    const i = this.groupings.findIndex((g) => g.repo === view.repo && sameComparison(g.compare, compare));
+    if (i >= 0 && this.groupings[i]!.error === null) return;
+    if (i >= 0) this.groupings.splice(i, 1);
+    const job: Grouping = { repo: view.repo, compare, focus, activity: "Starting", error: null };
+    this.groupings.push(job);
+    this.broadcast("groupings", this.groupings);
+    void (async () => {
+      try {
+        const diff = await computeDiff(view.repo, compare);
+        if (!diff.files.length) throw new Error("This comparison has no changes to group.");
+        const onActivity = (activity: string) => {
+          job.activity = activity;
+          this.broadcast("groupings", this.groupings);
+        };
+        const topics = await groupChanges({ diff, focus, cwd: threads.cwd, session: threads.parentSession, onActivity });
+        this.groupings.splice(this.groupings.indexOf(job), 1);
+        this.addReview(view, compare, focus, topics);
+      } catch (err) {
+        job.activity = null;
+        job.error = errorMessage(err);
+        this.broadcast("groupings", this.groupings);
+      }
+    })();
+  }
+
+  private broadcast(event: string, data: unknown): void {
+    for (const send of this.pages) send(event, data);
   }
 
   /** Each repository's threads, with the newest view opened for it. */
@@ -100,7 +156,7 @@ export class ReviewServer {
     }
 
     const { pathname, searchParams } = new URL(req.url ?? "/", "http://127.0.0.1");
-    const api = /^\/api\/views\/([\w-]+)\/(diff|events|refs|threads|review|wait|version)(?:\/([\w-]+)\/comments(?:\/([\w-]+))?)?$/.exec(pathname);
+    const api = /^\/api\/views\/([\w-]+)\/(diff|events|refs|threads|review|wait|version|topics)(?:\/([\w-]+)\/comments(?:\/([\w-]+))?)?$/.exec(pathname);
     if (api) {
       const view = this.views.get(api[1]!);
       if (!view) return sendJson(res, 404, { error: "Unknown view. Ask Claude to open the viewer again." });
@@ -118,7 +174,8 @@ export class ReviewServer {
             diff,
             version,
             opened: view.compare,
-            review: view.review,
+            reviews: this.reviews,
+            groupings: this.groupings,
             threads: threads.threads,
             listening: threads.listening,
           };
@@ -142,6 +199,13 @@ export class ReviewServer {
         }
       }
       if (req.method === "GET" && route === "events" && !threadId) return this.events(req, res, threads);
+      if (req.method === "POST" && route === "topics" && !threadId) {
+        if (!this.sameOrigin(req)) return sendJson(res, 403, { error: "Cross-site request refused" });
+        const { focus } = (await readJson(req)) ?? {};
+        if (focus !== undefined && focus !== null && !isText(focus, 2000)) return sendJson(res, 400, { error: "Invalid focus" });
+        this.group(view, comparisonFromQuery(searchParams) ?? view.compare, focus?.trim() || null, threads);
+        return sendJson(res, 202, { groupings: this.groupings });
+      }
       if (route === "threads" && threadId && commentId && (req.method === "PATCH" || req.method === "DELETE")) {
         if (!this.sameOrigin(req)) return sendJson(res, 403, { error: "Cross-site request refused" });
         if (req.method === "DELETE") {
@@ -212,16 +276,20 @@ export class ReviewServer {
       "X-Content-Type-Options": "nosniff",
     });
     res.write("retry: 2000\n\n");
-    const unsubscribe = threads.subscribe((thread) => res.write(`event: thread\ndata: ${JSON.stringify(thread)}\n\n`));
-    const listening = (on: boolean) => res.write(`event: listening\ndata: ${on}\n\n`);
+    const send = (event: string, data: unknown) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    const unsubscribe = threads.subscribe((thread) => send("thread", thread));
     // A reconnect can miss a change, so each connection starts with the current state.
-    listening(threads.listening);
-    const unlisten = threads.subscribeListening(listening);
+    send("listening", threads.listening);
+    send("reviews", this.reviews);
+    send("groupings", this.groupings);
+    const unlisten = threads.subscribeListening((on) => send("listening", on));
+    this.pages.add(send);
     const ping = setInterval(() => res.write(": ping\n\n"), 25_000);
     req.on("close", () => {
       clearInterval(ping);
       unsubscribe();
       unlisten();
+      this.pages.delete(send);
     });
   }
 
@@ -269,11 +337,19 @@ function isAnchor(value: unknown): value is ThreadAnchor {
   if (value === null || typeof value !== "object") return false;
   const a = value as Record<string, unknown>;
   const line = (n: unknown) => Number.isInteger(n) && (n as number) > 0;
-  if (a.path === null) return isText(a.topic, 1024, true) && a.side === null && a.start === null && a.end === null && a.commit === null;
+  if (a.path === null) {
+    return isText(a.topic, 1024, true) && isComparison(a.compare) && a.side === null && a.start === null && a.end === null && a.commit === null;
+  }
   if (!isText(a.path, 4096, true)) return false;
   if (a.commit !== null && !(typeof a.commit === "string" && /^[0-9a-f]{40,64}$/.test(a.commit))) return false;
   if (a.side === null) return a.start === null && a.end === null;
   return (a.side === "old" || a.side === "new") && line(a.start) && line(a.end) && (a.start as number) <= (a.end as number);
+}
+
+function isComparison(value: unknown): value is Comparison {
+  if (value === null || typeof value !== "object") return false;
+  const c = value as Record<string, unknown>;
+  return isText(c.base, 1024, true) && (c.head === null || isText(c.head, 1024, true)) && typeof c.threeDot === "boolean";
 }
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
