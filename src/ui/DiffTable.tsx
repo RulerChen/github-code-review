@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, memo, type MouseEvent, useEffect, useMemo, useState } from "react";
 import type { DiffLine, DisplayHunk, Expansion, Thread } from "../shared/types";
 import { CommentForm, onShownVersion, ThreadView, useComments } from "./comments";
 import type { Token, TokenLines } from "./highlight";
@@ -71,22 +71,38 @@ export function DiffTable({ path, hunks, oldTokens, newTokens, onExpand }: Props
   const [selection, setSelection] = useState<Selection | null>(null);
   const [drag, setDrag] = useState<Drag | null>(null);
   const threads = threadsFor(path);
+  const rows = useMemo(() => hunks.map((h) => toSplitRows(h.lines)), [hunks]);
+  const threadsAt = useMemo(() => {
+    const at = new Map<string, Thread[]>();
+    for (const t of threads) {
+      if (!onShownVersion(t, versions)) continue;
+      const key = `${t.anchor.side}:${t.anchor.end}`;
+      at.set(key, [...(at.get(key) ?? []), t]);
+    }
+    return at;
+  }, [threads, versions]);
   const last = hunks[hunks.length - 1];
   const shown = drag ? span(drag.side, drag.pivot, drag.end) : selection;
 
   const isSelected = (side: Side, no: number | null) =>
     shown !== null && no !== null && shown.side === side && no >= shown.start && no <= shown.end;
 
-  const press = (side: Side, no: number, shift: boolean) => {
-    if (shift && selection?.side === side) {
+  // One pair of handlers on the table finds the line under the pointer, so cells carry no handlers.
+  const press = (e: MouseEvent) => {
+    const hit = e.button === 0 ? lineAt(e.target, true) : null;
+    if (!hit) return;
+    e.preventDefault();
+    const [side, no] = hit;
+    if (e.shiftKey && selection?.side === side) {
       setSelection(span(side, selection.pivot, no));
     } else {
       setDrag({ side, pivot: no, end: no, toggle: selection?.side === side && selection.start === no && selection.end === no });
     }
   };
 
-  const hover = (side: Side, no: number) => {
-    if (drag?.side === side && drag.end !== no) setDrag({ ...drag, end: no });
+  const hover = (e: MouseEvent) => {
+    const hit = drag ? lineAt(e.target, false) : null;
+    if (drag && hit && hit[0] === drag.side && hit[1] !== drag.end) setDrag({ ...drag, end: hit[1] });
   };
 
   useEffect(() => {
@@ -106,24 +122,26 @@ export function DiffTable({ path, hunks, oldTokens, newTokens, onExpand }: Props
     setSelection(null);
   };
 
-  const below = (side: Side, no: number | null) => (
-    <>
-      {no !== null &&
-        threads
-          .filter((t) => t.anchor.side === side && t.anchor.end === no && onShownVersion(t, versions))
-          .map((t) => <ThreadRow key={t.id} thread={t} />)}
-      {selection?.side === side && selection.end === no && (
-        <tr className="thread-row">
-          <td colSpan={4}>
-            <CommentForm placeholder="Leave a comment" submitLabel="Comment" onSubmit={submit} onCancel={() => setSelection(null)} />
-          </td>
-        </tr>
-      )}
-    </>
-  );
+  const below = (side: Side, no: number | null) => {
+    const list = no === null ? undefined : threadsAt.get(`${side}:${no}`);
+    const form = selection?.side === side && selection.end === no;
+    if (!list && !form) return null;
+    return (
+      <>
+        {list?.map((t) => <ThreadRow key={t.id} thread={t} />)}
+        {form && (
+          <tr className="thread-row">
+            <td colSpan={4}>
+              <CommentForm placeholder="Leave a comment" submitLabel="Comment" onSubmit={submit} onCancel={() => setSelection(null)} />
+            </td>
+          </tr>
+        )}
+      </>
+    );
+  };
 
   return (
-    <table className="diff">
+    <table className="diff" onMouseDown={press} onMouseOver={hover}>
       <colgroup>
         <col className="col-num" />
         <col />
@@ -141,29 +159,18 @@ export function DiffTable({ path, hunks, oldTokens, newTokens, onExpand }: Props
                 {h.header}
               </td>
             </tr>
-            {toSplitRows(h.lines).map((row, ri) => {
+            {rows[hi]!.map((row, ri) => {
               const oldNo = row.left?.oldNo ?? null;
               const newNo = row.right?.newNo ?? null;
               return (
                 <Fragment key={ri}>
-                  <tr>
-                    <SplitCell
-                      line={row.left}
-                      tokens={row.left ? tokensFor(row.left, oldTokens, newTokens) : undefined}
-                      side="old"
-                      selected={isSelected("old", oldNo)}
-                      onPress={press}
-                      onHover={hover}
-                    />
-                    <SplitCell
-                      line={row.right}
-                      tokens={row.right ? tokensFor(row.right, oldTokens, newTokens) : undefined}
-                      side="new"
-                      selected={isSelected("new", newNo)}
-                      onPress={press}
-                      onHover={hover}
-                    />
-                  </tr>
+                  <Row
+                    row={row}
+                    oldTokens={oldTokens}
+                    newTokens={newTokens}
+                    oldSelected={isSelected("old", oldNo)}
+                    newSelected={isSelected("new", newNo)}
+                  />
                   {below("old", oldNo)}
                   {below("new", newNo)}
                 </Fragment>
@@ -226,16 +233,42 @@ function ThreadRow({ thread }: { thread: Thread }) {
   );
 }
 
+// The side and number of the line in the cell under `target`, read from the number cell's data attributes.
+function lineAt(target: EventTarget, numberOnly: boolean): [Side, number] | null {
+  const td = target instanceof Element ? target.closest("td") : null;
+  const num = td?.classList.contains("num") ? td : numberOnly ? null : td?.previousElementSibling;
+  if (!(num instanceof HTMLElement)) return null;
+  const side = num.dataset.side;
+  const no = Number(num.dataset.n);
+  return (side === "old" || side === "new") && no > 0 ? [side, no] : null;
+}
+
+interface RowProps {
+  row: SplitRow;
+  oldTokens: TokenLines | null;
+  newTokens: TokenLines | null;
+  oldSelected: boolean;
+  newSelected: boolean;
+}
+
+// Memoized so a selection change renders only the rows whose selected state changed.
+const Row = memo(function Row({ row, oldTokens, newTokens, oldSelected, newSelected }: RowProps) {
+  return (
+    <tr>
+      <SplitCell line={row.left} tokens={row.left ? tokensFor(row.left, oldTokens, newTokens) : undefined} side="old" selected={oldSelected} />
+      <SplitCell line={row.right} tokens={row.right ? tokensFor(row.right, oldTokens, newTokens) : undefined} side="new" selected={newSelected} />
+    </tr>
+  );
+});
+
 interface CellProps {
   line: DiffLine | null;
   tokens: Token[] | undefined;
   side: Side;
   selected: boolean;
-  onPress: (side: Side, no: number, shift: boolean) => void;
-  onHover: (side: Side, no: number) => void;
 }
 
-function SplitCell({ line, tokens, side, selected, onPress, onHover }: CellProps) {
+function SplitCell({ line, tokens, side, selected }: CellProps) {
   if (!line) {
     return (
       <>
@@ -246,25 +279,15 @@ function SplitCell({ line, tokens, side, selected, onPress, onHover }: CellProps
   }
   const n = side === "old" ? line.oldNo : line.newNo;
   const sel = selected ? " is-selected" : "";
-  const enter = n ? () => onHover(side, n) : undefined;
   return (
     <>
       <td
         className={`num ${line.kind}${sel}`}
+        data-side={side}
         data-n={n ?? ""}
         title={n ? "Comment on this line. Drag or shift-click to select a range." : undefined}
-        onMouseDown={
-          n
-            ? (e) => {
-                if (e.button !== 0) return;
-                e.preventDefault();
-                onPress(side, n, e.shiftKey);
-              }
-            : undefined
-        }
-        onMouseEnter={enter}
       />
-      <td className={`code ${line.kind}${sel}`} data-mark={MARK[line.kind]} onMouseEnter={enter}>
+      <td className={`code ${line.kind}${sel}`} data-mark={MARK[line.kind]}>
         <Code line={line} tokens={tokens} />
       </td>
     </>
@@ -289,6 +312,25 @@ export function hasLine(hunks: DisplayHunk[], side: Side, no: number): boolean {
 interface SplitRow {
   left: DiffLine | null;
   right: DiffLine | null;
+}
+
+export function splitRowCount(lines: DiffLine[]): number {
+  let rows = 0;
+  let dels = 0;
+  let adds = 0;
+  for (const line of lines) {
+    if (line.kind === "add") {
+      adds++;
+      continue;
+    }
+    if (line.kind === "context" || adds > 0) {
+      rows += Math.max(dels, adds);
+      dels = adds = 0;
+    }
+    if (line.kind === "context") rows++;
+    else dels++;
+  }
+  return rows + Math.max(dels, adds);
 }
 
 export function toSplitRows(lines: DiffLine[]): SplitRow[] {

@@ -1,12 +1,40 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { buildHunks, splitLines } from "../shared/hunks";
 import type { Block, DisplayHunk, Expansion, FileDiff } from "../shared/types";
 import { onShownVersion, ThreadView, useComments } from "./comments";
-import { DiffTable, hasLine, type OnExpand } from "./DiffTable";
+import { DiffTable, hasLine, type OnExpand, splitRowCount } from "./DiffTable";
 import { highlight, languageFor, type TokenLines } from "./highlight";
 
-const LARGE_DIFF_LINES = 800;
+// GitHub loads 400 lines or 20 KB of a file's diff before asking. Characters stand in for bytes.
+const AUTO_LOAD_LINES = 400;
+const AUTO_LOAD_CHARS = 20 * 1024;
 const NO_EXPANSION: Expansion = { above: {}, below: {} };
+const ROW_PX = 20;
+const HUNK_PX = 28;
+
+// One observer for every card: a card's body mounts once it comes within a viewport of the screen.
+const nearCallbacks = new Map<Element, () => void>();
+let nearObserver: IntersectionObserver | null = null;
+
+function whenNear(el: Element, callback: () => void): () => void {
+  nearObserver ??= new IntersectionObserver(
+    (entries) => {
+      for (const e of entries) {
+        if (!e.isIntersecting) continue;
+        nearCallbacks.get(e.target)?.();
+        nearCallbacks.delete(e.target);
+        nearObserver!.unobserve(e.target);
+      }
+    },
+    { rootMargin: "100% 0px" },
+  );
+  nearCallbacks.set(el, callback);
+  nearObserver.observe(el);
+  return () => {
+    nearCallbacks.delete(el);
+    nearObserver?.unobserve(el);
+  };
+}
 
 interface Props {
   file: FileDiff;
@@ -40,6 +68,10 @@ export function FileCard({ file, blocks = file.blocks, anchor, viewed = false, o
     setExpansion((e) => ({ ...e, [dir]: { ...e[dir], [id]: (e[dir][id] ?? 0) + lines } }));
 
   const lineCount = baseHunks.reduce((s, h) => s + h.lines.length, 0);
+  const charCount = useMemo(() => baseHunks.reduce((s, h) => h.lines.reduce((n, l) => n + l.text.length + 1, s), 0), [baseHunks]);
+  const ref = useRef<HTMLElement>(null);
+  const [near, setNear] = useState(false);
+  useEffect(() => (near || !ref.current ? undefined : whenNear(ref.current, () => setNear(true))), [near]);
   const { threadsFor, versions, revealSeq, peekReveal } = useComments();
   useEffect(() => {
     const thread = peekReveal()?.thread;
@@ -47,6 +79,7 @@ export function FileCard({ file, blocks = file.blocks, anchor, viewed = false, o
     const placed = onShownVersion(thread, versions) && hasLine(hunks, thread.anchor.side, thread.anchor.end);
     if (!placed && partial) return;
     setCollapsed(false);
+    setNear(true);
     if (placed) setForceLoad(true);
   }, [revealSeq]);
   const unplaced = partial
@@ -54,11 +87,11 @@ export function FileCard({ file, blocks = file.blocks, anchor, viewed = false, o
     : threadsFor(file.path).filter((t) => !onShownVersion(t, versions) || !hasLine(hunks, t.anchor.side, t.anchor.end));
   const additions = partial ? countLines(hunks, "add") : file.additions;
   const deletions = partial ? countLines(hunks, "del") : file.deletions;
-  const deferred = lineCount > LARGE_DIFF_LINES && !forceLoad;
-  const tokens = useHighlight(file, !collapsed && !deferred);
+  const deferred = (lineCount > AUTO_LOAD_LINES || charCount > AUTO_LOAD_CHARS) && !forceLoad;
+  const tokens = useHighlight(file, near && !collapsed && !deferred);
 
   return (
-    <section className={`file${viewed ? " is-viewed" : ""}`} id={anchor}>
+    <section className={`file${viewed ? " is-viewed" : ""}`} id={anchor} ref={ref}>
       <header className="file-header">
         <button
           className="icon-button chevron"
@@ -87,7 +120,10 @@ export function FileCard({ file, blocks = file.blocks, anchor, viewed = false, o
           </label>
         )}
       </header>
-      {!collapsed && (
+      {!collapsed && !near && (
+        <div className="file-body" style={{ height: deferred ? 2 * HUNK_PX : estimateHeight(hunks) }} />
+      )}
+      {!collapsed && near && (
         <div className="file-body">
           {unplaced.length > 0 && (
             <div className="unplaced">
@@ -102,6 +138,7 @@ export function FileCard({ file, blocks = file.blocks, anchor, viewed = false, o
             hunks={hunks}
             deferred={deferred}
             lineCount={lineCount}
+            charCount={charCount}
             onLoad={() => setForceLoad(true)}
             onExpand={expand}
             tokens={tokens}
@@ -117,6 +154,7 @@ function FileBody({
   hunks,
   deferred,
   lineCount,
+  charCount,
   onLoad,
   onExpand,
   tokens,
@@ -125,6 +163,7 @@ function FileBody({
   hunks: DisplayHunk[];
   deferred: boolean;
   lineCount: number;
+  charCount: number;
   onLoad: () => void;
   onExpand: OnExpand;
   tokens: { old: TokenLines | null; new: TokenLines | null };
@@ -139,7 +178,7 @@ function FileBody({
   if (deferred) {
     return (
       <div className="file-note">
-        Large diff ({lineCount.toLocaleString()} lines) not rendered by default.{" "}
+        Large diff ({lineCount.toLocaleString()} lines, {Math.ceil(charCount / 1024).toLocaleString()} KB) not rendered by default.{" "}
         <button className="link-button" onClick={onLoad}>
           Load diff
         </button>
@@ -165,6 +204,11 @@ export function hunksOf(file: FileDiff, blocks: Block[], expansion: Expansion | 
   if (blocks.length === 0) return [];
   const lines = (text: string | null) => (text === null ? null : splitLines(text));
   return buildHunks(blocks, lines(file.oldContent), lines(file.newContent), file.blocks, expansion);
+}
+
+// Height of a body that has not mounted yet, so the page keeps its length and anchors land close.
+function estimateHeight(hunks: DisplayHunk[]): number {
+  return Math.max(2 * HUNK_PX, hunks.reduce((px, h) => px + HUNK_PX + splitRowCount(h.lines) * ROW_PX, 0));
 }
 
 function countLines(hunks: DisplayHunk[], kind: "add" | "del"): number {

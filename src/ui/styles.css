@@ -495,13 +495,15 @@ button {
   padding: 0 10px 0 22px;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  position: relative;
 }
 
+/* The mark hangs in the cell's left padding. A positioned cell would make every code cell its own
+   paint layer, and hit testing walks all of them on each mouse event. */
 .diff .code::before {
   content: attr(data-mark);
-  position: absolute;
-  left: 8px;
+  float: left;
+  width: 14px;
+  margin-left: -14px;
   user-select: none;
 }
 
