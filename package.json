@@ -6,7 +6,7 @@
     "build": "npm run build:ui && npm run build:server",
     "build:ui": "vite build --config src/ui/vite.config.ts",
     "build:server": "node scripts/build-server.mjs",
-    "dev:server": "node scripts/build-server.mjs && node plugins/diff-review/dist/server.mjs --http-only",
+    "dev": "node scripts/build-server.mjs && node plugins/diff-review/dist/server.mjs --http-only",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p src/ui/tsconfig.json"
   },
   "devDependencies": {
