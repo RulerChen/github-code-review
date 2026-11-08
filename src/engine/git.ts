@@ -9,9 +9,9 @@ export class GitError extends Error {
   }
 }
 
-export function git(cwd: string, args: string[], okCodes: readonly number[] = [0]): Promise<Buffer> {
+export function git(cwd: string, args: string[], okCodes: readonly number[] = [0], input?: string): Promise<Buffer> {
   return new Promise((resolve, reject) => {
-    execFile(
+    const child = execFile(
       "git",
       args,
       {
@@ -28,5 +28,6 @@ export function git(cwd: string, args: string[], okCodes: readonly number[] = [0
         reject(new GitError(`git ${args[0]} failed: ${detail}`, code));
       },
     );
+    child.stdin?.end(input);
   });
 }

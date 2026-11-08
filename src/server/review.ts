@@ -20,7 +20,7 @@ export function formatChanges(diff: DiffResult): string {
   }
 
   for (const f of diff.files) {
-    const stat = f.binary ? "binary" : `+${f.additions} -${f.deletions}`;
+    const stat = f.binary ? "binary" : `+${f.additions} -${f.deletions}${f.diffTooLarge ? ", too large to list its lines" : ""}`;
     out.push("", `${f.oldPath ? `${f.oldPath} -> ` : ""}${f.path} (${f.status}, ${stat})`);
     if (f.blocks.length === 0) {
       out.push(`  file:${f.path}`);

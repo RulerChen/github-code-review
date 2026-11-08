@@ -36752,9 +36752,9 @@ var GitError = class extends Error {
   }
   exitCode;
 };
-function git(cwd, args, okCodes = [0]) {
+function git(cwd, args, okCodes = [0], input2) {
   return new Promise((resolve, reject) => {
-    execFile(
+    const child = execFile(
       "git",
       args,
       {
@@ -36771,11 +36771,14 @@ function git(cwd, args, okCodes = [0]) {
         reject(new GitError(`git ${args[0]} failed: ${detail}`, code));
       }
     );
+    child.stdin?.end(input2);
   });
 }
 
 // src/engine/diff.ts
 var MAX_CONTENT_BYTES = 1024 * 1024;
+var MAX_DIFF_LINES = 2e4;
+var MAX_DIFF_CHARS = 500 * 1024;
 var MAX_COMMITS = 250;
 var EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 async function computeDiff(repo, compare = {}) {
@@ -36796,25 +36799,34 @@ async function computeDiff(repo, compare = {}) {
   const oldCommit = threeDot && baseCommit && tip ? await mergeBase(repoRoot, baseCommit, tip, base, head) : baseCommit;
   const range = headCommit ? [oldCommit ?? EMPTY_TREE, headCommit] : [oldCommit ?? EMPTY_TREE];
   const diffArgs = ["diff", "--no-color", "--no-ext-diff", "--no-textconv", "--submodule=short", "--find-renames"];
-  const [nameStatus, patch, untracked, commits] = await Promise.all([
-    git(repoRoot, [...diffArgs, "--name-status", "-z", ...range, "--"]),
+  const [raw, patch, untracked, commits] = await Promise.all([
+    git(repoRoot, [...diffArgs, "--raw", "-z", "--no-abbrev", ...range, "--"]),
     git(repoRoot, [...diffArgs, "-U0", ...range, "--"]),
     head === null ? git(repoRoot, ["ls-files", "--others", "--exclude-standard", "-z"]) : Buffer.alloc(0),
     listCommits(repoRoot, baseCommit, tip)
   ]);
-  const entries = parseNameStatus(nameStatus);
+  const entries = parseRaw(raw);
   let sections = splitSections(patch.toString("utf8"));
   if (sections.length !== entries.length) sections = [];
+  const untrackedPaths = untracked.toString("utf8").split("\0").filter(Boolean);
+  const blobIds = entries.flatMap((e) => {
+    const status = statusOf(e.code);
+    return [status !== "added" && oldCommit ? e.oldOid : null, status !== "deleted" && headCommit ? e.newOid : null];
+  });
+  const [blobs, generated] = await Promise.all([
+    readBlobs(repoRoot, blobIds.filter((id) => id !== null)),
+    generatedPaths(repoRoot, [...entries.map((e) => e.path), ...untrackedPaths], headCommit)
+  ]);
   const tracked = await mapLimit(
     entries.map((e, i) => [e, sections[i]]),
     8,
-    ([entry, section]) => buildTrackedFile(repoRoot, diffArgs, range, oldCommit, headCommit, entry, section)
+    ([entry, section]) => buildTrackedFile(repoRoot, diffArgs, range, oldCommit, headCommit, blobs, entry, section)
   );
-  const untrackedPaths = untracked.toString("utf8").split("\0").filter(Boolean);
   const added = (await mapLimit(untrackedPaths, 8, (p) => buildUntrackedFile(repoRoot, p))).filter(
     (f) => f !== null
   );
   const files = [...tracked, ...added].sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
+  for (const f of files) f.generated = generated.has(f.path);
   return { repoRoot, base, head, threeDot, baseCommit, headCommit, oldCommit, ...commits, files };
 }
 function summarize(result) {
@@ -36869,20 +36881,61 @@ async function listRefs(repo) {
   const [branches, tags, commits] = await Promise.all([refs(["refs/heads", "refs/remotes"]), refs(["refs/tags"]), recentCommits(repoRoot)]);
   return { branches, tags, commits };
 }
-function parseNameStatus(buf) {
+function parseRaw(buf) {
   const parts = buf.toString("utf8").split("\0");
   const out = [];
   let i = 0;
   while (i < parts.length - 1) {
-    const code = parts[i++];
+    const [, , oldOid = "", newOid = "", code = ""] = parts[i++].slice(1).split(" ");
     if (code.startsWith("R") || code.startsWith("C")) {
       const oldPath = parts[i++];
-      out.push({ code: code[0], path: parts[i++], oldPath });
+      out.push({ code: code[0], path: parts[i++], oldPath, oldOid, newOid });
     } else {
-      out.push({ code: code[0], path: parts[i++], oldPath: null });
+      out.push({ code: code[0], path: parts[i++], oldPath: null, oldOid, newOid });
     }
   }
   return out;
+}
+async function readBlobs(repoRoot, ids) {
+  const out = /* @__PURE__ */ new Map();
+  const unique = [...new Set(ids)];
+  if (unique.length === 0) return out;
+  const checks = (await git(repoRoot, ["cat-file", "--batch-check"], [0], `${unique.join("\n")}
+`)).toString("utf8").split("\n");
+  const wanted = [];
+  unique.forEach((id, i) => {
+    const [, type, size] = checks[i].split(" ");
+    if (type !== "blob") out.set(id, { kind: "absent" });
+    else if (Number(size) > MAX_CONTENT_BYTES) out.set(id, { kind: "tooLarge" });
+    else wanted.push(id);
+  });
+  if (wanted.length === 0) return out;
+  const buf = await git(repoRoot, ["cat-file", "--batch"], [0], `${wanted.join("\n")}
+`);
+  let pos = 0;
+  for (const id of wanted) {
+    const eol = buf.indexOf(10, pos);
+    const size = Number(buf.subarray(pos, eol).toString("latin1").split(" ")[2]);
+    out.set(id, classify(buf.subarray(eol + 1, eol + 1 + size)));
+    pos = eol + 1 + size + 1;
+  }
+  return out;
+}
+async function generatedPaths(repoRoot, paths, source) {
+  if (paths.length === 0) return /* @__PURE__ */ new Set();
+  const args = ["check-attr", "-z", "--stdin", ...source ? ["--source", source] : [], "linguist-generated"];
+  const parts = (await git(repoRoot, args, [0], `${paths.join("\0")}\0`)).toString("utf8").split("\0");
+  const out = /* @__PURE__ */ new Set();
+  for (let i = 0; i + 2 < parts.length; i += 3) {
+    if (parts[i + 2] === "set" || parts[i + 2] === "true") out.add(parts[i]);
+  }
+  return out;
+}
+function diffTooLarge(blocks) {
+  if (blocks.reduce((n, b) => n + b.oldCount + b.newCount, 0) > MAX_DIFF_LINES) return true;
+  let chars = 0;
+  for (const b of blocks) for (const line of [b.del, b.add].flat()) chars += line.length + 2;
+  return chars > MAX_DIFF_CHARS;
 }
 function statusOf(code) {
   if (code === "A") return "added";
@@ -36966,13 +37019,6 @@ function classify(buf) {
   if (buf.subarray(0, 8e3).includes(0)) return { kind: "binary" };
   return { kind: "text", text: buf.toString("utf8") };
 }
-async function readBlob(repoRoot, commit, filePath) {
-  try {
-    return classify(await git(repoRoot, ["cat-file", "blob", `${commit}:${filePath}`]));
-  } catch {
-    return { kind: "absent" };
-  }
-}
 async function readWorkTree(repoRoot, filePath) {
   const abs = path.join(repoRoot, filePath);
   try {
@@ -36995,7 +37041,7 @@ function matchesBlocks(lines, blocks, side) {
     });
   });
 }
-async function buildTrackedFile(repoRoot, diffArgs, range, oldCommit, headCommit, entry, section) {
+async function buildTrackedFile(repoRoot, diffArgs, range, oldCommit, headCommit, blobs, entry, section) {
   const status = statusOf(entry.code);
   if (!section) {
     const paths = entry.oldPath ? [entry.oldPath, entry.path] : [entry.path];
@@ -37004,24 +37050,30 @@ async function buildTrackedFile(repoRoot, diffArgs, range, oldCommit, headCommit
   }
   const parsed = parseSection(section);
   const blocks = assignIds(entry.path, parsed.blocks);
-  const [oldC, newC] = await Promise.all([
-    status === "added" || !oldCommit ? Promise.resolve({ kind: "absent" }) : readBlob(repoRoot, oldCommit, entry.oldPath ?? entry.path),
-    status === "deleted" ? Promise.resolve({ kind: "absent" }) : headCommit ? readBlob(repoRoot, headCommit, entry.path) : readWorkTree(repoRoot, entry.path)
-  ]);
+  const absent = { kind: "absent" };
+  const oldC = status === "added" || !oldCommit ? absent : blobs.get(entry.oldOid) ?? absent;
+  const newC = status === "deleted" ? absent : headCommit ? blobs.get(entry.newOid) ?? absent : await readWorkTree(repoRoot, entry.path);
   const binary = parsed.binary || oldC.kind === "binary" || newC.kind === "binary";
+  const tooLarge = oldC.kind === "tooLarge" || newC.kind === "tooLarge";
+  const file2 = {
+    path: entry.path,
+    oldPath: status === "renamed" ? entry.oldPath : null,
+    status,
+    binary,
+    tooLarge,
+    generated: false,
+    diffTooLarge: false,
+    modeChange: parsed.modeChange,
+    additions: blocks.reduce((s, b) => s + b.newCount, 0),
+    deletions: blocks.reduce((s, b) => s + b.oldCount, 0)
+  };
+  if (!binary && diffTooLarge(blocks)) return withoutLines(file2, blocks);
   let oldLines = oldC.kind === "text" ? splitLines(oldC.text) : null;
   let newLines = newC.kind === "text" ? splitLines(newC.text) : null;
   if (oldLines && !matchesBlocks(oldLines, blocks, "old")) oldLines = null;
   if (newLines && !matchesBlocks(newLines, blocks, "new")) newLines = null;
   return {
-    path: entry.path,
-    oldPath: status === "renamed" ? entry.oldPath : null,
-    status,
-    binary,
-    tooLarge: oldC.kind === "tooLarge" || newC.kind === "tooLarge",
-    modeChange: parsed.modeChange,
-    additions: blocks.reduce((s, b) => s + b.newCount, 0),
-    deletions: blocks.reduce((s, b) => s + b.oldCount, 0),
+    ...file2,
     blocks: binary ? [] : blocks,
     hunks: binary ? [] : buildHunks(blocks, oldLines, newLines),
     oldContent: oldLines && oldC.kind === "text" ? oldC.text : null,
@@ -37037,6 +37089,8 @@ async function buildUntrackedFile(repoRoot, filePath) {
     status: "added",
     binary: c.kind === "binary",
     tooLarge: c.kind === "tooLarge",
+    generated: false,
+    diffTooLarge: false,
     modeChange: null,
     additions: 0,
     deletions: 0,
@@ -37061,7 +37115,18 @@ async function buildUntrackedFile(repoRoot, filePath) {
       section: ""
     }
   ]);
+  if (diffTooLarge(blocks)) return withoutLines({ ...base, additions: lines.length }, blocks);
   return { ...base, additions: lines.length, blocks, hunks: buildHunks(blocks, null, lines), newContent: c.text };
+}
+function withoutLines(file2, blocks) {
+  return {
+    ...file2,
+    diffTooLarge: true,
+    blocks: blocks.map((b) => ({ ...b, del: [], add: [] })),
+    hunks: [],
+    oldContent: null,
+    newContent: null
+  };
 }
 async function mapLimit(items, limit, fn) {
   const out = new Array(items.length);
@@ -37493,7 +37558,7 @@ function formatChanges(diff) {
     for (const c of shown) out.push(`  ${c.sha.slice(0, 7)} ${c.subject}`);
   }
   for (const f of diff.files) {
-    const stat = f.binary ? "binary" : `+${f.additions} -${f.deletions}`;
+    const stat = f.binary ? "binary" : `+${f.additions} -${f.deletions}${f.diffTooLarge ? ", too large to list its lines" : ""}`;
     out.push("", `${f.oldPath ? `${f.oldPath} -> ` : ""}${f.path} (${f.status}, ${stat})`);
     if (f.blocks.length === 0) {
       out.push(`  file:${f.path}`);

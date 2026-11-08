@@ -87,7 +87,7 @@ export function FileCard({ file, blocks = file.blocks, anchor, viewed = false, o
     : threadsFor(file.path).filter((t) => !onShownVersion(t, versions) || !hasLine(hunks, t.anchor.side, t.anchor.end));
   const additions = partial ? countLines(hunks, "add") : file.additions;
   const deletions = partial ? countLines(hunks, "del") : file.deletions;
-  const deferred = (lineCount > AUTO_LOAD_LINES || charCount > AUTO_LOAD_CHARS) && !forceLoad;
+  const deferred = (file.generated || lineCount > AUTO_LOAD_LINES || charCount > AUTO_LOAD_CHARS) && !forceLoad;
   const tokens = useHighlight(file, near && !collapsed && !deferred);
 
   return (
@@ -169,6 +169,9 @@ function FileBody({
   tokens: { old: TokenLines | null; new: TokenLines | null };
 }) {
   if (file.binary) return <p className="file-note">Binary file not shown.</p>;
+  if (file.diffTooLarge) {
+    return <p className="file-note">Diff too large to display ({(file.additions + file.deletions).toLocaleString()} changed lines).</p>;
+  }
   if (hunks.length === 0) {
     if (file.tooLarge) return <p className="file-note">File too large to display.</p>;
     if (file.modeChange) return <p className="file-note">File mode changed from {file.modeChange.from} to {file.modeChange.to}.</p>;
@@ -178,7 +181,8 @@ function FileBody({
   if (deferred) {
     return (
       <div className="file-note">
-        Large diff ({lineCount.toLocaleString()} lines, {Math.ceil(charCount / 1024).toLocaleString()} KB) not rendered by default.{" "}
+        {file.generated ? "Generated file" : `Large diff (${lineCount.toLocaleString()} lines, ${Math.ceil(charCount / 1024).toLocaleString()} KB)`} not
+        rendered by default.{" "}
         <button className="link-button" onClick={onLoad}>
           Load diff
         </button>
@@ -201,7 +205,7 @@ function FileBody({
 }
 
 export function hunksOf(file: FileDiff, blocks: Block[], expansion: Expansion | null): DisplayHunk[] {
-  if (blocks.length === 0) return [];
+  if (blocks.length === 0 || file.diffTooLarge) return [];
   const lines = (text: string | null) => (text === null ? null : splitLines(text));
   return buildHunks(blocks, lines(file.oldContent), lines(file.newContent), file.blocks, expansion);
 }

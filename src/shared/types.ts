@@ -48,6 +48,10 @@ export interface FileDiff {
   status: FileStatus;
   binary: boolean;
   tooLarge: boolean;
+  /** Marked linguist-generated in .gitattributes. Like GitHub, the page does not render it until asked. */
+  generated: boolean;
+  /** Over GitHub's per-file limit of 20,000 changed lines or 500 KB: blocks keep their ids and ranges but no lines. */
+  diffTooLarge: boolean;
   modeChange: { from: string; to: string } | null;
 
   additions: number;

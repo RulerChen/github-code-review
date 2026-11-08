@@ -8,6 +8,9 @@ import { git } from "./git.js";
 export type { Block, CommitInfo, Comparison, DiffLine, DiffResult, DisplayHunk, FileDiff, FileStatus };
 
 export const MAX_CONTENT_BYTES = 1024 * 1024;
+// GitHub stops showing a file's diff past 20,000 lines or 500 KB. Characters stand in for bytes.
+export const MAX_DIFF_LINES = 20_000;
+export const MAX_DIFF_CHARS = 500 * 1024;
 export const MAX_COMMITS = 250;
 const EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 
@@ -30,27 +33,37 @@ export async function computeDiff(repo: string, compare: Partial<Comparison> = {
   const range = headCommit ? [oldCommit ?? EMPTY_TREE, headCommit] : [oldCommit ?? EMPTY_TREE];
 
   const diffArgs = ["diff", "--no-color", "--no-ext-diff", "--no-textconv", "--submodule=short", "--find-renames"];
-  const [nameStatus, patch, untracked, commits] = await Promise.all([
-    git(repoRoot, [...diffArgs, "--name-status", "-z", ...range, "--"]),
+  const [raw, patch, untracked, commits] = await Promise.all([
+    git(repoRoot, [...diffArgs, "--raw", "-z", "--no-abbrev", ...range, "--"]),
     git(repoRoot, [...diffArgs, "-U0", ...range, "--"]),
     head === null ? git(repoRoot, ["ls-files", "--others", "--exclude-standard", "-z"]) : Buffer.alloc(0),
     listCommits(repoRoot, baseCommit, tip),
   ]);
 
-  const entries = parseNameStatus(nameStatus);
+  const entries = parseRaw(raw);
   let sections: (string[] | undefined)[] = splitSections(patch.toString("utf8"));
 
   if (sections.length !== entries.length) sections = [];
 
-  const tracked = await mapLimit(entries.map((e, i) => [e, sections[i]] as const), 8, ([entry, section]) =>
-    buildTrackedFile(repoRoot, diffArgs, range, oldCommit, headCommit, entry, section),
-  );
   const untrackedPaths = untracked.toString("utf8").split("\0").filter(Boolean);
+  const blobIds = entries.flatMap((e) => {
+    const status = statusOf(e.code);
+    return [status !== "added" && oldCommit ? e.oldOid : null, status !== "deleted" && headCommit ? e.newOid : null];
+  });
+  const [blobs, generated] = await Promise.all([
+    readBlobs(repoRoot, blobIds.filter((id): id is string => id !== null)),
+    generatedPaths(repoRoot, [...entries.map((e) => e.path), ...untrackedPaths], headCommit),
+  ]);
+
+  const tracked = await mapLimit(entries.map((e, i) => [e, sections[i]] as const), 8, ([entry, section]) =>
+    buildTrackedFile(repoRoot, diffArgs, range, oldCommit, headCommit, blobs, entry, section),
+  );
   const added = (await mapLimit(untrackedPaths, 8, (p) => buildUntrackedFile(repoRoot, p))).filter(
     (f): f is FileDiff => f !== null,
   );
 
   const files = [...tracked, ...added].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  for (const f of files) f.generated = generated.has(f.path);
   return { repoRoot, base, head, threeDot, baseCommit, headCommit, oldCommit, ...commits, files };
 }
 
@@ -125,26 +138,74 @@ export async function listRefs(repo: string): Promise<RefList> {
   return { branches, tags, commits };
 }
 
-interface NameStatusEntry {
+interface RawEntry {
   code: string;
   path: string;
   oldPath: string | null;
+  oldOid: string;
+  newOid: string;
 }
 
-function parseNameStatus(buf: Buffer): NameStatusEntry[] {
+// `git diff --raw -z` records: ":<old mode> <new mode> <old oid> <new oid> <status>", then one path,
+// or two for a rename or copy. The new oid is all zeros for a file in the working tree.
+function parseRaw(buf: Buffer): RawEntry[] {
   const parts = buf.toString("utf8").split("\0");
-  const out: NameStatusEntry[] = [];
+  const out: RawEntry[] = [];
   let i = 0;
   while (i < parts.length - 1) {
-    const code = parts[i++]!;
+    const [, , oldOid = "", newOid = "", code = ""] = parts[i++]!.slice(1).split(" ");
     if (code.startsWith("R") || code.startsWith("C")) {
       const oldPath = parts[i++]!;
-      out.push({ code: code[0]!, path: parts[i++]!, oldPath });
+      out.push({ code: code[0]!, path: parts[i++]!, oldPath, oldOid, newOid });
     } else {
-      out.push({ code: code[0]!, path: parts[i++]!, oldPath: null });
+      out.push({ code: code[0]!, path: parts[i++]!, oldPath: null, oldOid, newOid });
     }
   }
   return out;
+}
+
+// Reads blobs with two git processes instead of one per file. Spawning is synchronous on Node's main
+// thread, and one spawn per file took 3 of the 5.6 seconds a 2,000-file diff needed.
+async function readBlobs(repoRoot: string, ids: string[]): Promise<Map<string, Content>> {
+  const out = new Map<string, Content>();
+  const unique = [...new Set(ids)];
+  if (unique.length === 0) return out;
+  const checks = (await git(repoRoot, ["cat-file", "--batch-check"], [0], `${unique.join("\n")}\n`)).toString("utf8").split("\n");
+  const wanted: string[] = [];
+  unique.forEach((id, i) => {
+    const [, type, size] = checks[i]!.split(" ");
+    if (type !== "blob") out.set(id, { kind: "absent" });
+    else if (Number(size) > MAX_CONTENT_BYTES) out.set(id, { kind: "tooLarge" });
+    else wanted.push(id);
+  });
+  if (wanted.length === 0) return out;
+  const buf = await git(repoRoot, ["cat-file", "--batch"], [0], `${wanted.join("\n")}\n`);
+  let pos = 0;
+  for (const id of wanted) {
+    const eol = buf.indexOf(10, pos);
+    const size = Number(buf.subarray(pos, eol).toString("latin1").split(" ")[2]);
+    out.set(id, classify(buf.subarray(eol + 1, eol + 1 + size)));
+    pos = eol + 1 + size + 1;
+  }
+  return out;
+}
+
+async function generatedPaths(repoRoot: string, paths: string[], source: string | null): Promise<Set<string>> {
+  if (paths.length === 0) return new Set();
+  const args = ["check-attr", "-z", "--stdin", ...(source ? ["--source", source] : []), "linguist-generated"];
+  const parts = (await git(repoRoot, args, [0], `${paths.join("\0")}\0`)).toString("utf8").split("\0");
+  const out = new Set<string>();
+  for (let i = 0; i + 2 < parts.length; i += 3) {
+    if (parts[i + 2] === "set" || parts[i + 2] === "true") out.add(parts[i]!);
+  }
+  return out;
+}
+
+function diffTooLarge(blocks: Block[]): boolean {
+  if (blocks.reduce((n, b) => n + b.oldCount + b.newCount, 0) > MAX_DIFF_LINES) return true;
+  let chars = 0;
+  for (const b of blocks) for (const line of [b.del, b.add].flat()) chars += line.length + 2;
+  return chars > MAX_DIFF_CHARS;
 }
 
 function statusOf(code: string): FileStatus {
@@ -257,14 +318,6 @@ function classify(buf: Buffer): Content {
   return { kind: "text", text: buf.toString("utf8") };
 }
 
-async function readBlob(repoRoot: string, commit: string, filePath: string): Promise<Content> {
-  try {
-    return classify(await git(repoRoot, ["cat-file", "blob", `${commit}:${filePath}`]));
-  } catch {
-    return { kind: "absent" };
-  }
-}
-
 async function readWorkTree(repoRoot: string, filePath: string): Promise<Content> {
   const abs = path.join(repoRoot, filePath);
   try {
@@ -296,7 +349,8 @@ async function buildTrackedFile(
   range: string[],
   oldCommit: string | null,
   headCommit: string | null,
-  entry: NameStatusEntry,
+  blobs: Map<string, Content>,
+  entry: RawEntry,
   section: string[] | undefined,
 ): Promise<FileDiff> {
   const status = statusOf(entry.code);
@@ -308,15 +362,24 @@ async function buildTrackedFile(
   const parsed = parseSection(section);
   const blocks = assignIds(entry.path, parsed.blocks);
 
-  const [oldC, newC] = await Promise.all([
-    status === "added" || !oldCommit ? Promise.resolve<Content>({ kind: "absent" }) : readBlob(repoRoot, oldCommit, entry.oldPath ?? entry.path),
-    status === "deleted"
-      ? Promise.resolve<Content>({ kind: "absent" })
-      : headCommit
-        ? readBlob(repoRoot, headCommit, entry.path)
-        : readWorkTree(repoRoot, entry.path),
-  ]);
+  const absent: Content = { kind: "absent" };
+  const oldC = status === "added" || !oldCommit ? absent : (blobs.get(entry.oldOid) ?? absent);
+  const newC = status === "deleted" ? absent : headCommit ? (blobs.get(entry.newOid) ?? absent) : await readWorkTree(repoRoot, entry.path);
   const binary = parsed.binary || oldC.kind === "binary" || newC.kind === "binary";
+  const tooLarge = oldC.kind === "tooLarge" || newC.kind === "tooLarge";
+  const file = {
+    path: entry.path,
+    oldPath: status === "renamed" ? entry.oldPath : null,
+    status,
+    binary,
+    tooLarge,
+    generated: false,
+    diffTooLarge: false,
+    modeChange: parsed.modeChange,
+    additions: blocks.reduce((s, b) => s + b.newCount, 0),
+    deletions: blocks.reduce((s, b) => s + b.oldCount, 0),
+  };
+  if (!binary && diffTooLarge(blocks)) return withoutLines(file, blocks);
 
   let oldLines = oldC.kind === "text" ? splitLines(oldC.text) : null;
   let newLines = newC.kind === "text" ? splitLines(newC.text) : null;
@@ -325,14 +388,7 @@ async function buildTrackedFile(
   if (newLines && !matchesBlocks(newLines, blocks, "new")) newLines = null;
 
   return {
-    path: entry.path,
-    oldPath: status === "renamed" ? entry.oldPath : null,
-    status,
-    binary,
-    tooLarge: oldC.kind === "tooLarge" || newC.kind === "tooLarge",
-    modeChange: parsed.modeChange,
-    additions: blocks.reduce((s, b) => s + b.newCount, 0),
-    deletions: blocks.reduce((s, b) => s + b.oldCount, 0),
+    ...file,
     blocks: binary ? [] : blocks,
     hunks: binary ? [] : buildHunks(blocks, oldLines, newLines),
     oldContent: oldLines && oldC.kind === "text" ? oldC.text : null,
@@ -349,6 +405,8 @@ async function buildUntrackedFile(repoRoot: string, filePath: string): Promise<F
     status: "added",
     binary: c.kind === "binary",
     tooLarge: c.kind === "tooLarge",
+    generated: false,
+    diffTooLarge: false,
     modeChange: null,
     additions: 0,
     deletions: 0,
@@ -373,7 +431,20 @@ async function buildUntrackedFile(repoRoot: string, filePath: string): Promise<F
       section: "",
     },
   ]);
+  if (diffTooLarge(blocks)) return withoutLines({ ...base, additions: lines.length }, blocks);
   return { ...base, additions: lines.length, blocks, hunks: buildHunks(blocks, null, lines), newContent: c.text };
+}
+
+// Keeps each block's id and range, so topics and comments still find it, and drops its lines.
+function withoutLines(file: Omit<FileDiff, "blocks" | "hunks" | "oldContent" | "newContent">, blocks: Block[]): FileDiff {
+  return {
+    ...file,
+    diffTooLarge: true,
+    blocks: blocks.map((b) => ({ ...b, del: [], add: [] })),
+    hunks: [],
+    oldContent: null,
+    newContent: null,
+  };
 }
 
 async function mapLimit<T, R>(items: readonly T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
