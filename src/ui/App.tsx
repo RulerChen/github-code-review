@@ -8,7 +8,7 @@ import { ConversationsButton, ConversationsPanel, type Place, useConversations }
 import { FileCard } from "./FileCard";
 import { comparePaths, FileTree } from "./FileTree";
 import { scrollToTop, startAnchoring } from "./anchor";
-import { go, stepSection, useShortcuts } from "./keyboard";
+import { go, KeyboardButton, ShortcutHelp, stepSection, useShortcuts } from "./keyboard";
 import { readStorage, writeStorage } from "./storage";
 import { SubmitReview } from "./SubmitReview";
 import { buildTopics, TopicList, TopicSection, topicShows, type TopicView } from "./Topics";
@@ -273,11 +273,12 @@ export function App({ viewId }: Props) {
     },
   });
   const commentsValue = useMemo(() => ({ ...comments, ...conv.api }), [comments, conv.api]);
+  const [help, setHelp] = useState(false);
   useShortcuts({
     j: () => stepSection(1, active, setActive),
     k: () => stepSection(-1, active, setActive),
     u: conv.nextUnread,
-    Escape: () => conv.setOpen(false),
+    Escape: () => (help ? setHelp(false) : conv.setOpen(false)),
   });
 
   const isViewed = useCallback((f: FileDiff) => viewed[f.path] === signature(f), [viewed]);
@@ -396,6 +397,7 @@ export function App({ viewId }: Props) {
             </div>
           )}
           <ConversationsButton conv={conv} />
+          <KeyboardButton onClick={() => setHelp(true)} />
           <ThemeToggle theme={theme} onToggle={toggleTheme} />
           <SubmitReview drafts={drafts} listening={listening} onSubmit={submit} />
         </header>
@@ -463,6 +465,7 @@ export function App({ viewId }: Props) {
         </div>
         {conv.open && <ConversationsPanel conv={conv} />}
       </div>
+      {help && <ShortcutHelp onClose={() => setHelp(false)} />}
     </CommentsContext.Provider>
   );
 }

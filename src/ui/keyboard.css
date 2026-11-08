@@ -1,0 +1,52 @@
+.shortcut-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgb(1 4 9 / 0.5);
+}
+
+.shortcut-dialog {
+  width: min(440px, 100%);
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg);
+  box-shadow: 0 8px 24px rgb(1 4 9 / 0.3);
+}
+
+.shortcut-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 8px 8px 16px;
+  border-bottom: 1px solid var(--border-muted);
+}
+
+.shortcut-head h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.shortcut-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.shortcut-table td {
+  padding: 6px 16px;
+  border-bottom: 1px solid var(--border-muted);
+}
+
+.shortcut-table tr:last-child td {
+  border-bottom: 0;
+}
+
+.shortcut-table td:first-child {
+  width: 1%;
+  white-space: nowrap;
+}

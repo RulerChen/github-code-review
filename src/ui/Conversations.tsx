@@ -140,7 +140,7 @@ export function useConversations({ repoRoot, threads, place, show }: Options): C
   return { api, ordered, placeOf, unreadThreads, open, setOpen, reveal, nextUnread, markAllRead };
 }
 
-function CloseIcon() {
+export function CloseIcon() {
   return (
     <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
       <path d="M3.75 3.75l8.5 8.5M12.25 3.75l-8.5 8.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
