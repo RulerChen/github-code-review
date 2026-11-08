@@ -73,8 +73,8 @@ function checkRefs(base: string, head: string | null): void {
 
 /**
  * A fingerprint of what computeDiff reads, at a fraction of its cost: the commits the refs name and, for the
- * working tree, git status with the size, mode and mtime of every path it lists. A file missing from git status
- * has HEAD's content. Take it before the diff, so a change made while the diff runs shows up as a new version.
+ * working tree, every path git status lists with a hash of its content. A file missing from git status has
+ * HEAD's content. Take it before the diff, so a change made while the diff runs shows up as a new version.
  */
 export async function diffVersion(repo: string, compare: Partial<Comparison> = {}): Promise<string> {
   const base = compare.base ?? "HEAD";
@@ -87,26 +87,50 @@ export async function diffVersion(repo: string, compare: Partial<Comparison> = {
   ]);
   const hash = createHash("sha256").update(commits);
   if (status) {
-    // Records are "XY path", and a rename or copy is followed by its source path.
+    // Records are "XY path", and a rename is followed by its source path. Staging a change leaves the diff
+    // as it was, so of XY only whether git tracks the path counts.
     const records = status.toString("utf8").split("\0");
+    const entries: string[] = [];
     const paths: string[] = [];
     for (let i = 0; i < records.length; i++) {
       const r = records[i]!;
       if (r.length < 4) continue;
+      const from = /[RC]/.test(r.slice(0, 2)) ? records[++i] : "";
+      entries.push(`${r.startsWith("??") ? "?" : "t"} ${r.slice(3)} ${from}`);
       paths.push(r.slice(3));
-      if (/[RC]/.test(r.slice(0, 2))) i++;
     }
-    const stats = await mapLimit(paths, 16, async (p) => {
-      try {
-        const st = await lstat(path.join(repo, p), { bigint: true });
-        return `${st.mtimeNs} ${st.size} ${st.mode}`;
-      } catch {
-        return "-";
-      }
-    });
-    hash.update(status).update(stats.join("\0"));
+    const known = contentHashes.get(repo);
+    const next = new Map<string, FileHash>();
+    const versions = await mapLimit(paths, 16, (p) => fileVersion(path.join(repo, p), known, next));
+    contentHashes.set(repo, next);
+    hash.update(entries.join("\0")).update(versions.join("\0"));
   }
   return hash.digest("hex").slice(0, 16);
+}
+
+interface FileHash {
+  stat: string;
+  hash: string;
+}
+
+// The content hash of each working-tree file git status listed last time, by repository, reused while the
+// file's mtime, size and mode stay the same.
+const contentHashes = new Map<string, Map<string, FileHash>>();
+
+// Saving a file without changing it, or undoing an edit, must not count as a change, so a file goes by its
+// content. Files too large for the diff to show, and symlinks, go by their stat.
+async function fileVersion(abs: string, known: Map<string, FileHash> | undefined, next: Map<string, FileHash>): Promise<string> {
+  try {
+    const st = await lstat(abs, { bigint: true });
+    const stat = `${st.mtimeNs} ${st.size} ${st.mode}`;
+    if (!st.isFile() || st.size > MAX_CONTENT_BYTES) return stat;
+    let entry = known?.get(abs);
+    if (entry?.stat !== stat) entry = { stat, hash: `${createHash("sha1").update(await readFile(abs)).digest("hex")} ${st.mode}` };
+    next.set(abs, entry);
+    return entry.hash;
+  } catch {
+    return "-";
+  }
 }
 
 export function summarize(result: DiffResult): string {

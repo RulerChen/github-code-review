@@ -1,5 +1,6 @@
 :root {
   color-scheme: light;
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
   --bg: #ffffff;
   --bg-subtle: #f6f8fa;
   --bg-inset: #f6f8fa;
@@ -397,6 +398,60 @@ button {
 
 .icon-button svg {
   fill: currentColor;
+}
+
+/* Hidden until the diff on disk changes, holding its slot. It turns a quarter in as it appears and spins
+   while the new diff loads. */
+.refresh-button {
+  color: var(--accent);
+  opacity: 0;
+  transform: scale(0.9) rotate(-90deg);
+  visibility: hidden;
+  transition:
+    opacity 150ms var(--ease-out),
+    transform 150ms var(--ease-out),
+    visibility 0s linear 150ms;
+}
+
+.refresh-button.is-shown {
+  opacity: 1;
+  transform: none;
+  visibility: visible;
+  transition:
+    opacity 200ms var(--ease-out),
+    transform 200ms var(--ease-out),
+    visibility 0s;
+}
+
+.refresh-button:hover {
+  color: var(--accent);
+}
+
+.refresh-button:disabled {
+  cursor: default;
+}
+
+.refresh-button.is-loading svg {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .refresh-button,
+  .refresh-button.is-shown {
+    transform: none;
+  }
+  .refresh-button.is-loading svg {
+    animation: none;
+  }
+  .refresh-button.is-loading {
+    opacity: 0.5;
+  }
 }
 
 .chevron svg {

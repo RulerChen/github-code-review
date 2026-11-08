@@ -26,7 +26,8 @@ export function App({ viewId }: Props) {
   const [data, setData] = useState<ViewData | null>(null);
   const [error, setError] = useState<{ message: string; status: number } | null>(null);
   const [loading, setLoading] = useState(false);
-  const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
+  // Whether the files or refs changed since the diff on screen was loaded.
+  const [stale, setStale] = useState(false);
   const [theme, setTheme] = useState(document.documentElement.dataset.theme === "dark" ? "dark" : "light");
   const [tab, setTab] = useState<Tab>("topics");
   const [sidebarOpen, setSidebarOpen] = useState(() => readStorage("diff-review:sidebar", true));
@@ -42,15 +43,13 @@ export function App({ viewId }: Props) {
   // The comparison in the page URL, or null for the one Claude opened the viewer with.
   const requested = useRef<Comparison | null>(comparisonFromQuery(location.search));
   const seq = useRef(0);
-  const busy = useRef(false);
-  // The version of the diff on screen, or of the last one that failed to load.
+  // The version of the diff on screen.
   const version = useRef<string | null>(null);
 
-  const load = useCallback(async (target: Comparison | null, push = false, quiet = false) => {
+  const load = useCallback(async (target: Comparison | null, push = false) => {
     if (!viewId) return;
     const n = ++seq.current;
-    busy.current = true;
-    if (!quiet) setLoading(true);
+    setLoading(true);
     try {
       const result = await fetchView(viewId, target);
       if (n !== seq.current) return;
@@ -61,17 +60,14 @@ export function App({ viewId }: Props) {
       setData(result);
       setThreads((prev) => mergeThreads(prev, result.threads));
       setError(null);
-      setUpdatedAt(new Date());
+      setStale(false);
       setViewed((prev) => (Object.keys(prev).length ? prev : readStorage(`diff-review:viewed:${root}`, {})));
       setViewedTopics((prev) => (Object.keys(prev).length ? prev : readStorage(`diff-review:viewed-topics:${root}`, {})));
     } catch (e) {
       if (n !== seq.current) return;
       setError({ message: e instanceof Error ? e.message : String(e), status: e instanceof ApiError ? e.status : 0 });
     } finally {
-      if (n === seq.current) {
-        busy.current = false;
-        setLoading(false);
-      }
+      if (n === seq.current) setLoading(false);
     }
   }, [viewId]);
 
@@ -82,22 +78,19 @@ export function App({ viewId }: Props) {
     return () => window.removeEventListener("popstate", onPop);
   }, [load]);
 
-  // Load the diff again when files or refs change. The check is cheap, and waits while the page is hidden,
-  // while a load runs, and while a comment form is open in the diff so its lines stay put.
+  // Ask whether the files or refs changed since the diff on screen was loaded, so the refresh button can show.
+  // The check is cheap, and waits while the page is hidden. A load that lands meanwhile makes the answer moot.
   useEffect(() => {
     if (!viewId) return;
     let timer = 0;
     let stopped = false;
-    const idle = () => version.current !== null && !busy.current && !document.hidden && !document.querySelector("main.files .comment-form");
     const check = async () => {
       const target = requested.current;
+      const loaded = version.current;
       try {
-        if (idle()) {
+        if (loaded !== null && !document.hidden) {
           const v = await fetchVersion(viewId, target);
-          if (!stopped && v !== version.current && idle() && requested.current === target) {
-            version.current = v;
-            await load(target, false, true);
-          }
+          if (!stopped && version.current === loaded && requested.current === target) setStale(v !== loaded);
         }
       } catch {
         // The next check tries again.
@@ -109,7 +102,7 @@ export function App({ viewId }: Props) {
       stopped = true;
       clearTimeout(timer);
     };
-  }, [viewId, load]);
+  }, [viewId]);
 
   const loadRefs = useCallback(() => fetchRefs(viewId ?? ""), [viewId]);
 
@@ -286,6 +279,7 @@ export function App({ viewId }: Props) {
             <span className="count-add">+{additions.toLocaleString()}</span>
             <span className="count-del">−{deletions.toLocaleString()}</span>
           </div>
+          <RefreshButton stale={stale} loading={loading} onClick={() => void load(requested.current)} />
           <span className="spacer" />
           <div className="viewed-progress" title={`${viewedCount} of ${total} ${unit} viewed`}>
             <span>
@@ -322,9 +316,6 @@ export function App({ viewId }: Props) {
           )}
           <ConversationsButton conv={conv} />
           <ThemeToggle theme={theme} onToggle={toggleTheme} />
-          <button className="button" onClick={() => void load(requested.current)} disabled={loading} title={updatedAt ? `Updated ${updatedAt.toLocaleTimeString()}` : undefined}>
-            Refresh
-          </button>
           <SubmitReview drafts={drafts} onSubmit={submit} />
         </header>
 
@@ -438,6 +429,26 @@ function SidebarToggle({ open, onToggle }: { open: boolean; onToggle: () => void
             <path key={d} d={d} />
           ))}
         </g>
+      </svg>
+    </button>
+  );
+}
+
+// Shows only when the diff on disk changed. Hidden, it keeps its slot next to the stats, so showing it moves
+// nothing in the top bar.
+function RefreshButton({ stale, loading, onClick }: { stale: boolean; loading: boolean; onClick: () => void }) {
+  const label = "Load new changes";
+  return (
+    <button
+      className={`icon-button refresh-button${stale ? " is-shown" : ""}${loading ? " is-loading" : ""}`}
+      onClick={onClick}
+      disabled={!stale || loading}
+      aria-label={label}
+      title={label}
+    >
+      {/* Octicon sync-16, @primer/octicons 19.42.0 */}
+      <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+        <path d="M1.705 8.005a.75.75 0 0 1 .834.656 5.5 5.5 0 0 0 9.592 2.97l-1.204-1.204a.25.25 0 0 1 .177-.427h3.646a.25.25 0 0 1 .25.25v3.646a.25.25 0 0 1-.427.177l-1.38-1.38A7.002 7.002 0 0 1 1.05 8.84a.75.75 0 0 1 .656-.834ZM8 2.5a5.487 5.487 0 0 0-4.131 1.869l1.204 1.204A.25.25 0 0 1 4.896 6H1.25A.25.25 0 0 1 1 5.75V2.104a.25.25 0 0 1 .427-.177l1.38 1.38A7.002 7.002 0 0 1 14.95 7.16a.75.75 0 0 1-1.49.178A5.5 5.5 0 0 0 8 2.5Z" />
       </svg>
     </button>
   );

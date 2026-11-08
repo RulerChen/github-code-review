@@ -36844,24 +36844,36 @@ async function diffVersion(repo, compare = {}) {
   const hash2 = createHash("sha256").update(commits);
   if (status) {
     const records = status.toString("utf8").split("\0");
+    const entries = [];
     const paths = [];
     for (let i = 0; i < records.length; i++) {
       const r = records[i];
       if (r.length < 4) continue;
+      const from = /[RC]/.test(r.slice(0, 2)) ? records[++i] : "";
+      entries.push(`${r.startsWith("??") ? "?" : "t"} ${r.slice(3)} ${from}`);
       paths.push(r.slice(3));
-      if (/[RC]/.test(r.slice(0, 2))) i++;
     }
-    const stats = await mapLimit(paths, 16, async (p) => {
-      try {
-        const st = await lstat(path.join(repo, p), { bigint: true });
-        return `${st.mtimeNs} ${st.size} ${st.mode}`;
-      } catch {
-        return "-";
-      }
-    });
-    hash2.update(status).update(stats.join("\0"));
+    const known = contentHashes.get(repo);
+    const next = /* @__PURE__ */ new Map();
+    const versions = await mapLimit(paths, 16, (p) => fileVersion(path.join(repo, p), known, next));
+    contentHashes.set(repo, next);
+    hash2.update(entries.join("\0")).update(versions.join("\0"));
   }
   return hash2.digest("hex").slice(0, 16);
+}
+var contentHashes = /* @__PURE__ */ new Map();
+async function fileVersion(abs, known, next) {
+  try {
+    const st = await lstat(abs, { bigint: true });
+    const stat = `${st.mtimeNs} ${st.size} ${st.mode}`;
+    if (!st.isFile() || st.size > MAX_CONTENT_BYTES) return stat;
+    let entry = known?.get(abs);
+    if (entry?.stat !== stat) entry = { stat, hash: `${createHash("sha1").update(await readFile(abs)).digest("hex")} ${st.mode}` };
+    next.set(abs, entry);
+    return entry.hash;
+  } catch {
+    return "-";
+  }
 }
 function summarize(result) {
   const add = result.files.reduce((s, f) => s + f.additions, 0);
