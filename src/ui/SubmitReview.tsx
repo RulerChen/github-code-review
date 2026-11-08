@@ -1,4 +1,5 @@
 import { type FormEvent, useEffect, useRef, useState } from "react";
+import { focusInPlace } from "./anchor";
 
 interface Props {
   drafts: number;
@@ -60,7 +61,7 @@ export function SubmitReview({ drafts, onSubmit }: Props) {
                 onChange={(e) => setText(e.target.value)}
                 placeholder="Leave a comment on the whole review (optional)"
                 rows={4}
-                autoFocus
+                ref={focusInPlace}
                 onKeyDown={(e) => {
                   if ((e.metaKey || e.ctrlKey) && e.key === "Enter") void submit();
                 }}

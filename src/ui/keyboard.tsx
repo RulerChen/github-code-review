@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { flushSync } from "react-dom";
+import { pin, topBar } from "./anchor";
 
 const TEXT_INPUT = /^(text|search|email|url|password|number|tel)$/;
 
@@ -33,26 +33,10 @@ export function useShortcuts(shortcuts: Record<string, () => void>): void {
 }
 
 // File and topic sections are found in the page itself, so the keys follow the reader's scrolling.
-const sections = () => [...document.querySelectorAll<HTMLElement>(".files > section[id]")];
-
-function topBar(): number {
-  const bar = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--topbar-h"));
-  return Number.isFinite(bar) ? bar : 0;
-}
+const sections = () => [...document.querySelectorAll<HTMLElement>(".files > :not([hidden]) > section[id]")];
 
 function topOffset(): number {
   return topBar() + 8;
-}
-
-/**
- * Applies a change that may fold a file or topic, then scrolls so its header stays where it was on screen.
- * Folding under a stuck header would otherwise leave the reader files further down the page.
- * A header above the top bar, which only the keyboard can fold, comes back to just under it.
- */
-export function keepHeaderInPlace(header: HTMLElement | null, change: () => void): void {
-  const before = header?.getBoundingClientRect().top;
-  flushSync(change);
-  if (header && before !== undefined) window.scrollBy(0, header.getBoundingClientRect().top - Math.max(before, topBar()));
 }
 
 /** The active section while it is on screen, otherwise the last one whose top has reached the top bar, or the first. */
@@ -70,8 +54,10 @@ function currentIndex(list: HTMLElement[], active: string | null): number {
   return index;
 }
 
-function go(el: HTMLElement, setActive: (id: string) => void): void {
+/** Scrolls a section to the top and holds it there while the sections around it mount. */
+export function go(el: HTMLElement, setActive: (id: string) => void): void {
   el.scrollIntoView({ block: "start" });
+  pin(el);
   setActive(el.id);
 }
 

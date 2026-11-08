@@ -64,9 +64,11 @@
   color: var(--shiki-dark) !important;
 }
 
-/* The top bar covers this band, so scrolling into view and scroll anchoring both start below it. */
+/* The top bar covers this band, so scrolling into view starts below it. The page keeps the content under it in
+   place itself (anchor.ts), so the browser's own scroll anchoring is off. */
 html {
   scroll-padding-top: var(--topbar-h);
+  overflow-anchor: none;
 }
 
 * {
@@ -137,11 +139,18 @@ button {
 
 .viewed-progress {
   display: flex;
+  flex: none;
   align-items: center;
   gap: 8px;
   color: var(--fg-muted);
   font-size: 12px;
   white-space: nowrap;
+}
+
+/* Sized for the largest count it can show, so counting up moves nothing. */
+.viewed-count {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
 }
 
 .progress {
@@ -173,10 +182,19 @@ button {
   cursor: default;
 }
 
+/* Floats over the content instead of pushing it down. */
 .banner {
+  position: fixed;
+  top: calc(var(--topbar-h) + 8px);
+  left: 50%;
+  z-index: 25;
+  max-width: min(720px, calc(100vw - 32px));
   padding: 8px 16px;
+  transform: translateX(-50%);
+  border: 1px solid var(--border);
+  border-radius: 6px;
   background: var(--del-line);
-  border-bottom: 1px solid var(--border);
+  box-shadow: 0 8px 24px rgb(1 4 9 / 0.15);
 }
 
 .layout {
@@ -671,6 +689,7 @@ button {
 
 .segmented {
   display: inline-flex;
+  flex: none;
   border: 1px solid var(--border);
   border-radius: 6px;
   overflow: hidden;
@@ -680,7 +699,21 @@ button {
   padding: 4px 12px;
   border: 0;
   background: var(--bg-subtle);
+  white-space: nowrap;
   cursor: pointer;
+}
+
+/* An invisible bold copy of the label sets its width, so the bold selected tab is no wider. */
+.tab-label {
+  display: inline-grid;
+}
+
+.tab-label::after {
+  content: attr(data-text);
+  height: 0;
+  overflow: hidden;
+  visibility: hidden;
+  font-weight: 600;
 }
 
 .segmented button + button {
@@ -944,10 +977,13 @@ button {
   position: relative;
 }
 
+/* As wide with pending comments, bold and with a counter, as without, so the top bar does not shift. */
 .review-menu > .button {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
+  min-width: 156px;
 }
 
 .review-menu > .button.primary .counter {
@@ -1039,6 +1075,19 @@ button {
   font-size: 12px;
 }
 
+/* Both texts take the same cell and the hidden one keeps its size. */
+.either {
+  display: inline-grid;
+}
+
+.either > * {
+  grid-area: 1 / 1;
+}
+
+.either > [aria-hidden="true"] {
+  visibility: hidden;
+}
+
 .notice {
   max-width: 640px;
   margin: 64px auto;
@@ -1050,8 +1099,50 @@ button {
   margin: 0 0 8px;
 }
 
-@media (max-width: 900px) {
-  .viewed-progress,
+/* Widths are set by the Topics view, whose tabs take the most room, so that "HEAD" and "working tree" show in full.
+   With less room in one row the progress bar goes, then the stats. Under 1141px the top bar takes two rows: the
+   comparison and stats, then the rest. Narrower still the viewed count goes, then the stats. Under 600px the page
+   scrolls sideways instead of squeezing controls. */
+.app {
+  min-width: 600px;
+}
+
+@media (max-width: 1440px) {
+  .progress {
+    display: none;
+  }
+}
+
+@media (min-width: 1141px) and (max-width: 1360px) {
+  .topbar-stats {
+    display: none;
+  }
+}
+
+@media (max-width: 1140px) {
+  :root {
+    --topbar-h: 96px;
+  }
+  .topbar {
+    flex-wrap: wrap;
+    align-content: space-evenly;
+    row-gap: 0;
+  }
+  .topbar > .spacer {
+    flex-basis: 100%;
+  }
+  .conv-button {
+    margin-left: auto;
+  }
+}
+
+@media (max-width: 700px) {
+  .viewed-progress {
+    display: none;
+  }
+}
+
+@media (max-width: 600px) {
   .topbar-stats {
     display: none;
   }
@@ -1107,7 +1198,7 @@ button {
   display: flex;
   align-items: center;
   gap: 4px;
-  max-width: 260px;
+  max-width: min(260px, 100%);
   padding: 3px 4px 3px 10px;
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -1360,10 +1451,4 @@ button {
 .commit-sha {
   flex: none;
   color: var(--fg-muted);
-}
-
-@media (max-width: 768px) {
-  .picker-role {
-    display: none;
-  }
 }

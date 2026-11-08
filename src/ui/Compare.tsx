@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CommitInfo, Comparison, DiffResult, RefList } from "../shared/types";
+import { focusInPlace } from "./anchor";
 
 const SHA = /^[0-9a-f]{40,64}$/;
 const MAX_ITEMS = 100;
@@ -147,7 +148,7 @@ function RefPicker({ role, value, commit, loadRefs, onPick }: PickerProps) {
             <input
               className="filter"
               type="search"
-              autoFocus
+              ref={focusInPlace}
               placeholder="Find a branch, tag or commit"
               aria-label="Find a ref"
               value={query}

@@ -1,6 +1,7 @@
-import { createContext, type FormEvent, useContext, useEffect, useRef, useState } from "react";
+import { createContext, type FormEvent, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { MENTION } from "../shared/comments";
 import type { FileAnchor, LineAnchor, Thread, ThreadAnchor } from "../shared/types";
+import { pin } from "./anchor";
 import { Markdown } from "./Markdown";
 
 export interface RevealRequest {
@@ -71,6 +72,14 @@ export function CommentForm({ placeholder, submitLabel, onSubmit, onCancel }: Fo
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const asking = MENTION.test(text);
+  const form = useRef<HTMLFormElement>(null);
+  const input = useRef<HTMLTextAreaElement>(null);
+
+  // Focusing would scroll the field to the middle of the screen. Scroll only as far as it takes to show the form.
+  useLayoutEffect(() => {
+    input.current?.focus({ preventScroll: true });
+    form.current?.scrollIntoView({ block: "nearest" });
+  }, []);
 
   const submit = async (e?: FormEvent) => {
     e?.preventDefault();
@@ -88,27 +97,25 @@ export function CommentForm({ placeholder, submitLabel, onSubmit, onCancel }: Fo
   };
 
   return (
-    <form className="comment-form" onSubmit={submit}>
+    <form className="comment-form" onSubmit={submit} ref={form}>
       <textarea
+        ref={input}
         value={text}
         onChange={(e) => setText(e.target.value)}
         placeholder={placeholder}
         rows={3}
-        autoFocus
         onKeyDown={(e) => {
           if ((e.metaKey || e.ctrlKey) && e.key === "Enter") void submit();
           if (e.key === "Escape") onCancel();
         }}
       />
       <div className="comment-form-actions">
-        <span className="comment-hint">
-          {asking ? "Claude answers here right away." : "Goes into your review for Claude to address. Mention @claude to ask a question instead."}
-        </span>
+        <Either className="comment-hint" first={asking} a="Claude answers here right away." b="Goes into your review for Claude to address. Mention @claude to ask a question instead." />
         <button type="button" className="button" onClick={onCancel}>
           Cancel
         </button>
         <button type="submit" className="button primary" disabled={busy || !text.trim()}>
-          {asking ? submitLabel : "Add review comment"}
+          <Either first={asking} a={submitLabel} b="Add review comment" />
         </button>
       </div>
       {error && <p className="comment-error">{error}</p>}
@@ -116,31 +123,14 @@ export function CommentForm({ placeholder, submitLabel, onSubmit, onCancel }: Fo
   );
 }
 
-const READER_INPUT = ["wheel", "touchstart", "keydown", "mousedown"] as const;
-
-/**
- * Scrolls an element to the middle of the screen and keeps it there for a second, until the reader scrolls. Files
- * above it mount once they come near the screen, and when they turn out taller than estimated they push it down,
- * often off screen, since the browser's scroll anchoring does not always make up for it.
- */
-function holdCentered(el: HTMLElement): () => void {
-  el.scrollIntoView({ block: "center" });
-  const top = el.getBoundingClientRect().top;
-  const until = performance.now() + 1000;
-  let frame = 0;
-  const stop = () => {
-    cancelAnimationFrame(frame);
-    for (const type of READER_INPUT) window.removeEventListener(type, stop, true);
-  };
-  const step = () => {
-    const drift = el.getBoundingClientRect().top - top;
-    if (Math.abs(drift) >= 1) window.scrollBy(0, drift);
-    if (performance.now() < until) frame = requestAnimationFrame(step);
-    else stop();
-  };
-  for (const type of READER_INPUT) window.addEventListener(type, stop, { capture: true, passive: true });
-  frame = requestAnimationFrame(step);
-  return stop;
+/** Shows one of two texts in a box sized for the longer, so switching between them moves nothing around it. */
+function Either({ first, a, b, className }: { first: boolean; a: string; b: string; className?: string }) {
+  return (
+    <span className={`either${className ? ` ${className}` : ""}`}>
+      <span aria-hidden={!first}>{a}</span>
+      <span aria-hidden={first}>{b}</span>
+    </span>
+  );
 }
 
 export function ThreadView({ thread, withVersion = false }: { thread: Thread; withVersion?: boolean }) {
@@ -149,10 +139,13 @@ export function ThreadView({ thread, withVersion = false }: { thread: Thread; wi
   const ref = useRef<HTMLDivElement>(null);
   const unreadCount = unread(thread);
 
+  // The thread goes to the middle of the screen and stays there while the files around it mount. A copy in a
+  // hidden tab leaves the request to the one on screen.
   useEffect(() => {
     const el = ref.current;
-    if (!takeReveal(thread.id) || !el) return;
-    return holdCentered(el);
+    if (!el || el.getClientRects().length === 0 || !takeReveal(thread.id)) return;
+    el.scrollIntoView({ block: "center" });
+    return pin(el);
   }, [revealSeq]);
 
   // An answer counts as read once its thread is on screen while the page is in front.

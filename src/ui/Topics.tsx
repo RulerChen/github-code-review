@@ -4,7 +4,7 @@ import type { Block, FileDiff, Review, Thread } from "../shared/types";
 import { type CommentsApi, onShownVersion, useComments } from "./comments";
 import { hasLine } from "./DiffTable";
 import { baseHunksOf, ChevronIcon, FileCard } from "./FileCard";
-import { keepHeaderInPlace } from "./keyboard";
+import { keepHeaderInPlace } from "./anchor";
 import { Markdown } from "./Markdown";
 
 export interface TopicPart {
@@ -124,7 +124,7 @@ export function TopicSection({ topic, viewed, onToggleViewed }: SectionProps) {
             checked={viewed}
             onChange={() =>
               keepHeaderInPlace(header.current, () => {
-                if (!viewed) setCollapsed(true);
+                setCollapsed(!viewed || !topic.related);
                 onToggleViewed();
               })
             }

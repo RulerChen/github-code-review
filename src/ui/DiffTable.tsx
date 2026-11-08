@@ -1,6 +1,7 @@
-import { Fragment, memo, type MouseEvent, useEffect, useMemo, useState } from "react";
+import { memo, type MouseEvent, type ReactNode, useEffect, useMemo, useState } from "react";
 import type { DiffLine, DisplayHunk, Expansion, Thread } from "../shared/types";
 import { CommentForm, onShownVersion, ThreadView, useComments } from "./comments";
+import { keepInPlace } from "./anchor";
 import type { Token, TokenLines } from "./highlight";
 
 type Side = "old" | "new";
@@ -122,23 +123,69 @@ export function DiffTable({ path, hunks, oldTokens, newTokens, onExpand }: Props
     setSelection(null);
   };
 
-  const below = (side: Side, no: number | null) => {
-    const list = no === null ? undefined : threadsAt.get(`${side}:${no}`);
-    const form = selection?.side === side && selection.end === no;
-    if (!list && !form) return null;
-    return (
-      <>
-        {list?.map((t) => <ThreadRow key={t.id} thread={t} />)}
-        {form && (
-          <tr className="thread-row">
-            <td colSpan={4}>
-              <CommentForm placeholder="Leave a comment" submitLabel="Comment" onSubmit={submit} onCancel={() => setSelection(null)} />
-            </td>
-          </tr>
-        )}
-      </>
-    );
+  // Opening lines keeps the row the reader is looking at in place: the clicked row when lines open under it,
+  // otherwise the row under the clicked one, since the clicked row can shrink or merge away.
+  const expand: Expand = (e, dir, blockId, lines) => {
+    // The clicked row stays under the pointer when it stays. When it goes, the line above it stays, the way text
+    // opens downwards.
+    const tr = e.currentTarget.closest("tr");
+    const keep = dir === "up" ? tr : dir === "down" ? (tr?.nextElementSibling ?? tr) : (tr?.previousElementSibling ?? tr);
+    keepInPlace(keep, () => onExpand(dir === "up" || dir === "all" ? "above" : "below", blockId, lines));
   };
+
+  // One flat list of rows keyed by what they show, so a row stays the same element when lines open or a refresh
+  // adds lines above it, and the page can keep it in place.
+  const body: ReactNode[] = [];
+  const addBelow = (side: Side, no: number | null) => {
+    for (const t of (no !== null && threadsAt.get(`${side}:${no}`)) || []) body.push(<ThreadRow key={`t${t.id}`} thread={t} />);
+    if (selection?.side === side && selection.end === no) {
+      body.push(
+        <tr className="thread-row" key="form">
+          <td colSpan={4}>
+            <CommentForm placeholder="Leave a comment" submitLabel="Comment" onSubmit={submit} onCancel={() => setSelection(null)} />
+          </td>
+        </tr>,
+      );
+    }
+  };
+  hunks.forEach((h, hi) => {
+    body.push(
+      <tr className="hunk" key={`h${h.firstId}`}>
+        <td className="num expander">
+          <HunkExpanders prev={hunks[hi - 1]} hunk={h} expand={expand} />
+        </td>
+        <td className="hunk-text" colSpan={3}>
+          {h.header}
+        </td>
+      </tr>,
+    );
+    for (const row of rows[hi]!) {
+      const oldNo = row.left?.oldNo ?? null;
+      const newNo = row.right?.newNo ?? null;
+      body.push(
+        <Row
+          key={row.left ? `o${oldNo}` : `n${newNo}`}
+          row={row}
+          oldTokens={oldTokens}
+          newTokens={newTokens}
+          oldSelected={isSelected("old", oldNo)}
+          newSelected={isSelected("new", newNo)}
+        />,
+      );
+      addBelow("old", oldNo);
+      addBelow("new", newNo);
+    }
+  });
+  if (last && last.hiddenBelow > 0) {
+    body.push(
+      <tr className="hunk" key="end">
+        <td className="num expander">
+          <ExpandButton dir="down" onClick={(e) => expand(e, "down", last.lastId, EXPAND_STEP)} />
+        </td>
+        <td className="hunk-text" colSpan={3} />
+      </tr>,
+    );
+  }
 
   return (
     <table className="diff" onMouseDown={press} onMouseOver={hover}>
@@ -148,60 +195,29 @@ export function DiffTable({ path, hunks, oldTokens, newTokens, onExpand }: Props
         <col className="col-num" />
         <col />
       </colgroup>
-      <tbody>
-        {hunks.map((h, hi) => (
-          <Fragment key={hi}>
-            <tr className="hunk">
-              <td className="num expander">
-                <HunkExpanders prev={hunks[hi - 1]} hunk={h} onExpand={onExpand} />
-              </td>
-              <td className="hunk-text" colSpan={3}>
-                {h.header}
-              </td>
-            </tr>
-            {rows[hi]!.map((row, ri) => {
-              const oldNo = row.left?.oldNo ?? null;
-              const newNo = row.right?.newNo ?? null;
-              return (
-                <Fragment key={ri}>
-                  <Row
-                    row={row}
-                    oldTokens={oldTokens}
-                    newTokens={newTokens}
-                    oldSelected={isSelected("old", oldNo)}
-                    newSelected={isSelected("new", newNo)}
-                  />
-                  {below("old", oldNo)}
-                  {below("new", newNo)}
-                </Fragment>
-              );
-            })}
-          </Fragment>
-        ))}
-        {last && last.hiddenBelow > 0 && (
-          <tr className="hunk">
-            <td className="num expander">
-              <ExpandButton dir="down" onClick={() => onExpand("below", last.lastId, EXPAND_STEP)} />
-            </td>
-            <td className="hunk-text" colSpan={3} />
-          </tr>
-        )}
-      </tbody>
+      <tbody>{body}</tbody>
     </table>
   );
 }
 
+type Expand = (e: MouseEvent<HTMLButtonElement>, dir: keyof typeof EXPAND_ICON, blockId: string, lines: number) => void;
+
 // Lines hidden between two hunks with no change between them open together once few are left,
 // as on GitHub. Otherwise each side opens EXPAND_STEP lines at a time.
-function HunkExpanders({ prev, hunk, onExpand }: { prev: DisplayHunk | undefined; hunk: DisplayHunk; onExpand: OnExpand }) {
+const opensAll = (hunk: DisplayHunk) => hunk.joinsPrevious && hunk.hiddenAbove > 0 && hunk.hiddenAbove <= EXPAND_STEP;
+
+/** Whether a hunk's row holds two expand buttons, which make it taller. */
+export function twoExpanders(prev: DisplayHunk | undefined, hunk: DisplayHunk): boolean {
+  return !opensAll(hunk) && (prev?.hiddenBelow ?? 0) > 0 && hunk.hiddenAbove > 0;
+}
+
+function HunkExpanders({ prev, hunk, expand }: { prev: DisplayHunk | undefined; hunk: DisplayHunk; expand: Expand }) {
   const up = hunk.hiddenAbove;
-  if (hunk.joinsPrevious && up > 0 && up <= EXPAND_STEP) {
-    return <ExpandButton dir="all" onClick={() => onExpand("above", hunk.firstId, up)} />;
-  }
+  if (opensAll(hunk)) return <ExpandButton dir="all" onClick={(e) => expand(e, "all", hunk.firstId, up)} />;
   return (
     <>
-      {prev && prev.hiddenBelow > 0 && <ExpandButton dir="down" onClick={() => onExpand("below", prev.lastId, EXPAND_STEP)} />}
-      {up > 0 && <ExpandButton dir="up" onClick={() => onExpand("above", hunk.firstId, EXPAND_STEP)} />}
+      {prev && prev.hiddenBelow > 0 && <ExpandButton dir="down" onClick={(e) => expand(e, "down", prev.lastId, EXPAND_STEP)} />}
+      {up > 0 && <ExpandButton dir="up" onClick={(e) => expand(e, "up", hunk.firstId, EXPAND_STEP)} />}
     </>
   );
 }
@@ -212,7 +228,7 @@ const EXPAND_ICON = {
   all: { label: "Expand all", d: "M8 2v12M5 5l3-3 3 3M5 11l3 3 3-3" },
 } as const;
 
-function ExpandButton({ dir, onClick }: { dir: keyof typeof EXPAND_ICON; onClick: () => void }) {
+function ExpandButton({ dir, onClick }: { dir: keyof typeof EXPAND_ICON; onClick: (e: MouseEvent<HTMLButtonElement>) => void }) {
   const { label, d } = EXPAND_ICON[dir];
   return (
     <button className="expand-button" aria-label={label} title={label} onClick={onClick}>
@@ -312,25 +328,6 @@ export function hasLine(hunks: DisplayHunk[], side: Side, no: number): boolean {
 interface SplitRow {
   left: DiffLine | null;
   right: DiffLine | null;
-}
-
-export function splitRowCount(lines: DiffLine[]): number {
-  let rows = 0;
-  let dels = 0;
-  let adds = 0;
-  for (const line of lines) {
-    if (line.kind === "add") {
-      adds++;
-      continue;
-    }
-    if (line.kind === "context" || adds > 0) {
-      rows += Math.max(dels, adds);
-      dels = adds = 0;
-    }
-    if (line.kind === "context") rows++;
-    else dels++;
-  }
-  return rows + Math.max(dels, adds);
 }
 
 export function toSplitRows(lines: DiffLine[]): SplitRow[] {

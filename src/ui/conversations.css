@@ -12,9 +12,17 @@
 }
 
 .conv-button {
+  position: relative;
   display: inline-flex;
+  flex: none;
   align-items: center;
   gap: 6px;
+}
+
+/* Room for two digits, so a new thread does not widen the button. */
+.conv-button > span:not(.conv-badge) {
+  min-width: 2ch;
+  font-variant-numeric: tabular-nums;
 }
 
 .conv-button svg {
@@ -26,8 +34,11 @@
   background: var(--accent-subtle);
 }
 
+/* Sits on the button's corner, so it can come and go without moving anything. */
 .conv-badge {
-  flex: none;
+  position: absolute;
+  top: -8px;
+  right: -8px;
   padding: 0 6px;
   border-radius: 10px;
   background: var(--accent);

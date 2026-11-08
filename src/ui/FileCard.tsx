@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { buildHunks, splitLines } from "../shared/hunks";
-import type { Block, DisplayHunk, Expansion, FileDiff } from "../shared/types";
+import type { Block, DiffLine, DisplayHunk, Expansion, FileDiff } from "../shared/types";
 import { CommentForm, onShownVersion, ThreadView, useComments } from "./comments";
-import { DiffTable, hasLine, type OnExpand, splitRowCount } from "./DiffTable";
+import { DiffTable, hasLine, type OnExpand, toSplitRows, twoExpanders } from "./DiffTable";
 import { highlight, languageFor, type TokenLines } from "./highlight";
-import { keepHeaderInPlace } from "./keyboard";
+import { keepHeaderInPlace, keepInPlace, topBar } from "./anchor";
 
 // GitHub loads 400 lines or 20 KB of a file's diff before asking. Characters stand in for bytes.
 const AUTO_LOAD_LINES = 400;
@@ -13,6 +13,10 @@ const NO_EXPANSION: Expansion = { above: {}, below: {} };
 const NO_TOKENS: Tokens = { old: null, new: null };
 const ROW_PX = 20;
 const HUNK_PX = 28;
+const TWO_EXPANDERS_PX = 44;
+const THREAD_PX = 110;
+const NUM_PX = 52;
+const CODE_PAD_PX = 32;
 
 // One observer for every card: a card's body mounts once it comes within a viewport of the screen.
 const nearCallbacks = new Map<Element, () => void>();
@@ -85,6 +89,13 @@ export function FileCard({ file: next, blocks: nextBlocks = next.blocks, anchor,
   const ref = useRef<HTMLElement>(null);
   const header = useRef<HTMLElement>(null);
   useEffect(() => (near || !ref.current ? undefined : whenNear(ref.current, () => setNear(true))), [near]);
+  // A card already near the screen when it mounts shows its body before the first paint, not one frame later.
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (near || !el || el.getClientRects().length === 0) return;
+    const r = el.getBoundingClientRect();
+    if (r.bottom > -window.innerHeight && r.top < 2 * window.innerHeight) setNear(true);
+  }, []);
   const { threadsFor, create, versions, revealSeq, peekReveal } = useComments();
   useEffect(() => {
     const thread = peekReveal()?.thread;
@@ -102,6 +113,8 @@ export function FileCard({ file: next, blocks: nextBlocks = next.blocks, anchor,
   const unplaced = partial
     ? []
     : threads.filter((t) => t.anchor.side !== null && (!onShownVersion(t, versions) || !hasLine(hunks, t.anchor.side, t.anchor.end)));
+  // A body that is only a note costs nothing to show, and a placeholder could not match its height.
+  const cheap = deferred || hunks.length === 0;
   const additions = partial ? blocks.reduce((n, b) => n + b.newCount, 0) : file.additions;
   const deletions = partial ? blocks.reduce((n, b) => n + b.oldCount, 0) : file.deletions;
 
@@ -112,7 +125,12 @@ export function FileCard({ file: next, blocks: nextBlocks = next.blocks, anchor,
           className="icon-button chevron"
           aria-expanded={!collapsed}
           aria-label={collapsed ? "Expand file" : "Collapse file"}
-          onClick={() => keepHeaderInPlace(header.current, () => setCollapsed(!collapsed))}
+          onClick={() =>
+            keepHeaderInPlace(header.current, () => {
+              setCollapsed(!collapsed);
+              setNear(true);
+            })
+          }
         >
           <ChevronIcon />
         </button>
@@ -132,11 +150,18 @@ export function FileCard({ file: next, blocks: nextBlocks = next.blocks, anchor,
           className="icon-button"
           aria-label="Comment on this file"
           title="Comment on this file"
-          onClick={() => {
-            setCollapsed(false);
-            setNear(true);
-            setCommenting(true);
-          }}
+          onClick={() =>
+            // The form opens at the top of the body, so a stuck header first goes back to the top of its card.
+            keepInPlace(
+              ref.current,
+              () => {
+                setCollapsed(false);
+                setNear(true);
+                setCommenting(true);
+              },
+              topBar(),
+            )
+          }
         >
           <CommentIcon />
         </button>
@@ -147,7 +172,8 @@ export function FileCard({ file: next, blocks: nextBlocks = next.blocks, anchor,
               checked={viewed}
               onChange={() =>
                 keepHeaderInPlace(header.current, () => {
-                  if (!viewed) setCollapsed(true);
+                  setCollapsed(!viewed);
+                  setNear(true);
                   onToggleViewed();
                 })
               }
@@ -156,10 +182,8 @@ export function FileCard({ file: next, blocks: nextBlocks = next.blocks, anchor,
           </label>
         )}
       </header>
-      {!collapsed && !near && (
-        <div className="file-body" style={{ height: deferred ? 2 * HUNK_PX : estimateHeight(hunks) }} />
-      )}
-      {!collapsed && near && (
+      {!collapsed && !near && !cheap && <Placeholder hunks={hunks} threads={threads.length} />}
+      {!collapsed && (near || cheap) && (
         <div className="file-body">
           {(fileThreads.length > 0 || commenting) && (
             <div className="file-threads">
@@ -289,9 +313,43 @@ function sizeOf(hunks: DisplayHunk[]): { lineCount: number; charCount: number } 
   return { lineCount, charCount };
 }
 
-// Height of a body that has not mounted yet, so the page keeps its length and anchors land close.
-function estimateHeight(hunks: DisplayHunk[]): number {
-  return Math.max(2 * HUNK_PX, hunks.reduce((px, h) => px + HUNK_PX + splitRowCount(h.lines) * ROW_PX, 0));
+// A body that has not mounted yet, about as tall as it will be, so the page keeps its length and what follows it
+// hardly moves when it mounts. Its width decides how long lines wrap, so the height is set once it is laid out.
+function Placeholder({ hunks, threads }: { hunks: DisplayHunk[]; threads: number }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (el && el.clientWidth > 0) el.style.height = `${estimateHeight(hunks, el.clientWidth) + threads * THREAD_PX}px`;
+  }, [hunks, threads]);
+  return <div className="file-body" ref={ref} style={{ height: estimateHeight(hunks, 1000) }} />;
+}
+
+let charPx = 0;
+
+function charWidth(): number {
+  if (!charPx) {
+    const ctx = document.createElement("canvas").getContext("2d");
+    if (ctx) {
+      ctx.font = `12px ${getComputedStyle(document.documentElement).getPropertyValue("--mono")}`;
+      charPx = ctx.measureText("0".repeat(100)).width / 100;
+    }
+  }
+  return charPx || 7.2;
+}
+
+// Rows as DiffTable lays them out: a hunk row as tall as its expand buttons, a code row as tall as the longer of
+// its two sides once wrapped at the code column's width.
+function estimateHeight(hunks: DisplayHunk[], width: number): number {
+  const cols = Math.max(20, Math.floor(((width - 2 * NUM_PX) / 2 - CODE_PAD_PX) / charWidth()));
+  const wrapped = (line: DiffLine | null | undefined) =>
+    line ? Math.max(1, Math.ceil(line.text.replace(/\t/g, "    ").length / cols)) : 1;
+  let px = 0;
+  hunks.forEach((h, i) => {
+    px += twoExpanders(hunks[i - 1], h) ? TWO_EXPANDERS_PX : HUNK_PX;
+    for (const row of toSplitRows(h.lines)) px += ROW_PX * Math.max(wrapped(row.left), wrapped(row.right));
+  });
+  if ((hunks.at(-1)?.hiddenBelow ?? 0) > 0) px += HUNK_PX;
+  return Math.max(2 * HUNK_PX, px);
 }
 
 interface Tokens {

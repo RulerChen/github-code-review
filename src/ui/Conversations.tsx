@@ -104,7 +104,7 @@ export function useConversations({ repoRoot, threads, place, show }: Options): C
 
   const reveal = (thread: Thread) => {
     setCurrent(thread.id);
-    if (!document.querySelector(`.files [data-thread="${thread.id}"]`)) {
+    if (!document.querySelector(`.files > :not([hidden]) [data-thread="${thread.id}"]`)) {
       const p = placeOf.get(thread.id);
       if (p) show(thread, p);
       else setOpen(true);

@@ -1,4 +1,4 @@
-import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { comparisonFromQuery, comparisonQuery } from "../shared/comparison";
 import type { CommitInfo, Comparison, DiffResult, FileDiff, Thread, ViewData } from "../shared/types";
 import { ApiError, createThread, fetchRefs, fetchVersion, fetchView, replyToThread, submitReview } from "./api";
@@ -7,7 +7,8 @@ import { CommitList, CompareControls, refLabel, sameComparison } from "./Compare
 import { ConversationsButton, ConversationsPanel, type Place, useConversations } from "./Conversations";
 import { FileCard } from "./FileCard";
 import { comparePaths, FileTree } from "./FileTree";
-import { stepSection, useShortcuts } from "./keyboard";
+import { startAnchoring } from "./anchor";
+import { go, stepSection, useShortcuts } from "./keyboard";
 import { readStorage, writeStorage } from "./storage";
 import { SubmitReview } from "./SubmitReview";
 import { buildTopics, TopicList, TopicSection, topicShows, type TopicView } from "./Topics";
@@ -46,6 +47,8 @@ export function App({ viewId }: Props) {
   const seq = useRef(0);
   // The version of the diff on screen.
   const version = useRef<string | null>(null);
+  // Where each tab was scrolled to, so coming back to one returns to the same place.
+  const scrolls = useRef<Partial<Record<Tab, number>>>({});
 
   const load = useCallback(async (target: Comparison | null, push = false) => {
     if (!viewId) return;
@@ -57,7 +60,10 @@ export function App({ viewId }: Props) {
       const root = result.diff.repoRoot;
       requested.current = target;
       version.current = result.version;
-      if (push) history.pushState(null, "", target ? `?${comparisonQuery(target)}` : location.pathname);
+      if (push) {
+        history.pushState(null, "", target ? `?${comparisonQuery(target)}` : location.pathname);
+        scrolls.current = {};
+      }
       setData(result);
       setThreads((prev) => mergeThreads(prev, result.threads));
       setError(null);
@@ -180,6 +186,27 @@ export function App({ viewId }: Props) {
   );
 
   const topicTab = review !== null && isOpened && tab === "topics";
+  const view: Tab = topicTab ? "topics" : tab === "commits" && diff?.commits.length ? "commits" : "files";
+
+  useEffect(() => (diff !== null ? startAnchoring() : undefined), [diff !== null]);
+
+  // A tab's content stays mounted once shown and is hidden while another tab shows, so it keeps its layout, and
+  // the page scrolls back to where that tab was.
+  const visited = useRef(new Set<Tab>());
+  visited.current.add(view);
+  const shownView = useRef(view);
+  useEffect(() => {
+    const onScroll = () => {
+      scrolls.current[shownView.current] = window.scrollY;
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+  useLayoutEffect(() => {
+    if (shownView.current === view) return;
+    shownView.current = view;
+    window.scrollTo(0, scrolls.current[view] ?? 0);
+  }, [view]);
   const place = useCallback(
     (t: Thread): Place | null => {
       const fileIndex = entries.findIndex((e) => e.file.path === t.anchor.path);
@@ -235,8 +262,9 @@ export function App({ viewId }: Props) {
   };
 
   const select = (anchor: string) => {
-    setActive(anchor);
-    document.getElementById(anchor)?.scrollIntoView({ block: "start" });
+    const el = document.getElementById(anchor);
+    if (el) go(el, setActive);
+    else setActive(anchor);
   };
 
   if (!viewId) {
@@ -259,7 +287,6 @@ export function App({ viewId }: Props) {
   }
   if (!diff) return <Notice title="Loading diff…" />;
 
-  const view: Tab = tab === "topics" && review && isOpened ? "topics" : tab === "commits" && diff.commits.length ? "commits" : "files";
   const byTopic = view === "topics";
   const additions = diff.files.reduce((s, f) => s + f.additions, 0);
   const deletions = diff.files.reduce((s, f) => s + f.deletions, 0);
@@ -272,7 +299,7 @@ export function App({ viewId }: Props) {
     <CommentsContext.Provider value={commentsValue}>
       <div className="app">
         <header className="topbar">
-          {view !== "commits" && <SidebarToggle open={sidebarOpen} onToggle={() => showSidebar(!sidebarOpen)} />}
+          <SidebarToggle open={sidebarOpen} hidden={view === "commits"} onToggle={() => showSidebar(!sidebarOpen)} />
           <div className="topbar-title">
             <CompareControls diff={diff} loadRefs={loadRefs} onCompare={compareWith} />
           </div>
@@ -286,7 +313,7 @@ export function App({ viewId }: Props) {
           <RefreshButton stale={stale} loading={loading} onClick={() => void load(requested.current)} />
           <span className="spacer" />
           <div className="viewed-progress" title={`${viewedCount} of ${total} ${unit} viewed`}>
-            <span>
+            <span className="viewed-count" style={{ minWidth: `${2 * String(Math.max(topics.length, diff.files.length)).length + 10}ch` }}>
               {viewedCount} / {total} viewed
             </span>
             <span className="progress" aria-hidden="true">
@@ -305,15 +332,15 @@ export function App({ viewId }: Props) {
                     if (!isOpened) compareWith(data!.opened);
                   }}
                 >
-                  Topics
+                  <TabLabel text="Topics" />
                 </button>
               )}
               <button role="tab" aria-selected={view === "files"} onClick={() => setTab("files")}>
-                Files
+                <TabLabel text="Files" />
               </button>
               {diff.commits.length > 0 && (
                 <button role="tab" aria-selected={view === "commits"} onClick={() => setTab("commits")}>
-                  Commits <span className="counter">{diff.commitCount.toLocaleString()}</span>
+                  <TabLabel text="Commits" /> <span className="counter">{diff.commitCount.toLocaleString()}</span>
                 </button>
               )}
             </div>
@@ -345,12 +372,9 @@ export function App({ viewId }: Props) {
           </aside>
 
           <main className="files">
-            {view === "commits" ? (
-              <CommitList diff={diff} onView={viewCommit} />
-            ) : diff.files.length === 0 ? (
-              <Notice title="No changes">{noChanges(diff)}</Notice>
-            ) : byTopic && review ? (
-              <>
+            {view !== "commits" && diff.files.length === 0 && <Notice title="No changes">{noChanges(diff)}</Notice>}
+            {visited.current.has("topics") && review && isOpened && diff.files.length > 0 && (
+              <div hidden={view !== "topics"}>
                 {review.focus && (
                   <p className="focus">
                     Focus: <strong>{review.focus}</strong>
@@ -362,17 +386,25 @@ export function App({ viewId }: Props) {
                     <TopicSection topic={t} viewed={isTopicViewed(t)} onToggleViewed={() => toggleTopicViewed(t)} />
                   </Fragment>
                 ))}
-              </>
-            ) : (
-              shown.map(({ file, anchor }) => (
-                <FileCard
-                  key={file.path}
-                  file={file}
-                  anchor={anchor}
-                  viewed={isViewed(file)}
-                  onToggleViewed={() => toggleViewed(file)}
-                />
-              ))
+              </div>
+            )}
+            {visited.current.has("files") && diff.files.length > 0 && (
+              <div hidden={view !== "files"}>
+                {shown.map(({ file, anchor }) => (
+                  <FileCard
+                    key={file.path}
+                    file={file}
+                    anchor={anchor}
+                    viewed={isViewed(file)}
+                    onToggleViewed={() => toggleViewed(file)}
+                  />
+                ))}
+              </div>
+            )}
+            {visited.current.has("commits") && diff.commits.length > 0 && (
+              <div hidden={view !== "commits"}>
+                <CommitList diff={diff} onView={viewCommit} />
+              </div>
             )}
           </main>
         </div>
@@ -423,10 +455,19 @@ const SIDEBAR_ICON = {
   ],
 };
 
-function SidebarToggle({ open, onToggle }: { open: boolean; onToggle: () => void }) {
+// The Commits tab has no sidebar, but the button keeps its slot there so the controls after it stay put.
+function SidebarToggle({ open, hidden, onToggle }: { open: boolean; hidden: boolean; onToggle: () => void }) {
   const label = open ? "Collapse sidebar" : "Expand sidebar";
   return (
-    <button className="icon-button sidebar-toggle" onClick={onToggle} aria-label={label} aria-expanded={open} title={label}>
+    <button
+      className="icon-button sidebar-toggle"
+      onClick={onToggle}
+      aria-label={label}
+      aria-expanded={open}
+      title={label}
+      style={hidden ? { visibility: "hidden" } : undefined}
+      tabIndex={hidden ? -1 : undefined}
+    >
       <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
         <g transform="matrix(-1 0 0 1 16 0)">
           {SIDEBAR_ICON[open ? "collapse" : "expand"].map((d) => (
@@ -435,6 +476,15 @@ function SidebarToggle({ open, onToggle }: { open: boolean; onToggle: () => void
         </g>
       </svg>
     </button>
+  );
+}
+
+// The selected tab's label is bold. Each label is as wide as its bold text, so selecting a tab moves nothing.
+function TabLabel({ text }: { text: string }) {
+  return (
+    <span className="tab-label" data-text={text}>
+      {text}
+    </span>
   );
 }
 
