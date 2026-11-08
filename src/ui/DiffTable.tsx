@@ -1,4 +1,4 @@
-import { Fragment, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import type { DiffLine, DisplayHunk, Expansion, Thread } from "../shared/types";
 import { CommentForm, ThreadView, useComments } from "./comments";
 import type { Token, TokenLines } from "./highlight";
@@ -11,6 +11,20 @@ interface Selection {
   end: number;
   pivot: number;
 }
+
+interface Drag {
+  side: Side;
+  pivot: number;
+  end: number;
+  toggle: boolean;
+}
+
+const span = (side: Side, pivot: number, end: number): Selection => ({
+  side,
+  pivot,
+  start: Math.min(pivot, end),
+  end: Math.max(pivot, end),
+});
 
 export type OnExpand = (dir: keyof Expansion, blockId: string, lines: number) => void;
 
@@ -55,21 +69,35 @@ function Code({ line, tokens }: { line: DiffLine; tokens: Token[] | undefined })
 export function DiffTable({ path, hunks, oldTokens, newTokens, onExpand }: Props) {
   const { threadsFor, create } = useComments();
   const [selection, setSelection] = useState<Selection | null>(null);
+  const [drag, setDrag] = useState<Drag | null>(null);
   const threads = threadsFor(path);
   const last = hunks[hunks.length - 1];
+  const shown = drag ? span(drag.side, drag.pivot, drag.end) : selection;
 
   const isSelected = (side: Side, no: number | null) =>
-    selection !== null && no !== null && selection.side === side && no >= selection.start && no <= selection.end;
+    shown !== null && no !== null && shown.side === side && no >= shown.start && no <= shown.end;
 
-  const pick = (side: Side, no: number, extend: boolean) => {
-    if (extend && selection?.side === side) {
-      setSelection({ side, pivot: selection.pivot, start: Math.min(selection.pivot, no), end: Math.max(selection.pivot, no) });
-    } else if (selection?.side === side && selection.start === no && selection.end === no) {
-      setSelection(null);
+  const press = (side: Side, no: number, shift: boolean) => {
+    if (shift && selection?.side === side) {
+      setSelection(span(side, selection.pivot, no));
     } else {
-      setSelection({ side, pivot: no, start: no, end: no });
+      setDrag({ side, pivot: no, end: no, toggle: selection?.side === side && selection.start === no && selection.end === no });
     }
   };
+
+  const hover = (side: Side, no: number) => {
+    if (drag?.side === side && drag.end !== no) setDrag({ ...drag, end: no });
+  };
+
+  useEffect(() => {
+    if (!drag) return;
+    const release = () => {
+      setSelection(drag.toggle && drag.end === drag.pivot ? null : span(drag.side, drag.pivot, drag.end));
+      setDrag(null);
+    };
+    window.addEventListener("mouseup", release);
+    return () => window.removeEventListener("mouseup", release);
+  }, [drag]);
 
   const submit = async (body: string) => {
     if (!selection) return;
@@ -124,14 +152,16 @@ export function DiffTable({ path, hunks, oldTokens, newTokens, onExpand }: Props
                       tokens={row.left ? tokensFor(row.left, oldTokens, newTokens) : undefined}
                       side="old"
                       selected={isSelected("old", oldNo)}
-                      onPick={pick}
+                      onPress={press}
+                      onHover={hover}
                     />
                     <SplitCell
                       line={row.right}
                       tokens={row.right ? tokensFor(row.right, oldTokens, newTokens) : undefined}
                       side="new"
                       selected={isSelected("new", newNo)}
-                      onPick={pick}
+                      onPress={press}
+                      onHover={hover}
                     />
                   </tr>
                   {below("old", oldNo)}
@@ -201,10 +231,11 @@ interface CellProps {
   tokens: Token[] | undefined;
   side: Side;
   selected: boolean;
-  onPick: (side: Side, no: number, extend: boolean) => void;
+  onPress: (side: Side, no: number, shift: boolean) => void;
+  onHover: (side: Side, no: number) => void;
 }
 
-function SplitCell({ line, tokens, side, selected, onPick }: CellProps) {
+function SplitCell({ line, tokens, side, selected, onPress, onHover }: CellProps) {
   if (!line) {
     return (
       <>
@@ -215,15 +246,25 @@ function SplitCell({ line, tokens, side, selected, onPick }: CellProps) {
   }
   const n = side === "old" ? line.oldNo : line.newNo;
   const sel = selected ? " is-selected" : "";
+  const enter = n ? () => onHover(side, n) : undefined;
   return (
     <>
       <td
         className={`num ${line.kind}${sel}`}
         data-n={n ?? ""}
-        title={n ? "Comment on this line. Shift-click another line to select a range." : undefined}
-        onClick={n ? (e) => onPick(side, n, e.shiftKey) : undefined}
+        title={n ? "Comment on this line. Drag or shift-click to select a range." : undefined}
+        onMouseDown={
+          n
+            ? (e) => {
+                if (e.button !== 0) return;
+                e.preventDefault();
+                onPress(side, n, e.shiftKey);
+              }
+            : undefined
+        }
+        onMouseEnter={enter}
       />
-      <td className={`code ${line.kind}${sel}`} data-mark={MARK[line.kind]}>
+      <td className={`code ${line.kind}${sel}`} data-mark={MARK[line.kind]} onMouseEnter={enter}>
         <Code line={line} tokens={tokens} />
       </td>
     </>
