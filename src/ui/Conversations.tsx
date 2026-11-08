@@ -80,7 +80,9 @@ export function useConversations({ repoRoot, threads, place, show }: Options): C
         const rb = placeOf.get(b.id)?.rank ?? Infinity;
         return (
           (ra === rb ? 0 : ra - rb) ||
-          comparePaths(a.anchor.path, b.anchor.path) ||
+          // A topic's own threads come before the threads on its files.
+          Number(a.anchor.path !== null) - Number(b.anchor.path !== null) ||
+          comparePaths(a.anchor.path ?? "", b.anchor.path ?? "") ||
           (a.anchor.end ?? 0) - (b.anchor.end ?? 0) ||
           (a.anchor.start ?? 0) - (b.anchor.start ?? 0)
         );
@@ -147,12 +149,19 @@ function CloseIcon() {
 }
 
 function lineLabel(anchor: ThreadAnchor): string {
+  if (anchor.path === null) return "topic";
   if (anchor.side === null) return "file";
   const lines = anchor.start === anchor.end ? `L${anchor.start}` : `L${anchor.start}–${anchor.end}`;
   return anchor.side === "old" ? `old ${lines}` : lines;
 }
 
-const preview = (text: string) => text.replace(/\s+/g, " ").trim();
+// Plain text for a one-line preview: Markdown's fences, backticks and bold markers would show as typed.
+const preview = (text: string) =>
+  text
+    .replace(/```[^\n]*\n?/g, " ")
+    .replace(/\*\*|`/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
 
 export function ConversationsButton({ conv }: { conv: Conversations }) {
   const n = conv.unreadThreads;
@@ -199,9 +208,9 @@ export function ConversationsPanel({ conv }: { conv: Conversations }) {
       </header>
       {ordered.length === 0 ? (
         <p className="conversations-empty">
-          No conversations yet. Click a line number to comment on lines, or the comment button in a file's header to
-          comment on the whole file. Mention @claude to ask a question, or leave comments for Claude to address and press
-          Submit review.
+          No conversations yet. Click a line number to comment on lines, or the comment button in a file's or topic's
+          header to comment on all of it. Mention @claude to ask a question, or leave comments for Claude to address and
+          press Submit review.
         </p>
       ) : (
         <ul className="conversations-list">
@@ -238,21 +247,27 @@ function ConversationItem({ thread, inDiff, current, unread, onOpen }: ItemProps
     if (current) ref.current?.scrollIntoView({ block: "nearest" });
   }, [current]);
 
-  const { path } = thread.anchor;
-  const slash = path.lastIndexOf("/") + 1;
+  const { anchor } = thread;
   const first = thread.comments[0];
   const last = thread.comments[thread.comments.length - 1];
   const className = `conv-item${current ? " is-current" : ""}${unread ? " is-unread" : ""}`;
 
   const head = (
     <span className="conv-row">
-      <span className="conv-where" title={`${path}, ${anchorLabel(thread.anchor).toLowerCase()}`}>
-        <span className="conv-file">
-          <span className="conv-dir">{path.slice(0, slash)}</span>
-          {path.slice(slash)}
+      {anchor.path === null ? (
+        <span className="conv-where" title={anchorLabel(anchor)}>
+          <span className="conv-file conv-topic">{anchor.topic}</span>
+          <span className="conv-lines">{lineLabel(anchor)}</span>
         </span>
-        <span className="conv-lines">{lineLabel(thread.anchor)}</span>
-      </span>
+      ) : (
+        <span className="conv-where" title={`${anchor.path}, ${anchorLabel(anchor).toLowerCase()}`}>
+          <span className="conv-file">
+            <span className="conv-dir">{anchor.path.slice(0, anchor.path.lastIndexOf("/") + 1)}</span>
+            {anchor.path.slice(anchor.path.lastIndexOf("/") + 1)}
+          </span>
+          <span className="conv-lines">{lineLabel(anchor)}</span>
+        </span>
+      )}
       {thread.comments.some((c) => c.draft) && <span className="pending-label">Pending</span>}
       {unread > 0 && <span className="conv-badge">{unread} new</span>}
     </span>
@@ -263,7 +278,7 @@ function ConversationItem({ thread, inDiff, current, unread, onOpen }: ItemProps
       <li ref={ref}>
         <div className={`${className} is-static`}>
           {head}
-          <span className="conv-status">This file is no longer in the diff.</span>
+          <span className="conv-status">{anchor.path === null ? "This topic is not on the page." : "This file is no longer in the diff."}</span>
           <ThreadView thread={thread} />
         </div>
       </li>

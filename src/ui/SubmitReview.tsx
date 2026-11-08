@@ -1,13 +1,19 @@
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import { focusInPlace } from "./anchor";
+import { CopyButton } from "./FileCard";
+
+/** What to tell Claude when it was not waiting. get_review_comments is the tool it reaches for. */
+const ASK = "address my review comments";
 
 interface Props {
   drafts: number;
+  /** Whether Claude is waiting for a review right now, so submitting starts it at once. */
+  listening: boolean;
   /** Resolves to whether Claude was waiting for the review. */
   onSubmit: (body: string) => Promise<boolean>;
 }
 
-export function SubmitReview({ drafts, onSubmit }: Props) {
+export function SubmitReview({ drafts, listening, onSubmit }: Props) {
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
@@ -15,13 +21,21 @@ export function SubmitReview({ drafts, onSubmit }: Props) {
   const [delivered, setDelivered] = useState<boolean | null>(null);
   const ref = useRef<HTMLDivElement>(null);
 
+  // Escape is heard on the whole page: once a review is sent, the button that had the focus is gone.
   useEffect(() => {
     if (!open) return;
     const away = (e: MouseEvent) => {
       if (!ref.current?.contains(e.target as Node)) setOpen(false);
     };
+    const escape = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
     document.addEventListener("mousedown", away);
-    return () => document.removeEventListener("mousedown", away);
+    document.addEventListener("keydown", escape);
+    return () => {
+      document.removeEventListener("mousedown", away);
+      document.removeEventListener("keydown", escape);
+    };
   }, [open]);
 
   const toggle = () => {
@@ -46,7 +60,7 @@ export function SubmitReview({ drafts, onSubmit }: Props) {
   };
 
   return (
-    <div className="review-menu" ref={ref} onKeyDown={(e) => e.key === "Escape" && setOpen(false)}>
+    <div className="review-menu" ref={ref}>
       <button className={`button${drafts ? " primary" : ""}`} onClick={toggle} aria-expanded={open}>
         Submit review
         {drafts > 0 && <span className="counter">{drafts}</span>}
@@ -56,6 +70,12 @@ export function SubmitReview({ drafts, onSubmit }: Props) {
           <div className="picker-title">Finish your review</div>
           {delivered === null ? (
             <form className="comment-form" onSubmit={submit}>
+              <p className={`review-status${listening ? " is-listening" : ""}`}>
+                <span className="status-dot" aria-hidden="true" />
+                {listening
+                  ? "Claude is waiting for this review and starts on it as soon as you submit."
+                  : "Claude isn't waiting for a review right now. Submitting saves it, and Claude works on it once you ask in the terminal."}
+              </p>
               <textarea
                 value={text}
                 onChange={(e) => setText(e.target.value)}
@@ -76,12 +96,16 @@ export function SubmitReview({ drafts, onSubmit }: Props) {
               </div>
               {error && <p className="comment-error">{error}</p>}
             </form>
+          ) : delivered ? (
+            <p className="review-sent">Review sent. Claude is working on it in the terminal and will reply on each thread here.</p>
           ) : (
-            <p className="review-sent">
-              {delivered
-                ? "Sent. Claude is addressing your review in the terminal and will reply on each thread."
-                : "Submitted, but Claude is not waiting for a review. Ask Claude in the terminal to address your review."}
-            </p>
+            <div className="review-sent">
+              <p>Review saved. Claude wasn't waiting for one, so nothing has started yet. To start, tell Claude in the terminal:</p>
+              <p className="review-ask">
+                <code>{ASK}</code>
+                <CopyButton text={ASK} label="Copy" />
+              </p>
+            </div>
           )}
         </div>
       )}

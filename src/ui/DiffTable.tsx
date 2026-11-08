@@ -136,17 +136,17 @@ export function DiffTable({ path, hunks, oldTokens, newTokens, onExpand }: Props
   // One flat list of rows keyed by what they show, so a row stays the same element when lines open or a refresh
   // adds lines above it, and the page can keep it in place.
   const body: ReactNode[] = [];
-  const addBelow = (side: Side, no: number | null) => {
-    for (const t of (no !== null && threadsAt.get(`${side}:${no}`)) || []) body.push(<ThreadRow key={`t${t.id}`} thread={t} />);
-    if (selection?.side === side && selection.end === no) {
-      body.push(
-        <tr className="thread-row" key="form">
-          <td colSpan={4}>
-            <CommentForm placeholder="Leave a comment" submitLabel="Comment" onSubmit={submit} onCancel={() => setSelection(null)} />
-          </td>
-        </tr>,
+  // The threads under a line and the form for a new one, on the side they belong to.
+  const sideContent = (side: Side, no: number | null): ReactNode[] => {
+    const out: ReactNode[] = ((no !== null && threadsAt.get(`${side}:${no}`)) || []).map((t) => <ThreadView key={t.id} thread={t} />);
+    if (no !== null && selection?.side === side && selection.end === no) {
+      out.push(
+        <div className="thread thread-new" key="form">
+          <CommentForm placeholder="Leave a comment" onSubmit={submit} onCancel={() => setSelection(null)} />
+        </div>,
       );
     }
+    return out;
   };
   hunks.forEach((h, hi) => {
     body.push(
@@ -162,9 +162,10 @@ export function DiffTable({ path, hunks, oldTokens, newTokens, onExpand }: Props
     for (const row of rows[hi]!) {
       const oldNo = row.left?.oldNo ?? null;
       const newNo = row.right?.newNo ?? null;
+      const key = row.left ? `o${oldNo}` : `n${newNo}`;
       body.push(
         <Row
-          key={row.left ? `o${oldNo}` : `n${newNo}`}
+          key={key}
           row={row}
           oldTokens={oldTokens}
           newTokens={newTokens}
@@ -172,8 +173,9 @@ export function DiffTable({ path, hunks, oldTokens, newTokens, onExpand }: Props
           newSelected={isSelected("new", newNo)}
         />,
       );
-      addBelow("old", oldNo);
-      addBelow("new", newNo);
+      const left = sideContent("old", oldNo);
+      const right = sideContent("new", newNo);
+      if (left.length || right.length) body.push(<ThreadRow key={`t${key}`} left={left} right={right} />);
     }
   });
   if (last && last.hiddenBelow > 0) {
@@ -239,11 +241,15 @@ function ExpandButton({ dir, onClick }: { dir: keyof typeof EXPAND_ICON; onClick
   );
 }
 
-function ThreadRow({ thread }: { thread: Thread }) {
+// Like GitHub's split view, a thread sits under its side of the diff, so it needs no label saying which side.
+function ThreadRow({ left, right }: { left: ReactNode[]; right: ReactNode[] }) {
   return (
     <tr className="thread-row">
-      <td colSpan={4}>
-        <ThreadView thread={thread} />
+      <td colSpan={2} className={left.length ? "thread-cell" : "thread-cell empty"}>
+        {left}
+      </td>
+      <td colSpan={2} className={right.length ? "thread-cell" : "thread-cell empty"}>
+        {right}
       </td>
     </tr>
   );

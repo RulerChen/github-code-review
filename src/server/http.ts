@@ -100,20 +100,28 @@ export class ReviewServer {
     }
 
     const { pathname, searchParams } = new URL(req.url ?? "/", "http://127.0.0.1");
-    const api = /^\/api\/views\/([\w-]+)\/(diff|events|refs|threads|review|wait|version)(?:\/([\w-]+)\/comments)?$/.exec(pathname);
+    const api = /^\/api\/views\/([\w-]+)\/(diff|events|refs|threads|review|wait|version)(?:\/([\w-]+)\/comments(?:\/([\w-]+))?)?$/.exec(pathname);
     if (api) {
       const view = this.views.get(api[1]!);
       if (!view) return sendJson(res, 404, { error: "Unknown view. Ask Claude to open the viewer again." });
       const threads = this.repos.get(view.repo)!;
       const route = api[2];
       const threadId = api[3];
+      const commentId = api[4];
 
       if (req.method === "GET" && route === "diff" && !threadId) {
         try {
           const compare = comparisonFromQuery(searchParams) ?? view.compare;
           const version = await diffVersion(view.repo, compare);
           const diff = await computeDiff(view.repo, compare);
-          const data: ViewData = { diff, version, opened: view.compare, review: view.review, threads: threads.threads };
+          const data: ViewData = {
+            diff,
+            version,
+            opened: view.compare,
+            review: view.review,
+            threads: threads.threads,
+            listening: threads.listening,
+          };
           return sendJson(res, 200, data);
         } catch (err) {
           return sendJson(res, 500, { error: errorMessage(err) });
@@ -134,7 +142,18 @@ export class ReviewServer {
         }
       }
       if (req.method === "GET" && route === "events" && !threadId) return this.events(req, res, threads);
-      if (req.method === "POST" && route === "threads") {
+      if (route === "threads" && threadId && commentId && (req.method === "PATCH" || req.method === "DELETE")) {
+        if (!this.sameOrigin(req)) return sendJson(res, 403, { error: "Cross-site request refused" });
+        if (req.method === "DELETE") {
+          const thread = threads.remove(threadId, commentId);
+          return thread ? sendJson(res, 200, { thread }) : sendJson(res, 404, { error: "Unknown comment" });
+        }
+        const { body: text } = (await readJson(req)) ?? {};
+        if (!isText(text, 20 * 1024, true)) return sendJson(res, 400, { error: "Invalid comment" });
+        const thread = threads.edit(threadId, commentId, text.trim());
+        return thread ? sendJson(res, 200, { thread }) : sendJson(res, 404, { error: "Unknown comment" });
+      }
+      if (req.method === "POST" && route === "threads" && !commentId) {
         if (!this.sameOrigin(req)) return sendJson(res, 403, { error: "Cross-site request refused" });
         const { anchor, snippet, body: text } = (await readJson(req)) ?? {};
         if (!isText(text, 20 * 1024, true)) return sendJson(res, 400, { error: "Invalid comment" });
@@ -194,10 +213,15 @@ export class ReviewServer {
     });
     res.write("retry: 2000\n\n");
     const unsubscribe = threads.subscribe((thread) => res.write(`event: thread\ndata: ${JSON.stringify(thread)}\n\n`));
+    const listening = (on: boolean) => res.write(`event: listening\ndata: ${on}\n\n`);
+    // A reconnect can miss a change, so each connection starts with the current state.
+    listening(threads.listening);
+    const unlisten = threads.subscribeListening(listening);
     const ping = setInterval(() => res.write(": ping\n\n"), 25_000);
     req.on("close", () => {
       clearInterval(ping);
       unsubscribe();
+      unlisten();
     });
   }
 
@@ -245,6 +269,7 @@ function isAnchor(value: unknown): value is ThreadAnchor {
   if (value === null || typeof value !== "object") return false;
   const a = value as Record<string, unknown>;
   const line = (n: unknown) => Number.isInteger(n) && (n as number) > 0;
+  if (a.path === null) return isText(a.topic, 1024, true) && a.side === null && a.start === null && a.end === null && a.commit === null;
   if (!isText(a.path, 4096, true)) return false;
   if (a.commit !== null && !(typeof a.commit === "string" && /^[0-9a-f]{40,64}$/.test(a.commit))) return false;
   if (a.side === null) return a.start === null && a.end === null;

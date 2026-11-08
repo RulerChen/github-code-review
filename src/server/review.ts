@@ -84,18 +84,23 @@ export function formatReviewComments(threads: Thread[], submissions: Submission[
 
 function formatThread(t: Thread, withDrafts: boolean): string {
   const { anchor } = t;
-  const version = anchor.commit ? ` at commit ${anchor.commit}` : anchor.side !== "old" ? " in the working tree" : "";
-  const where =
-    anchor.side === null
-      ? "the whole file"
-      : `${anchor.side} ${anchor.start === anchor.end ? `line ${anchor.start}` : `lines ${anchor.start}-${anchor.end}`}`;
-  const snippet = anchor.side === null ? [] : t.snippet.split("\n").slice(0, 8).map((l) => `  > ${l}`);
   const comments = t.comments
     .filter((c) => c.status === "done" && (withDrafts || !c.draft))
     .map((c) => {
       const who = c.author === "claude" ? "Claude" : c.draft ? "User (draft)" : c.review ? `User (review ${c.review})` : "User";
       return `  ${who}: ${indent(c.body, "    ").trimStart()}`;
     });
+  if (anchor.path === null) {
+    // The snippet of a topic thread starts with the topic's files.
+    const files = t.snippet.split("\n", 1)[0] ?? "";
+    return [`Thread ${t.id}: the topic "${anchor.topic}" as a whole`, ...(files ? [`  ${files}`] : []), ...comments].join("\n");
+  }
+  const version = anchor.commit ? ` at commit ${anchor.commit}` : anchor.side !== "old" ? " in the working tree" : "";
+  const where =
+    anchor.side === null
+      ? "the whole file"
+      : `${anchor.side} ${anchor.start === anchor.end ? `line ${anchor.start}` : `lines ${anchor.start}-${anchor.end}`}`;
+  const snippet = anchor.side === null ? [] : t.snippet.split("\n").slice(0, 8).map((l) => `  > ${l}`);
   return [`Thread ${t.id}: ${anchor.path}, ${where}${version}`, ...snippet, ...comments].join("\n");
 }
 

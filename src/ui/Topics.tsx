@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { changeIds } from "../shared/hunks";
 import type { Block, FileDiff, Review, Thread } from "../shared/types";
-import { type CommentsApi, onShownVersion, useComments } from "./comments";
+import { CommentForm, type CommentsApi, onShownVersion, ThreadView, useComments } from "./comments";
 import { hasLine } from "./DiffTable";
-import { baseHunksOf, ChevronIcon, FileCard } from "./FileCard";
+import { baseHunksOf, ChevronIcon, CommentIcon, FileCard } from "./FileCard";
 import { keepHeaderInPlace } from "./anchor";
 import { Markdown } from "./Markdown";
 
@@ -74,11 +74,12 @@ export function buildTopics(review: Review, files: FileDiff[]): TopicView[] {
 }
 
 /**
- * Whether a thread belongs to the topic: its line is in the topic's diff before any expanding, or it is a comment on
- * a whole file and the topic is the first with the file.
+ * Whether a thread belongs to the topic: it is on the topic itself, its line is in the topic's diff before any
+ * expanding, or it is a comment on a whole file and the topic is the first with the file.
  */
 export function topicShows(topic: TopicView, thread: Thread, versions: CommentsApi["versions"]): boolean {
   const { anchor } = thread;
+  if (anchor.path === null) return anchor.topic === topic.title;
   if (anchor.side === null) return topic.firstFor.has(anchor.path);
   if (!onShownVersion(thread, versions)) return false;
   return topic.parts.some((p) => p.file.path === anchor.path && hasLine(baseHunksOf(p.file, p.blocks), anchor.side, anchor.end));
@@ -94,11 +95,13 @@ export function TopicSection({ topic, viewed, onToggleViewed }: SectionProps) {
   const [collapsed, setCollapsed] = useState(viewed || !topic.related);
   // A viewed topic whose changes are edited stops being viewed and opens again.
   useEffect(() => setCollapsed(viewed || !topic.related), [viewed]);
-  const { revealSeq, peekReveal, versions } = useComments();
+  const { revealSeq, peekReveal, versions, threadsForTopic, create } = useComments();
   useEffect(() => {
     const thread = peekReveal()?.thread;
     if (thread && topicShows(topic, thread, versions)) setCollapsed(false);
   }, [revealSeq]);
+  const [commenting, setCommenting] = useState(false);
+  const threads = threadsForTopic(topic.title);
 
   const header = useRef<HTMLElement>(null);
   const files = topic.parts.length;
@@ -116,8 +119,22 @@ export function TopicSection({ topic, viewed, onToggleViewed }: SectionProps) {
         <h2 className="topic-title">{topic.title}</h2>
         <span className="topic-meta">
           {topic.changeCount} change{topic.changeCount === 1 ? "" : "s"} in {files} file{files === 1 ? "" : "s"}
+          {threads.length > 0 && ` · ${threads.length} comment${threads.length === 1 ? "" : "s"}`}
         </span>
         <span className="spacer" />
+        <button
+          className="icon-button"
+          aria-label="Comment on this topic"
+          title="Comment on this topic"
+          onClick={() =>
+            keepHeaderInPlace(header.current, () => {
+              setCollapsed(false);
+              setCommenting(true);
+            })
+          }
+        >
+          <CommentIcon />
+        </button>
         <label className="viewed-toggle">
           <input
             type="checkbox"
@@ -136,6 +153,27 @@ export function TopicSection({ topic, viewed, onToggleViewed }: SectionProps) {
       {!collapsed && (
         <div className="topic-body">
           {topic.summary && <Markdown className="topic-summary" text={topic.summary} />}
+          {(threads.length > 0 || commenting) && (
+            <div className="topic-threads">
+              {threads.map((t) => (
+                <ThreadView key={t.id} thread={t} />
+              ))}
+              {commenting && (
+                <div className="thread thread-new">
+                  <CommentForm
+                    placeholder="Comment on this topic"
+                    onSubmit={async (body) => {
+                      const anchor = { topic: topic.title, path: null, side: null, start: null, end: null, commit: null };
+                      const files = `Files: ${topic.parts.map((p) => p.file.path).join(", ")}`;
+                      await create(anchor, topic.summary ? `${files}\n\n${topic.summary}` : files, body);
+                      setCommenting(false);
+                    }}
+                    onCancel={() => setCommenting(false)}
+                  />
+                </div>
+              )}
+            </div>
+          )}
           {topic.stale > 0 && (
             <p className="topic-note">
               {topic.stale} change{topic.stale === 1 ? " was" : "s were"} edited after Claude grouped them and now

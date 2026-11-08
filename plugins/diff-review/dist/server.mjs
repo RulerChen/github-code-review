@@ -37319,6 +37319,7 @@ var RepoThreads = class {
   fork = null;
   queue = Promise.resolve();
   listeners = /* @__PURE__ */ new Set();
+  listeningListeners = /* @__PURE__ */ new Set();
   waiters = /* @__PURE__ */ new Set();
   constructor(cwd) {
     this.cwd = cwd;
@@ -37326,6 +37327,15 @@ var RepoThreads = class {
   subscribe(fn) {
     this.listeners.add(fn);
     return () => this.listeners.delete(fn);
+  }
+  /** Whether Claude is running the wait command, so a submitted review reaches it at once. */
+  get listening() {
+    return this.waiters.size > 0;
+  }
+  /** Calls fn whenever `listening` changes. */
+  subscribeListening(fn) {
+    this.listeningListeners.add(fn);
+    return () => this.listeningListeners.delete(fn);
   }
   create(anchor2, snippet, body) {
     const thread = { id: newId(), rev: 0, anchor: anchor2, snippet, comments: [] };
@@ -37337,6 +37347,33 @@ var RepoThreads = class {
     const thread = this.threads.find((t) => t.id === threadId);
     if (!thread) return null;
     this.addComment(thread, body);
+    return thread;
+  }
+  /** Changes the text of a comment the user wrote. It does not ask Claude again. */
+  edit(threadId, commentId, body) {
+    const thread = this.threads.find((t) => t.id === threadId);
+    const c = thread?.comments.find((x) => x.id === commentId && x.author === "user");
+    if (!thread || !c) return null;
+    c.body = body;
+    c.editedAt = (/* @__PURE__ */ new Date()).toISOString();
+    this.emit(thread);
+    return thread;
+  }
+  /**
+   * Deletes a comment the user wrote. Deleting the first one deletes the thread with its replies: the page gets
+   * the thread with no comments and drops it.
+   */
+  remove(threadId, commentId) {
+    const thread = this.threads.find((t) => t.id === threadId);
+    const i = thread ? thread.comments.findIndex((x) => x.id === commentId && x.author === "user") : -1;
+    if (!thread || i < 0) return null;
+    if (i === 0) {
+      this.threads.splice(this.threads.indexOf(thread), 1);
+      thread.comments = [];
+    } else {
+      thread.comments.splice(i, 1);
+    }
+    this.emit(thread);
     return thread;
   }
   /** A reply from the Claude Code session that addressed the review. */
@@ -37364,6 +37401,7 @@ var RepoThreads = class {
     const delivered = this.waiters.size > 0;
     for (const wake of this.waiters) wake(submission);
     this.waiters.clear();
+    if (delivered) this.emitListening();
     return { submission, delivered, threads: changed };
   }
   /** Calls onReview once a review numbered above `after` is submitted, right away if one already is. Returns a function that stops waiting. */
@@ -37375,7 +37413,13 @@ var RepoThreads = class {
       };
     }
     this.waiters.add(onReview);
-    return () => this.waiters.delete(onReview);
+    if (this.waiters.size === 1) this.emitListening();
+    return () => {
+      if (this.waiters.delete(onReview) && this.waiters.size === 0) this.emitListening();
+    };
+  }
+  emitListening() {
+    for (const fn of this.listeningListeners) fn(this.listening);
   }
   emit(thread) {
     thread.rev++;
@@ -37397,6 +37441,7 @@ var RepoThreads = class {
     this.queue = this.queue.then(() => this.run(thread, reply, prompt));
   }
   async run(thread, reply, prompt) {
+    if (!this.threads.includes(thread)) return;
     reply.activity = "Thinking";
     this.emit(thread);
     let last = 0;
@@ -37440,13 +37485,25 @@ var RepoThreads = class {
   }
 };
 function comment(author, body, status) {
-  return { id: newId(), author, body, status, activity: null, createdAt: (/* @__PURE__ */ new Date()).toISOString(), draft: false, review: null };
+  return { id: newId(), author, body, status, activity: null, createdAt: (/* @__PURE__ */ new Date()).toISOString(), draft: false, review: null, editedAt: null };
 }
 function buildPrompt(thread) {
   const { anchor: anchor2 } = thread;
   const version2 = anchor2.commit ? ` as of commit ${anchor2.commit}. The files on disk are the working tree and can differ from that commit` : anchor2.side !== "old" ? " in the working tree" : "";
   const history = thread.comments.filter((c) => c.status === "done").map((c) => `${c.author === "user" ? "User" : "Claude"}: ${c.body}`).join("\n\n");
   const answer = "Answer the last comment directly and concisely, in the language it is written in, using Markdown. You can read files to check details, but do not change anything.";
+  if (anchor2.path === null) {
+    return [
+      `The user is reviewing the code changes in a diff viewer, where you grouped the changes into topics. They wrote in a comment thread on the topic "${anchor2.topic}" as a whole.`,
+      answer,
+      "",
+      "The topic:",
+      thread.snippet,
+      "",
+      "Thread:",
+      history
+    ].join("\n");
+  }
   if (anchor2.side === null) {
     return [
       `The user is reviewing the code changes in a diff viewer. They wrote in a comment thread on the whole file ${anchor2.path}${version2}, not on particular lines.`,
@@ -37548,19 +37605,27 @@ var ReviewServer = class {
       return sendText(res, 403, "Forbidden host");
     }
     const { pathname, searchParams } = new URL(req.url ?? "/", "http://127.0.0.1");
-    const api = /^\/api\/views\/([\w-]+)\/(diff|events|refs|threads|review|wait|version)(?:\/([\w-]+)\/comments)?$/.exec(pathname);
+    const api = /^\/api\/views\/([\w-]+)\/(diff|events|refs|threads|review|wait|version)(?:\/([\w-]+)\/comments(?:\/([\w-]+))?)?$/.exec(pathname);
     if (api) {
       const view = this.views.get(api[1]);
       if (!view) return sendJson(res, 404, { error: "Unknown view. Ask Claude to open the viewer again." });
       const threads = this.repos.get(view.repo);
       const route = api[2];
       const threadId = api[3];
+      const commentId = api[4];
       if (req.method === "GET" && route === "diff" && !threadId) {
         try {
           const compare = comparisonFromQuery(searchParams) ?? view.compare;
           const version2 = await diffVersion(view.repo, compare);
           const diff = await computeDiff(view.repo, compare);
-          const data = { diff, version: version2, opened: view.compare, review: view.review, threads: threads.threads };
+          const data = {
+            diff,
+            version: version2,
+            opened: view.compare,
+            review: view.review,
+            threads: threads.threads,
+            listening: threads.listening
+          };
           return sendJson(res, 200, data);
         } catch (err) {
           return sendJson(res, 500, { error: errorMessage(err) });
@@ -37581,7 +37646,18 @@ var ReviewServer = class {
         }
       }
       if (req.method === "GET" && route === "events" && !threadId) return this.events(req, res, threads);
-      if (req.method === "POST" && route === "threads") {
+      if (route === "threads" && threadId && commentId && (req.method === "PATCH" || req.method === "DELETE")) {
+        if (!this.sameOrigin(req)) return sendJson(res, 403, { error: "Cross-site request refused" });
+        if (req.method === "DELETE") {
+          const thread2 = threads.remove(threadId, commentId);
+          return thread2 ? sendJson(res, 200, { thread: thread2 }) : sendJson(res, 404, { error: "Unknown comment" });
+        }
+        const { body: text } = await readJson(req) ?? {};
+        if (!isText(text, 20 * 1024, true)) return sendJson(res, 400, { error: "Invalid comment" });
+        const thread = threads.edit(threadId, commentId, text.trim());
+        return thread ? sendJson(res, 200, { thread }) : sendJson(res, 404, { error: "Unknown comment" });
+      }
+      if (req.method === "POST" && route === "threads" && !commentId) {
         if (!this.sameOrigin(req)) return sendJson(res, 403, { error: "Cross-site request refused" });
         const { anchor: anchor2, snippet, body: text } = await readJson(req) ?? {};
         if (!isText(text, 20 * 1024, true)) return sendJson(res, 400, { error: "Invalid comment" });
@@ -37641,10 +37717,17 @@ var ReviewServer = class {
 data: ${JSON.stringify(thread)}
 
 `));
+    const listening = (on) => res.write(`event: listening
+data: ${on}
+
+`);
+    listening(threads.listening);
+    const unlisten = threads.subscribeListening(listening);
     const ping = setInterval(() => res.write(": ping\n\n"), 25e3);
     req.on("close", () => {
       clearInterval(ping);
       unsubscribe();
+      unlisten();
     });
   }
   async sendFile(res, rel, cacheControl) {
@@ -37688,6 +37771,7 @@ function isAnchor(value) {
   if (value === null || typeof value !== "object") return false;
   const a = value;
   const line = (n) => Number.isInteger(n) && n > 0;
+  if (a.path === null) return isText(a.topic, 1024, true) && a.side === null && a.start === null && a.end === null && a.commit === null;
   if (!isText(a.path, 4096, true)) return false;
   if (a.commit !== null && !(typeof a.commit === "string" && /^[0-9a-f]{40,64}$/.test(a.commit))) return false;
   if (a.side === null) return a.start === null && a.end === null;
@@ -37778,13 +37862,17 @@ function formatReviewComments(threads, submissions, after) {
 }
 function formatThread(t, withDrafts) {
   const { anchor: anchor2 } = t;
-  const version2 = anchor2.commit ? ` at commit ${anchor2.commit}` : anchor2.side !== "old" ? " in the working tree" : "";
-  const where = anchor2.side === null ? "the whole file" : `${anchor2.side} ${anchor2.start === anchor2.end ? `line ${anchor2.start}` : `lines ${anchor2.start}-${anchor2.end}`}`;
-  const snippet = anchor2.side === null ? [] : t.snippet.split("\n").slice(0, 8).map((l) => `  > ${l}`);
   const comments = t.comments.filter((c) => c.status === "done" && (withDrafts || !c.draft)).map((c) => {
     const who = c.author === "claude" ? "Claude" : c.draft ? "User (draft)" : c.review ? `User (review ${c.review})` : "User";
     return `  ${who}: ${indent(c.body, "    ").trimStart()}`;
   });
+  if (anchor2.path === null) {
+    const files = t.snippet.split("\n", 1)[0] ?? "";
+    return [`Thread ${t.id}: the topic "${anchor2.topic}" as a whole`, ...files ? [`  ${files}`] : [], ...comments].join("\n");
+  }
+  const version2 = anchor2.commit ? ` at commit ${anchor2.commit}` : anchor2.side !== "old" ? " in the working tree" : "";
+  const where = anchor2.side === null ? "the whole file" : `${anchor2.side} ${anchor2.start === anchor2.end ? `line ${anchor2.start}` : `lines ${anchor2.start}-${anchor2.end}`}`;
+  const snippet = anchor2.side === null ? [] : t.snippet.split("\n").slice(0, 8).map((l) => `  > ${l}`);
   return [`Thread ${t.id}: ${anchor2.path}, ${where}${version2}`, ...snippet, ...comments].join("\n");
 }
 var indent = (text, prefix) => text.replace(/^/gm, prefix);
@@ -37908,7 +37996,7 @@ async function runMcp() {
     "get_review_comments",
     {
       title: "Get review comments",
-      description: "Read the review the user submitted in the diff viewer: their comment on the whole review and each comment thread with its id, the selected lines (or the whole file) and the earlier comments. Without after it also lists draft comments they have not submitted yet and their @claude questions. Use it when the wait command from open_diff_viewer finishes, or when the user asks you to address their review comments.",
+      description: "Read the review the user submitted in the diff viewer: their comment on the whole review and each comment thread with its id, the selected lines (or the whole file or topic) and the earlier comments. Without after it also lists draft comments they have not submitted yet and their @claude questions. Use it when the wait command from open_diff_viewer finishes, or when the user asks you to address their review comments.",
       inputSchema: {
         repo: external_exports.string().optional().describe("The repository the wait command names. Omit it to read every repository with a viewer open."),
         after: external_exports.number().int().min(0).optional().describe(

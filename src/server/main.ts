@@ -158,7 +158,7 @@ async function runMcp(): Promise<void> {
       title: "Get review comments",
       description:
         "Read the review the user submitted in the diff viewer: their comment on the whole review and each comment " +
-        "thread with its id, the selected lines (or the whole file) and the earlier comments. Without after it also " +
+        "thread with its id, the selected lines (or the whole file or topic) and the earlier comments. Without after it also " +
         "lists draft comments they have not submitted yet and their @claude questions. Use it when the wait command from open_diff_viewer " +
         "finishes, or when the user asks you to address their review comments.",
       inputSchema: {

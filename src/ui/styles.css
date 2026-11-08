@@ -1,6 +1,7 @@
 :root {
   color-scheme: light;
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
   --bg: #ffffff;
   --bg-subtle: #f6f8fa;
   --bg-inset: #f6f8fa;
@@ -65,10 +66,12 @@
 }
 
 /* The top bar covers this band, so scrolling into view starts below it. The page keeps the content under it in
-   place itself (anchor.ts), so the browser's own scroll anchoring is off. */
+   place itself (anchor.ts), so the browser's own scroll anchoring is off. The scrollbar's room is always kept, so
+   a short tab such as Commits does not widen the page and move everything sideways. */
 html {
   scroll-padding-top: var(--topbar-h);
   overflow-anchor: none;
+  scrollbar-gutter: stable;
 }
 
 * {
@@ -214,6 +217,63 @@ button {
 .files {
   min-width: 0;
   padding: 16px;
+  transition: opacity 150ms var(--ease-out);
+}
+
+/* While another comparison loads, what is on screen dims and stops taking clicks. The delay keeps a quick load
+   from flickering. */
+.files.is-switching {
+  opacity: 0.5;
+  pointer-events: none;
+  transition-delay: 120ms;
+}
+
+/* A tab's content fades in as it shows. Hidden content is not rendered, so this runs on every switch. */
+.view {
+  animation: view-in 150ms var(--ease-out);
+}
+
+@keyframes view-in {
+  from {
+    opacity: 0;
+  }
+}
+
+.loading-bar {
+  position: absolute;
+  right: 0;
+  bottom: -1px;
+  left: 0;
+  height: 2px;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 150ms var(--ease-out);
+}
+
+.loading-bar.is-active {
+  opacity: 1;
+  transition-delay: 120ms;
+}
+
+.loading-bar.is-active::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 40%;
+  background: var(--accent);
+  animation: loading-slide 1s linear infinite;
+}
+
+@keyframes loading-slide {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(250%);
+  }
 }
 
 .filter {
@@ -688,19 +748,35 @@ button {
 }
 
 .segmented {
+  position: relative;
   display: inline-flex;
   flex: none;
   border: 1px solid var(--border);
   border-radius: 6px;
   overflow: hidden;
+  background: var(--bg-subtle);
 }
 
 .segmented button {
+  position: relative;
   padding: 4px 12px;
   border: 0;
-  background: var(--bg-subtle);
+  background: none;
   white-space: nowrap;
   cursor: pointer;
+}
+
+/* The selected tab's background: a box as wide as the control, clipped to the selected tab (SlidingIndicator). */
+.segmented-indicator {
+  position: absolute;
+  inset: 0;
+  background: var(--bg);
+  clip-path: inset(0 100% 0 0);
+  pointer-events: none;
+}
+
+.segmented-indicator[data-ready] {
+  transition: clip-path 200ms var(--ease-in-out);
 }
 
 /* An invisible bold copy of the label sets its width, so the bold selected tab is no wider. */
@@ -721,7 +797,6 @@ button {
 }
 
 .segmented button[aria-selected="true"] {
-  background: var(--bg);
   font-weight: 600;
 }
 
@@ -907,20 +982,58 @@ button {
 }
 
 .thread-row > td {
-  padding: 8px 12px;
+  padding: 8px;
   border-top: 1px solid var(--border-muted);
   border-bottom: 1px solid var(--border-muted);
-  background: var(--bg-subtle);
+  background: var(--bg);
   font: 14px/1.5 var(--sans);
   white-space: normal;
 }
 
-.thread,
-.unplaced .thread {
-  max-width: 880px;
+/* The halves of a thread row sit under the two sides of the diff, split where the diff is. */
+.thread-row > td + td {
+  border-left: 1px solid var(--border-muted);
+}
+
+.thread-row > td.empty {
+  background: var(--empty-cell);
+}
+
+.thread-cell > .thread + .thread {
+  margin-top: 8px;
+}
+
+.thread {
+  position: relative;
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--bg);
+}
+
+/* A ring that fades after a jump to the thread, so the eye finds where it landed. */
+.thread::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border: 2px solid var(--accent);
+  border-radius: 7px;
+  box-shadow: 0 0 0 3px var(--accent-subtle);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.thread.is-flash::after {
+  animation: thread-flash 1200ms var(--ease-out);
+}
+
+@keyframes thread-flash {
+  0%,
+  35% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
 }
 
 .unplaced,
@@ -931,16 +1044,21 @@ button {
   border-bottom: 1px solid var(--border-muted);
 }
 
+.topic-threads {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.unplaced > .thread,
+.file-threads > .thread,
+.topic-threads > .thread {
+  max-width: 880px;
+}
+
 .unplaced .file-note.inline {
   padding: 0;
   border: 0;
-}
-
-.thread-head {
-  padding: 6px 12px;
-  border-bottom: 1px solid var(--border-muted);
-  color: var(--fg-muted);
-  font-size: 12px;
 }
 
 .comment {
@@ -951,9 +1069,15 @@ button {
   border-top: 1px solid var(--border-muted);
 }
 
-.comment-author {
-  margin-bottom: 4px;
+.comment-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
   font-size: 12px;
+}
+
+.comment-author {
   font-weight: 600;
 }
 
@@ -961,9 +1085,42 @@ button {
   color: var(--accent);
 }
 
+.comment-where,
+.comment-edited {
+  color: var(--fg-muted);
+}
+
+/* Edit and delete show on the comment the pointer is over, and always where there is no hover. */
+.comment-actions {
+  display: inline-flex;
+  gap: 2px;
+  margin-left: auto;
+  opacity: 0;
+  transition: opacity 150ms ease;
+}
+
+.comment:hover .comment-actions,
+.comment:focus-within .comment-actions {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .comment-actions {
+    opacity: 1;
+  }
+}
+
+.icon-button.small {
+  width: 24px;
+  height: 24px;
+}
+
+.icon-button.small svg {
+  fill: none;
+}
+
 .pending-label {
   flex: none;
-  margin-left: 8px;
   padding: 0 7px;
   border: 1px solid var(--attention);
   border-radius: 2em;
@@ -971,6 +1128,71 @@ button {
   font-size: 11px;
   font-weight: 500;
   line-height: 18px;
+}
+
+.comment .markdown {
+  margin-top: 2px;
+}
+
+.comment > .comment-form {
+  margin-top: 4px;
+}
+
+.comment-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--del-num);
+  border-radius: 6px;
+  background: var(--del-line);
+}
+
+.comment-confirm-text {
+  flex: 1 1 160px;
+  font-size: 13px;
+}
+
+.button.danger {
+  border-color: transparent;
+  background: var(--danger);
+  color: #ffffff;
+  font-weight: 600;
+}
+
+.button.danger:disabled {
+  opacity: 0.6;
+  color: #ffffff;
+}
+
+/* The reply field sits in its own band at the bottom of the thread, apart from the comments. */
+.thread-foot {
+  padding: 8px 12px;
+  border-top: 1px solid var(--border-muted);
+  border-radius: 0 0 5px 5px;
+  background: var(--bg-subtle);
+}
+
+.thread-reply {
+  display: block;
+  width: 100%;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg-muted);
+  text-align: left;
+  cursor: text;
+}
+
+.thread-reply:hover {
+  border-color: var(--fg-muted);
+}
+
+.thread-new {
+  padding: 8px 12px;
 }
 
 .review-menu {
@@ -1002,11 +1224,58 @@ button {
   border-radius: 12px;
   background: var(--bg);
   box-shadow: var(--overlay-shadow);
+  transform-origin: top right;
+}
+
+.review-popover .comment-form {
+  padding: 12px;
+}
+
+.review-status {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 0 10px;
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+
+.status-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--bar-neutral);
+}
+
+.review-status.is-listening .status-dot {
+  background: var(--success);
 }
 
 .review-sent {
   margin: 0;
   padding: 12px;
+}
+
+.review-sent p {
+  margin: 0;
+}
+
+.review-sent p + p {
+  margin-top: 8px;
+}
+
+.review-ask {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.review-ask code {
+  padding: 3px 8px;
+  border: 1px solid var(--border-muted);
+  border-radius: 6px;
+  background: var(--bg-subtle);
 }
 
 .comment-activity {
@@ -1019,29 +1288,6 @@ button {
   margin: 4px 0 0;
   color: var(--danger);
   font-size: 12px;
-}
-
-.thread-reply {
-  display: block;
-  width: calc(100% - 24px);
-  margin: 0 12px 10px;
-  padding: 5px 8px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg);
-  color: var(--fg-muted);
-  text-align: left;
-  cursor: text;
-}
-
-.comment-form {
-  max-width: 880px;
-  padding: 8px 12px 10px;
-}
-
-.thread-row .comment-form,
-.file-threads .comment-form {
-  padding: 0;
 }
 
 .comment-form textarea {
@@ -1057,22 +1303,31 @@ button {
   resize: vertical;
 }
 
+/* The focus ring stays inside the field, so it never lies over the border of the box around it. */
 .comment-form textarea:focus {
-  outline: 2px solid var(--accent);
-  outline-offset: -1px;
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
 }
 
 .comment-form-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   margin-top: 8px;
 }
 
 .comment-hint {
-  flex: 1;
+  flex: 1 1 200px;
   color: var(--fg-muted);
   font-size: 12px;
+}
+
+.comment-form-buttons {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
 }
 
 /* Both texts take the same cell and the hidden one keeps its size. */
@@ -1168,8 +1423,13 @@ button {
 @media (prefers-reduced-motion: reduce) {
   .progress > span,
   .chevron svg,
-  .tree-toggle svg {
+  .tree-toggle svg,
+  .segmented-indicator[data-ready] {
     transition: none;
+  }
+  .loading-bar.is-active::before {
+    width: 100%;
+    animation: none;
   }
 }
 
@@ -1267,6 +1527,45 @@ button {
   border-radius: 12px;
   background: var(--bg);
   box-shadow: var(--overlay-shadow);
+  transform-origin: top left;
+}
+
+/* Popovers grow out of the button that opened them. */
+.picker-menu,
+.review-popover {
+  transition:
+    opacity 150ms var(--ease-out),
+    transform 150ms var(--ease-out);
+}
+
+@starting-style {
+  .picker-menu,
+  .review-popover {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+
+/* A form or confirmation fades in where it opens. */
+.comment-form,
+.comment-confirm {
+  transition: opacity 150ms var(--ease-out);
+}
+
+@starting-style {
+  .comment-form,
+  .comment-confirm {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  @starting-style {
+    .picker-menu,
+    .review-popover {
+      transform: none;
+    }
+  }
 }
 
 .picker-title {
@@ -1373,11 +1672,6 @@ button {
 
 .layout.no-sidebar {
   grid-template-columns: minmax(0, 1fr);
-}
-
-.commits {
-  max-width: 1012px;
-  margin: 0 auto;
 }
 
 .commit-group + .commit-group {

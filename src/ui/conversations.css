@@ -6,11 +6,6 @@
   scroll-margin-top: 8px;
 }
 
-.thread.is-current {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
-}
-
 .conv-button {
   position: relative;
   display: inline-flex;
@@ -64,6 +59,25 @@
   width: min(var(--conversations-w), 100vw);
   border-left: 1px solid var(--border);
   background: var(--bg);
+  transition:
+    opacity 200ms var(--ease-out),
+    transform 200ms var(--ease-out);
+}
+
+/* The panel slides in a little from the side it lives on. */
+@starting-style {
+  .conversations {
+    opacity: 0;
+    transform: translateX(16px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  @starting-style {
+    .conversations {
+      transform: none;
+    }
+  }
 }
 
 .conversations-head {
@@ -152,6 +166,10 @@
   gap: 8px;
   min-width: 0;
   font: 12px/18px var(--mono);
+}
+
+.conv-topic {
+  font-family: var(--sans);
 }
 
 .conv-file {

@@ -16,7 +16,14 @@ export async function fetchView(viewId: string, compare: Comparison | null): Pro
   const res = await fetch(`/api/views/${encodeURIComponent(viewId)}/diff${query}`, { cache: "no-store" });
   const body = (await res.json().catch(() => null)) as (Partial<ViewData> & { error?: string }) | null;
   if (!res.ok || !body?.diff || !body.opened) throw new ApiError(body?.error ?? `HTTP ${res.status}`, res.status);
-  return { diff: body.diff, version: body.version ?? "", opened: body.opened, review: body.review ?? null, threads: body.threads ?? [] };
+  return {
+    diff: body.diff,
+    version: body.version ?? "",
+    opened: body.opened,
+    review: body.review ?? null,
+    threads: body.threads ?? [],
+    listening: body.listening ?? false,
+  };
 }
 
 /** A cheap fingerprint of the diff fetchView would load, which changes when the files or refs change. */
@@ -35,9 +42,9 @@ export async function fetchRefs(viewId: string): Promise<RefList> {
   return { branches: body.branches, tags: body.tags ?? [], commits: body.commits ?? [] };
 }
 
-async function postJson<T>(url: string, payload: unknown, ok: (body: Partial<T>) => boolean): Promise<T> {
+async function postJson<T>(url: string, payload: unknown, ok: (body: Partial<T>) => boolean, method = "POST"): Promise<T> {
   const res = await fetch(url, {
-    method: "POST",
+    method,
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
@@ -55,6 +62,18 @@ export async function createThread(viewId: string, anchor: ThreadAnchor, snippet
 export async function replyToThread(viewId: string, threadId: string, body: string): Promise<Thread> {
   const url = `/api/views/${encodeURIComponent(viewId)}/threads/${encodeURIComponent(threadId)}/comments`;
   return (await postJson(url, { body }, hasThread)).thread;
+}
+
+const commentUrl = (viewId: string, threadId: string, commentId: string) =>
+  `/api/views/${encodeURIComponent(viewId)}/threads/${encodeURIComponent(threadId)}/comments/${encodeURIComponent(commentId)}`;
+
+export async function editComment(viewId: string, threadId: string, commentId: string, body: string): Promise<Thread> {
+  return (await postJson(commentUrl(viewId, threadId, commentId), { body }, hasThread, "PATCH")).thread;
+}
+
+/** Deletes a comment. The thread comes back without it, or with no comments when the thread went with it. */
+export async function deleteComment(viewId: string, threadId: string, commentId: string): Promise<Thread> {
+  return (await postJson(commentUrl(viewId, threadId, commentId), {}, hasThread, "DELETE")).thread;
 }
 
 export interface SubmitResult {

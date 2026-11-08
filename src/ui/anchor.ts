@@ -5,7 +5,7 @@ import { flushSync } from "react-dom";
 // the width, a refresh or a new thread above the reader. The card's top stays put and everything under it moves.
 // So the page turns it off and keeps the first element under the top bar in place itself, or an element it pins.
 
-const UNIT = "tr, .file-body, .file-note, .file-threads, .unplaced, .topic-summary, .focus, .topic-divider, section";
+const UNIT = "tr, .file-body, .file-note, .file-threads, .unplaced, .topic-summary, .topic-threads, .focus, .topic-divider, section";
 const STICKY = ".file-header, .topic-header";
 // Blocks that change height only as their text rewraps, unlike a card or a list of threads.
 const LEAF = "tr, .file-note, .topic-summary, .focus, .topic-divider";
@@ -95,6 +95,13 @@ export function startAnchoring(): () => void {
     window.removeEventListener("scroll", settle);
     anchor = null;
   };
+}
+
+/** Scrolls to the top of the page and keeps what is there in place from now on, not what was on screen before. */
+export function scrollToTop(): void {
+  pinned = null;
+  window.scrollTo(0, 0);
+  record();
 }
 
 /** Holds an element where it is on screen until the reader scrolls, clicks or types. Returns a function that lets go. */

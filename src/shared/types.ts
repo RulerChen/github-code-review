@@ -75,7 +75,7 @@ export interface Review {
   topics: Topic[];
 }
 
-export type ThreadAnchor = LineAnchor | FileAnchor;
+export type ThreadAnchor = LineAnchor | FileAnchor | TopicAnchor;
 
 export interface LineAnchor {
   path: string;
@@ -96,6 +96,17 @@ export interface FileAnchor {
   commit: string | null;
 }
 
+/** A comment on a topic of Claude's review as a whole. */
+export interface TopicAnchor {
+  /** The topic's title. */
+  topic: string;
+  path: null;
+  side: null;
+  start: null;
+  end: null;
+  commit: null;
+}
+
 export interface ThreadComment {
   id: string;
   author: "user" | "claude";
@@ -107,6 +118,8 @@ export interface ThreadComment {
   draft: boolean;
   /** The number of the review the comment was submitted with. */
   review: number | null;
+  /** When the user last edited the comment, or null if never. */
+  editedAt: string | null;
 }
 
 export interface Thread {
@@ -126,6 +139,8 @@ export interface ViewData {
   opened: Comparison;
   review: Review | null;
   threads: Thread[];
+  /** Whether Claude is waiting for a review right now, so submitting one starts it at once. */
+  listening: boolean;
 }
 
 export interface Comparison {
