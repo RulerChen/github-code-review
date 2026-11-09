@@ -1752,35 +1752,26 @@ button {
   color: var(--fg-muted);
 }
 
-.repos-panel {
-  margin-bottom: 16px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
+.repos-picker {
+  flex: none;
 }
 
-.repos-panel > summary {
-  padding: 8px 16px;
-  color: var(--fg-muted);
-  cursor: pointer;
-}
-
-.repos-panel[open] > summary {
-  border-bottom: 1px solid var(--border-muted);
-}
-
-.repos-title {
-  color: var(--fg);
-  font-weight: 600;
+.picker-menu.repos-menu {
+  display: flex;
+  flex-direction: column;
+  width: max-content;
+  max-height: calc(100vh - var(--topbar-h) - 16px);
 }
 
 .repos-list {
   margin: 0;
   padding: 0;
+  overflow: auto;
   list-style: none;
 }
 
 .repos-list > li {
-  padding: 6px 16px;
+  padding: 6px 12px;
 }
 
 .repos-list > li + li {
@@ -1832,6 +1823,10 @@ button {
   background: var(--bg);
   box-shadow: var(--overlay-shadow);
   transform-origin: top left;
+}
+
+.picker-menu.is-fixed {
+  position: fixed;
 }
 
 .picker-menu,

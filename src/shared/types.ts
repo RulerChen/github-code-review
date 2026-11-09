@@ -181,4 +181,6 @@ export interface RefList {
   branches: string[];
   tags: string[];
   commits: CommitInfo[];
+  repoCount: number;
+  partial: [ref: string, repos: number][];
 }

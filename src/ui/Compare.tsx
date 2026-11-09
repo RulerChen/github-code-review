@@ -3,7 +3,7 @@ import { withOverride, withRange } from "../shared/comparison";
 import type { CommitInfo, Comparison, DiffResult, RefList, RefRange } from "../shared/types";
 import { errorMessage, plural } from "../shared/util";
 import { focusInPlace } from "./anchor";
-import { useDismiss } from "./hooks";
+import { useDismiss, usePlaceBelow } from "./hooks";
 import { CaretIcon, CheckMark, SwapIcon } from "./icons";
 
 const SHA = /^[0-9a-f]{40,64}$/;
@@ -36,51 +36,72 @@ interface ReposProps {
 }
 
 export function RepoComparisons({ diff, loadRefs, onCompare }: ReposProps) {
+  const [open, setOpen] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+  const button = useRef<HTMLButtonElement>(null);
+  const menu = useRef<HTMLDivElement>(null);
   const loaders = useMemo(() => new Map<string, () => Promise<RefList>>(), [loadRefs]);
   const loaderFor = (dir: string) => {
     let load = loaders.get(dir);
     if (!load) loaders.set(dir, (load = () => loadRefs(dir)));
     return load;
   };
+
+  useDismiss(root, open, () => setOpen(false));
+  usePlaceBelow(button, menu, open);
   if (diff.repos[0]?.dir === "") return null;
   const own = diff.overrides.length;
+  const title = "Refs for each repository";
 
   return (
-    <details className="repos-panel">
-      <summary>
-        <span className="repos-title">{plural(diff.repos.length, "repository", "repositories")}</span>
-        {own ? ` · ${own} with refs of ${own === 1 ? "its" : "their"} own` : " · all compare the refs above"}
-      </summary>
-      <ul className="repos-list">
-        {diff.repos.map((r) => {
-          const overridden = diff.overrides.some((o) => o.dir === r.dir);
-          const files = diff.files.filter((f) => f.path.startsWith(`${r.dir}/`)).length;
-          return (
-            <li key={r.dir}>
-              <div className="repos-row">
-                <span className="repos-dir" title={r.dir}>
-                  {r.dir}
-                </span>
-                <RangeControls
-                  range={r}
-                  baseCommit={r.baseCommit}
-                  headCommit={r.headCommit}
-                  loadRefs={loaderFor(r.dir)}
-                  onChange={(next) => onCompare(withOverride(diff, r.dir, next))}
-                />
-                {r.error === null && <span className="repos-files">{plural(files, "file")}</span>}
-                {overridden && (
-                  <button className="link-button repos-reset" onClick={() => onCompare(withOverride(diff, r.dir, diff))}>
-                    Compare the refs above
-                  </button>
-                )}
-              </div>
-              {r.error !== null && <p className="repos-error">{r.error}</p>}
-            </li>
-          );
-        })}
-      </ul>
-    </details>
+    <div className="picker repos-picker" ref={root}>
+      <button
+        ref={button}
+        className="picker-button"
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        title={own === 1 ? "1 repository compares refs of its own" : own ? `${own} repositories compare refs of their own` : title}
+        onClick={() => setOpen(!open)}
+      >
+        <span className="picker-value">{plural(diff.repos.length, "repo")}</span>
+        {own > 0 && <span className="picker-role">· {own} custom</span>}
+        <CaretIcon />
+      </button>
+      {open && (
+        <div ref={menu} className="picker-menu is-fixed repos-menu" role="dialog" aria-label={title}>
+          <div className="picker-title">{title}</div>
+          <ul className="repos-list">
+            {diff.repos.map((r) => {
+              const overridden = diff.overrides.some((o) => o.dir === r.dir);
+              const files = diff.files.filter((f) => f.path.startsWith(`${r.dir}/`)).length;
+              return (
+                <li key={r.dir}>
+                  <div className="repos-row">
+                    <span className="repos-dir" title={r.dir}>
+                      {r.dir}
+                    </span>
+                    <RangeControls
+                      range={r}
+                      baseCommit={r.baseCommit}
+                      headCommit={r.headCommit}
+                      loadRefs={loaderFor(r.dir)}
+                      onChange={(next) => onCompare(withOverride(diff, r.dir, next))}
+                    />
+                    {r.error === null && <span className="repos-files">{plural(files, "file")}</span>}
+                    {overridden && (
+                      <button className="link-button repos-reset" onClick={() => onCompare(withOverride(diff, r.dir, diff))}>
+                        Use default
+                      </button>
+                    )}
+                  </div>
+                  {r.error !== null && <p className="repos-error">{r.error}</p>}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -149,8 +170,11 @@ function RefPicker({ role, value, commit, loadRefs, onPick }: PickerProps) {
   const [tab, setTab] = useState<PickerTab>("branches");
   const [cursor, setCursor] = useState(0);
   const root = useRef<HTMLDivElement>(null);
+  const button = useRef<HTMLButtonElement>(null);
+  const menu = useRef<HTMLDivElement>(null);
 
   useDismiss(root, open, () => setOpen(false));
+  usePlaceBelow(button, menu, open);
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
@@ -179,7 +203,11 @@ function RefPicker({ role, value, commit, loadRefs, onPick }: PickerProps) {
       } else {
         const names = (tab === "branches" ? refs.branches : refs.tags).filter((n) => n.toLowerCase().includes(lq));
         names.sort((a, b) => Number(b === q) - Number(a === q));
-        for (const n of names) list.push({ key: n, value: n, label: n });
+        const partial = new Map(refs.partial);
+        for (const n of names) {
+          const holders = partial.get(n);
+          list.push({ key: n, value: n, label: n, detail: holders === undefined ? undefined : `${holders}/${refs.repoCount} repos` });
+        }
       }
     }
 
@@ -201,8 +229,17 @@ function RefPicker({ role, value, commit, loadRefs, onPick }: PickerProps) {
   const title = role === "base" ? "Choose a base ref" : "Choose a ref to compare";
 
   return (
-    <div className="picker" ref={root}>
+    <div
+      className="picker"
+      ref={root}
+      onKeyDown={(e) => {
+        if (!open || e.key !== "Escape") return;
+        e.preventDefault();
+        setOpen(false);
+      }}
+    >
       <button
+        ref={button}
         className="picker-button"
         aria-haspopup="dialog"
         aria-expanded={open}
@@ -214,7 +251,7 @@ function RefPicker({ role, value, commit, loadRefs, onPick }: PickerProps) {
         <CaretIcon />
       </button>
       {open && (
-        <div className="picker-menu" role="dialog" aria-label={title}>
+        <div ref={menu} className="picker-menu is-fixed" role="dialog" aria-label={title}>
           <div className="picker-title">{title}</div>
           <div className="picker-search">
             <input
@@ -226,8 +263,7 @@ function RefPicker({ role, value, commit, loadRefs, onPick }: PickerProps) {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === "Escape") setOpen(false);
-                else if (e.key === "Enter") pick(items[cursor]);
+                if (e.key === "Enter") pick(items[cursor]);
                 else if (e.key === "ArrowDown") setCursor((c) => Math.min(c + 1, items.length - 1));
                 else if (e.key === "ArrowUp") setCursor((c) => Math.max(c - 1, 0));
                 else return;

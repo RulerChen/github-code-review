@@ -37046,13 +37046,16 @@ async function listRefs(dir, repo = null) {
     return [...out];
   };
   const commits = lists.flatMap((l, i) => l ? l.commits.map((c) => ({ ...c, repo: repos[i] })) : []).sort((a, b) => byDate(b, a)).slice(0, MAX_RECENT_COMMITS);
-  return { branches: merge2((l) => l.branches), tags: merge2((l) => l.tags), commits };
+  const holders = /* @__PURE__ */ new Map();
+  for (const l of lists) for (const n of new Set(l ? [...l.branches, ...l.tags] : [])) holders.set(n, (holders.get(n) ?? 0) + 1);
+  const partial2 = [...holders].filter(([, count]) => count < repos.length);
+  return { branches: merge2((l) => l.branches), tags: merge2((l) => l.tags), commits, repoCount: repos.length, partial: partial2 };
 }
 async function repoRefs(root) {
   const refs = async (pattern) => (await git(root, ["for-each-ref", "--sort=-creatordate", "--format=%(refname:short)%00%(symref)", ...pattern])).toString("utf8").split("\n").map((l) => l.split("\0")).filter(([name, symref]) => name && !symref).map(([name]) => name);
   const recent = git(root, ["log", "-z", `-n${MAX_RECENT_COMMITS}`, `--format=${COMMIT_FORMAT}`, "HEAD", "--"]).then(parseCommits, () => []);
   const [branches, tags, commits] = await Promise.all([refs(["refs/heads", "refs/remotes"]), refs(["refs/tags"]), recent]);
-  return { branches, tags, commits };
+  return { branches, tags, commits, repoCount: 1, partial: [] };
 }
 function parseRaw(buf) {
   const parts = buf.toString("utf8").split("\0");

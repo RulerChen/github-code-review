@@ -370,6 +370,7 @@ export function App({ viewId }: Props) {
           <SidebarToggle open={sidebarOpen} onToggle={() => setSidebarOpen((o) => !o)} />
           <div className="topbar-title">
             <CompareControls diff={diff} loadRefs={loadRefs} onCompare={compareWith} />
+            <RepoComparisons diff={diff} loadRefs={loadRepoRefs} onCompare={compareWith} />
           </div>
           <ChangeStats files={diff.files} />
           <RefreshButton stale={stale} loading={loading} onClick={() => void load(requested.current)} />
@@ -411,7 +412,6 @@ export function App({ viewId }: Props) {
           </aside>
 
           <main className={`files${switching ? " is-switching" : ""}`}>
-            <RepoComparisons diff={diff} loadRefs={loadRepoRefs} onCompare={compareWith} />
             {repoFailures(diff.repos).map((f) => (
               <p key={f.error} className="file-note inline">
                 Not compared in {f.dirs.join(", ")}: {f.error}
