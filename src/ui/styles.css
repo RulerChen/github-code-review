@@ -638,7 +638,8 @@ button {
   background: var(--del-line);
 }
 
-.diff .code + .num {
+.diff .code + .num,
+.diff .hunk-text + .num {
   border-left: 1px solid var(--border-muted);
 }
 

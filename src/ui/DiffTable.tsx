@@ -149,14 +149,7 @@ export function DiffTable({ path, hunks, oldTokens, newTokens, onExpand }: Props
 
   hunks.forEach((h, hi) => {
     body.push(
-      <tr className="hunk" key={`h${h.firstId}`}>
-        <td className="num expander">
-          <HunkExpanders prev={hunks[hi - 1]} hunk={h} expand={expand} />
-        </td>
-        <td className="hunk-text" colSpan={3}>
-          {h.header}
-        </td>
-      </tr>,
+      <HunkRow key={`h${h.firstId}`} header={h.header} expanders={<HunkExpanders prev={hunks[hi - 1]} hunk={h} expand={expand} />} />,
     );
 
     for (const row of rows[hi]!) {
@@ -182,12 +175,7 @@ export function DiffTable({ path, hunks, oldTokens, newTokens, onExpand }: Props
 
   if (last && last.hiddenBelow > 0) {
     body.push(
-      <tr className="hunk" key="end">
-        <td className="num expander">
-          <ExpandButton dir="down" onClick={(e) => expand(e, "down", last.lastId, EXPAND_STEP)} />
-        </td>
-        <td className="hunk-text" colSpan={3} />
-      </tr>,
+      <HunkRow key="end" expanders={<ExpandButton dir="down" onClick={(e) => expand(e, "down", last.lastId, EXPAND_STEP)} />} />,
     );
   }
 
@@ -205,6 +193,18 @@ export function DiffTable({ path, hunks, oldTokens, newTokens, onExpand }: Props
 }
 
 type Expand = (e: MouseEvent<HTMLButtonElement>, dir: ExpandDir, blockId: string, lines: number) => void;
+
+// Context lines are shared by both sides, so each side's number column gets the same expanders.
+function HunkRow({ header, expanders }: { header?: string; expanders: ReactNode }) {
+  return (
+    <tr className="hunk">
+      <td className="num expander">{expanders}</td>
+      <td className="hunk-text">{header}</td>
+      <td className="num expander">{expanders}</td>
+      <td className="hunk-text" />
+    </tr>
+  );
+}
 
 const opensAll = (hunk: DisplayHunk) => hunk.joinsPrevious && hunk.hiddenAbove > 0 && hunk.hiddenAbove <= EXPAND_STEP;
 
