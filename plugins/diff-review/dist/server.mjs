@@ -3371,8 +3371,8 @@ var require_utils = __commonJS({
     var HOST_DELIMS = { "@": "%40", "/": "%2F", "?": "%3F", "#": "%23", ":": "%3A" };
     var HOST_DELIM_RE = /[@/?#:]/g;
     var HOST_DELIM_NO_COLON_RE = /[@/?#]/g;
-    function reescapeHostDelimiters(host, isIP) {
-      const re = isIP ? HOST_DELIM_NO_COLON_RE : HOST_DELIM_RE;
+    function reescapeHostDelimiters(host, isIP2) {
+      const re = isIP2 ? HOST_DELIM_NO_COLON_RE : HOST_DELIM_RE;
       re.lastIndex = 0;
       return host.replace(re, (ch) => HOST_DELIMS[ch]);
     }
@@ -4069,12 +4069,12 @@ var require_fast_uri = __commonJS({
       const host = matches[4];
       return hasMalformedPercentEncoding(matches[3]) || host !== void 0 && !isIPLiteral(host) && hasMalformedPercentEncoding(host) || hasMalformedPercentEncoding(matches[6]) || hasMalformedPercentEncoding(matches[7]) || hasMalformedPercentEncoding(matches[8]);
     }
-    function canonicalizeHost(parsed, options, schemeHandler, isIP) {
-      if (hasForbiddenDomainHost(parsed, options, schemeHandler, isIP)) {
+    function canonicalizeHost(parsed, options, schemeHandler, isIP2) {
+      if (hasForbiddenDomainHost(parsed, options, schemeHandler, isIP2)) {
         parsed.error = parsed.error || MALFORMED_HOST_ERROR;
         return true;
       }
-      if (!options.unicodeSupport && (!schemeHandler || !schemeHandler.unicodeSupport) && parsed.host && !isIPLiteral(parsed.host) && (options.domainHost || schemeHandler && schemeHandler.domainHost) && isIP === false && nonSimpleDomain(parsed.host)) {
+      if (!options.unicodeSupport && (!schemeHandler || !schemeHandler.unicodeSupport) && parsed.host && !isIPLiteral(parsed.host) && (options.domainHost || schemeHandler && schemeHandler.domainHost) && isIP2 === false && nonSimpleDomain(parsed.host)) {
         let url2;
         try {
           url2 = new URL("http://" + parsed.host);
@@ -4090,9 +4090,9 @@ var require_fast_uri = __commonJS({
       }
       return false;
     }
-    function hasForbiddenDomainHost(parsed, options, schemeHandler, isIP) {
+    function hasForbiddenDomainHost(parsed, options, schemeHandler, isIP2) {
       return Boolean(
-        parsed.host && isIP === false && !isIPLiteral(parsed.host) && (options.domainHost || schemeHandler && schemeHandler.domainHost) && FORBIDDEN_DOMAIN_HOST_CHARACTER.test(parsed.host)
+        parsed.host && isIP2 === false && !isIPLiteral(parsed.host) && (options.domainHost || schemeHandler && schemeHandler.domainHost) && FORBIDDEN_DOMAIN_HOST_CHARACTER.test(parsed.host)
       );
     }
     function isHostOnlyURL(url2) {
@@ -4115,7 +4115,7 @@ var require_fast_uri = __commonJS({
       let malformedHost = false;
       let malformedIPLiteral = false;
       let malformedScheme = false;
-      let isIP = false;
+      let isIP2 = false;
       if (options.reference === "suffix") {
         if (options.scheme) {
           uri = options.scheme + ":" + uri;
@@ -4177,15 +4177,15 @@ var require_fast_uri = __commonJS({
             const bracketedIPLiteral = isIPLiteral(parsed.host);
             const hasIPLiteralBracket = parsed.host.indexOf("[") !== -1 || parsed.host.indexOf("]") !== -1;
             const ipv6result = normalizeIPv6(parsed.host);
-            isIP = ipv6result.isIPV6 || ipv6result.isIPVFuture === true;
+            isIP2 = ipv6result.isIPV6 || ipv6result.isIPVFuture === true;
             malformedIPLiteral = hasIPLiteralBracket && (!bracketedIPLiteral || ipv6result.error === true);
-            parsed.host = isIP ? ipv6result.host : ipv6result.host.toLowerCase();
+            parsed.host = isIP2 ? ipv6result.host : ipv6result.host.toLowerCase();
             if (malformedIPLiteral) {
               parsed.error = parsed.error || MALFORMED_HOST_ERROR;
               malformedAuthorityOrPort = true;
             }
           } else {
-            isIP = true;
+            isIP2 = true;
           }
         }
         if (parsed.scheme === void 0 && parsed.userinfo === void 0 && parsed.host === void 0 && parsed.port === void 0 && parsed.query === void 0 && !parsed.path) {
@@ -4202,14 +4202,14 @@ var require_fast_uri = __commonJS({
         }
         const schemeHandler = getSchemeHandler(options.scheme || parsed.scheme);
         if (!malformedIPLiteral) {
-          malformedHost = canonicalizeHost(parsed, options, schemeHandler, isIP);
+          malformedHost = canonicalizeHost(parsed, options, schemeHandler, isIP2);
         }
         if (uri.indexOf("%") !== -1 && parsed.host !== void 0 && !malformedIPLiteral) {
-          let host = isIP ? parsed.host : normalizePercentEncoding(parsed.host, true);
-          if (!isIP) {
+          let host = isIP2 ? parsed.host : normalizePercentEncoding(parsed.host, true);
+          if (!isIP2) {
             host = normalizePercentEncoding(host.toLowerCase());
           }
-          parsed.host = isIP || options.scheme !== "null" ? reescapeHostDelimiters(host, isIP) : host;
+          parsed.host = isIP2 || options.scheme !== "null" ? reescapeHostDelimiters(host, isIP2) : host;
         }
         if (!schemeHandler || schemeHandler && !schemeHandler.skipNormalize) {
           if (parsed.path) {
@@ -37421,9 +37421,10 @@ function describe3(cwd, tool, input2) {
 }
 
 // src/server/http.ts
-import { randomInt } from "node:crypto";
+import { randomBytes as randomBytes2, randomInt, timingSafeEqual } from "node:crypto";
 import { readFile as readFile2 } from "node:fs/promises";
 import { createServer } from "node:http";
+import { isIP } from "node:net";
 import path3 from "node:path";
 
 // src/server/review.ts
@@ -37861,6 +37862,8 @@ var MIME = {
 };
 var FIRST_PORT = 7800;
 var PORT_COUNT = 10;
+var sshAddress = process.env.SSH_CONNECTION?.split(" ")[2] ?? "";
+var SSH_HOST = isIP(sshAddress) ? sshAddress : null;
 var CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'";
 var ReviewServer = class {
   views = /* @__PURE__ */ new Map();
@@ -37872,6 +37875,9 @@ var ReviewServer = class {
   uiDir;
   server = null;
   port = 0;
+  // Anyone who can reach the port could otherwise read the repository and have @claude read any file, so every
+  // request but the static assets needs this token, from the URL or from the cookie the page gets for it.
+  token = randomBytes2(32).toString("base64url");
   constructor(uiDir) {
     this.uiDir = path3.resolve(uiDir);
   }
@@ -37883,8 +37889,9 @@ var ReviewServer = class {
       });
     });
     let bound = false;
-    for (let port = FIRST_PORT; !bound && port < FIRST_PORT + PORT_COUNT; port++) bound = await listen(server, port);
-    if (!bound) await listen(server, 0);
+    const host = SSH_HOST ? void 0 : "127.0.0.1";
+    for (let port = FIRST_PORT; !bound && port < FIRST_PORT + PORT_COUNT; port++) bound = await listen(server, port, host);
+    if (!bound) await listen(server, 0, host);
     this.port = server.address().port;
     this.server = server;
   }
@@ -37963,19 +37970,36 @@ var ReviewServer = class {
     return [...this.repos].map(([repo, threads]) => ({ repo, threads, view: newest.get(repo) }));
   }
   url(view) {
-    return `http://127.0.0.1:${this.port}/v/${view.id}`;
+    const host = !SSH_HOST ? "127.0.0.1" : isIP(SSH_HOST) === 6 ? `[${SSH_HOST}]` : SSH_HOST;
+    return `http://${host}:${this.port}/v/${view.id}?token=${this.token}`;
   }
   /** A shell command that exits once the user submits a review newer than the ones submitted so far. */
   waitCommand(view) {
     const after = this.repos.get(view.repo)?.submissions.length ?? 0;
-    return `curl -sSf "http://127.0.0.1:${this.port}/api/views/${view.id}/wait?after=${after}"`;
+    return `curl -sSf "http://127.0.0.1:${this.port}/api/views/${view.id}/wait?after=${after}&token=${this.token}"`;
   }
   async handle(req, res) {
-    const host = req.headers.host;
-    if (host !== `127.0.0.1:${this.port}` && host !== `localhost:${this.port}`) {
-      return sendText(res, 403, "Forbidden host");
-    }
     const { pathname, searchParams } = new URL(req.url ?? "/", "http://127.0.0.1");
+    if (!pathname.startsWith("/assets/")) {
+      const given = searchParams.get("token");
+      const cookie = `diff-review-${this.port}`;
+      if (given !== null && this.validToken(given) && req.method === "GET" && /^\/v\/[\w-]+$/.test(pathname)) {
+        searchParams.delete("token");
+        const query = searchParams.toString();
+        res.writeHead(302, {
+          Location: query ? `${pathname}?${query}` : pathname,
+          // Cookies ignore the port, so each port's server has its own.
+          "Set-Cookie": `${cookie}=${this.token}; Path=/; HttpOnly; SameSite=Strict`,
+          "Cache-Control": "no-store"
+        });
+        return void res.end();
+      }
+      const fromCookie = req.headers.cookie?.split(/;\s*/).find((c) => c.startsWith(`${cookie}=`))?.slice(cookie.length + 1);
+      if (!this.validToken(given ?? fromCookie)) {
+        const error62 = "Open the URL Claude printed. It carries the access token.";
+        return pathname.startsWith("/api/") ? sendJson(res, 401, { error: error62 }) : sendText(res, 401, error62);
+      }
+    }
     const api = /^\/api\/views\/([\w-]+)\/(diff|events|refs|threads|review|wait|version|topics)(?:\/([\w-]+)\/comments(?:\/([\w-]+))?)?$/.exec(pathname);
     if (api) {
       const view = this.views.get(api[1]);
@@ -38080,12 +38104,16 @@ var ReviewServer = class {
     if (pathname.startsWith("/assets/")) return this.sendFile(res, pathname.slice(1), "public, max-age=31536000, immutable");
     return sendText(res, 404, "Not found");
   }
+  validToken(value) {
+    const given = Buffer.from(value ?? "");
+    const token = Buffer.from(this.token);
+    return given.length === token.length && timingSafeEqual(given, token);
+  }
   sameOrigin(req) {
     const type = req.headers["content-type"] ?? "";
     const origin = req.headers.origin;
     const site = req.headers["sec-fetch-site"];
-    const origins = [`http://127.0.0.1:${this.port}`, `http://localhost:${this.port}`];
-    return type.startsWith("application/json") && (origin === void 0 || origins.includes(origin)) && (site === void 0 || site === "same-origin");
+    return type.startsWith("application/json") && (origin === void 0 || origin === `http://${req.headers.host}`) && (site === void 0 || site === "same-origin");
   }
   events(req, res, threads) {
     res.writeHead(200, {
@@ -38131,7 +38159,7 @@ data: ${JSON.stringify(data)}
     res.end(body);
   }
 };
-function listen(server, port) {
+function listen(server, port, host) {
   return new Promise((resolve, reject) => {
     const onError = (err) => {
       server.off("listening", onListening);
@@ -38144,7 +38172,7 @@ function listen(server, port) {
     };
     server.once("error", onError);
     server.once("listening", onListening);
-    server.listen(port, "127.0.0.1");
+    server.listen(port, host);
   });
 }
 async function readJson(req, limit = 256 * 1024) {

@@ -1,7 +1,7 @@
-import { randomInt } from "node:crypto";
+import { randomBytes, randomInt, timingSafeEqual } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import type { AddressInfo } from "node:net";
+import { type AddressInfo, isIP } from "node:net";
 import path from "node:path";
 import { computeDiff, diffVersion, listRefs } from "../engine/diff.js";
 import { comparisonFromQuery, sameComparison } from "../shared/comparison.js";
@@ -24,9 +24,14 @@ const MIME: Record<string, string> = {
   ".woff2": "font/woff2",
 };
 
-// Ports tried in order before a random one. Over SSH, a LocalForward of each one makes the page open on the user's machine.
+// Ports tried in order before a random one, so a firewall rule or an SSH LocalForward can name them in advance.
 const FIRST_PORT = 7800;
 const PORT_COUNT = 10;
+
+// Over SSH, the address the user connected to. The server then listens on every interface, so the page opens from
+// any machine on the network that can reach that address.
+const sshAddress = process.env.SSH_CONNECTION?.split(" ")[2] ?? "";
+const SSH_HOST = isIP(sshAddress) ? sshAddress : null;
 
 const CSP =
   "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; " +
@@ -42,6 +47,9 @@ export class ReviewServer {
   private readonly uiDir: string;
   private server: Server | null = null;
   private port = 0;
+  // Anyone who can reach the port could otherwise read the repository and have @claude read any file, so every
+  // request but the static assets needs this token, from the URL or from the cookie the page gets for it.
+  private readonly token = randomBytes(32).toString("base64url");
 
   constructor(uiDir: string) {
     this.uiDir = path.resolve(uiDir);
@@ -55,8 +63,9 @@ export class ReviewServer {
       });
     });
     let bound = false;
-    for (let port = FIRST_PORT; !bound && port < FIRST_PORT + PORT_COUNT; port++) bound = await listen(server, port);
-    if (!bound) await listen(server, 0);
+    const host = SSH_HOST ? undefined : "127.0.0.1";
+    for (let port = FIRST_PORT; !bound && port < FIRST_PORT + PORT_COUNT; port++) bound = await listen(server, port, host);
+    if (!bound) await listen(server, 0, host);
     this.port = (server.address() as AddressInfo).port;
     this.server = server;
   }
@@ -143,22 +152,41 @@ export class ReviewServer {
   }
 
   url(view: View): string {
-    return `http://127.0.0.1:${this.port}/v/${view.id}`;
+    const host = !SSH_HOST ? "127.0.0.1" : isIP(SSH_HOST) === 6 ? `[${SSH_HOST}]` : SSH_HOST;
+    return `http://${host}:${this.port}/v/${view.id}?token=${this.token}`;
   }
 
   /** A shell command that exits once the user submits a review newer than the ones submitted so far. */
   waitCommand(view: View): string {
     const after = this.repos.get(view.repo)?.submissions.length ?? 0;
-    return `curl -sSf "http://127.0.0.1:${this.port}/api/views/${view.id}/wait?after=${after}"`;
+    return `curl -sSf "http://127.0.0.1:${this.port}/api/views/${view.id}/wait?after=${after}&token=${this.token}"`;
   }
 
   private async handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    const host = req.headers.host;
-    if (host !== `127.0.0.1:${this.port}` && host !== `localhost:${this.port}`) {
-      return sendText(res, 403, "Forbidden host");
+    const { pathname, searchParams } = new URL(req.url ?? "/", "http://127.0.0.1");
+    // The token stands in for the old check of the Host header against DNS rebinding: a page on another site has
+    // neither the token nor this host's cookie.
+    if (!pathname.startsWith("/assets/")) {
+      const given = searchParams.get("token");
+      const cookie = `diff-review-${this.port}`;
+      if (given !== null && this.validToken(given) && req.method === "GET" && /^\/v\/[\w-]+$/.test(pathname)) {
+        searchParams.delete("token");
+        const query = searchParams.toString();
+        res.writeHead(302, {
+          Location: query ? `${pathname}?${query}` : pathname,
+          // Cookies ignore the port, so each port's server has its own.
+          "Set-Cookie": `${cookie}=${this.token}; Path=/; HttpOnly; SameSite=Strict`,
+          "Cache-Control": "no-store",
+        });
+        return void res.end();
+      }
+      const fromCookie = req.headers.cookie?.split(/;\s*/).find((c) => c.startsWith(`${cookie}=`))?.slice(cookie.length + 1);
+      if (!this.validToken(given ?? fromCookie)) {
+        const error = "Open the URL Claude printed. It carries the access token.";
+        return pathname.startsWith("/api/") ? sendJson(res, 401, { error }) : sendText(res, 401, error);
+      }
     }
 
-    const { pathname, searchParams } = new URL(req.url ?? "/", "http://127.0.0.1");
     const api = /^\/api\/views\/([\w-]+)\/(diff|events|refs|threads|review|wait|version|topics)(?:\/([\w-]+)\/comments(?:\/([\w-]+))?)?$/.exec(pathname);
     if (api) {
       const view = this.views.get(api[1]!);
@@ -266,12 +294,17 @@ export class ReviewServer {
     return sendText(res, 404, "Not found");
   }
 
+  private validToken(value: string | undefined): boolean {
+    const given = Buffer.from(value ?? "");
+    const token = Buffer.from(this.token);
+    return given.length === token.length && timingSafeEqual(given, token);
+  }
+
   private sameOrigin(req: IncomingMessage): boolean {
     const type = req.headers["content-type"] ?? "";
     const origin = req.headers.origin;
     const site = req.headers["sec-fetch-site"];
-    const origins = [`http://127.0.0.1:${this.port}`, `http://localhost:${this.port}`];
-    return type.startsWith("application/json") && (origin === undefined || origins.includes(origin)) && (site === undefined || site === "same-origin");
+    return type.startsWith("application/json") && (origin === undefined || origin === `http://${req.headers.host}`) && (site === undefined || site === "same-origin");
   }
 
   private events(req: IncomingMessage, res: ServerResponse, threads: RepoThreads): void {
@@ -318,8 +351,8 @@ export class ReviewServer {
   }
 }
 
-/** Listens on 127.0.0.1, or resolves false when another process holds the port. */
-function listen(server: Server, port: number): Promise<boolean> {
+/** Listens on host, or on every interface without one. Resolves false when another process holds the port. */
+function listen(server: Server, port: number, host: string | undefined): Promise<boolean> {
   return new Promise((resolve, reject) => {
     const onError = (err: NodeJS.ErrnoException) => {
       server.off("listening", onListening);
@@ -333,7 +366,7 @@ function listen(server: Server, port: number): Promise<boolean> {
     };
     server.once("error", onError);
     server.once("listening", onListening);
-    server.listen(port, "127.0.0.1");
+    server.listen(port, host);
   });
 }
 

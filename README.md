@@ -26,7 +26,9 @@ claude plugin remove diff-review@github-code-review
 
 ## Remote development over SSH
 
-The viewer listens on 127.0.0.1 port 7800, or on the next free port up to 7809 when other Claude Code sessions on the machine have a viewer open. When Claude Code runs on a remote machine, forward these ports in `~/.ssh/config` on your own machine, and the URLs it prints open in your local browser:
+When Claude Code runs in an SSH session, the viewer listens on every network interface and its URL uses the address you connected to, so the page opens from any machine that can reach that address. The URL carries an access token, which the page keeps in a cookie. Anyone with the URL can read the diff and ask @claude questions that read files on that machine, so share it only with people you would give that access. The viewer uses port 7800, or the next free one up to 7809 when other sessions on the machine have a viewer open, so a firewall there needs to let TCP ports 7800 to 7809 through.
+
+When the browser cannot reach the remote machine, for example behind a jump host, forward the ports in `~/.ssh/config` on your own machine and open the URL with its host changed to 127.0.0.1:
 
 ```
 Host devbox
@@ -45,4 +47,4 @@ Host devbox
   ControlPersist 10m
 ```
 
-The `Control` lines make further connections to the host share the first one and its forwards. Without them, each further connection prints a warning for every port the first one already forwards. A session that finds all ten ports taken uses a random port, and its URL opens only on the remote machine.
+The `Control` lines make further connections to the host share the first one and its forwards. Without them, each further connection prints a warning for every port the first one already forwards. A session that finds all ten ports taken uses a random port.
