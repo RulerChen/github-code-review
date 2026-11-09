@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { computeDiff, summarize } from "../engine/diff.js";
+import { computeDiff, describeFailures, summarize } from "../engine/diff.js";
 import type { Comparison, Topic } from "../shared/types.js";
 import { stopAll } from "./claude.js";
 import { errorMessage, ReviewServer } from "./http.js";
@@ -48,7 +48,8 @@ async function openViewer(repo: string, compare: Comparison, focus?: string, top
   const shown = server.pageOpen
     ? "\nThe viewer page already open in the user's browser has switched to this comparison, so they do not need to open the URL again."
     : "";
-  return `${server.url(view)}\n${summarize(diff)}${note}${shown}\nWait for the user's review in the background with: ${server.waitCommand(view)}`;
+  const failed = describeFailures(diff).map((l) => `\n${l}`).join("");
+  return `${server.url(view)}\n${summarize(diff)}${failed}${note}${shown}\nWait for the user's review in the background with: ${server.waitCommand(view)}`;
 }
 
 async function shutdown(): Promise<never> {
@@ -68,7 +69,11 @@ async function runMcp(): Promise<void> {
   const repo = z
     .string()
     .optional()
-    .describe("Absolute path of a directory inside the git repository. Defaults to the server's working directory.");
+    .describe(
+      "Absolute path of a directory inside the git repository. Defaults to the server's working directory. A directory " +
+        "with no .git of its own but git repositories directly under it covers all of them in one diff, each file's " +
+        "path starting with its repository's directory.",
+    );
   const base = z
     .string()
     .optional()

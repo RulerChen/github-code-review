@@ -100,7 +100,8 @@ function RefPicker({ role, value, commit, loadRefs, onPick }: PickerProps) {
       if (tab === "commits") {
         for (const c of refs.commits) {
           if (!q || c.sha.startsWith(lq) || c.subject.toLowerCase().includes(lq)) {
-            list.push({ key: c.sha, value: c.sha, label: c.subject, detail: c.sha.slice(0, 7) });
+            const detail = c.repo ? `${c.repo} ${c.sha.slice(0, 7)}` : c.sha.slice(0, 7);
+            list.push({ key: `${c.repo ?? ""} ${c.sha}`, value: c.sha, label: c.subject, detail });
           }
         }
       } else {
@@ -221,7 +222,7 @@ export function CommitList({ diff, onView }: CommitListProps) {
           <h3 className="commit-day">Commits on {g.day}</h3>
           <ol className="commit-list">
             {g.commits.map((c) => (
-              <li key={c.sha} className="commit">
+              <li key={`${c.repo ?? ""} ${c.sha}`} className="commit">
                 <div className="commit-main">
                   <button
                     className="commit-subject"
@@ -232,6 +233,7 @@ export function CommitList({ diff, onView }: CommitListProps) {
                     {c.subject || "(no message)"}
                   </button>
                   <div className="commit-meta">
+                    {c.repo && `${c.repo} · `}
                     {c.author} committed {new Date(c.date).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}
                     {c.parents.length > 1 && " · merge"}
                   </div>

@@ -36661,8 +36661,23 @@ var StdioServerTransport = class {
 
 // src/engine/diff.ts
 import { createHash } from "node:crypto";
-import { lstat, readFile, readlink } from "node:fs/promises";
+import { lstat, readdir, readFile, readlink, realpath, stat } from "node:fs/promises";
 import path from "node:path";
+
+// src/shared/comparison.ts
+function comparisonFromQuery(params) {
+  const base = params.get("base");
+  return base ? { base, head: params.get("head") || null, threeDot: params.get("dots") !== "2" } : null;
+}
+var sameComparison = (a, b) => a.base === b.base && a.head === b.head && a.threeDot === b.threeDot;
+function describeComparison(c) {
+  return `${c.base}${c.threeDot ? "..." : ".."}${c.head ?? "the working tree"}`;
+}
+function repoFailures(repos) {
+  const out = /* @__PURE__ */ new Map();
+  for (const r of repos) if (r.error !== null) out.set(r.error, [...out.get(r.error) ?? [], r.dir]);
+  return [...out].map(([error62, dirs]) => ({ error: error62, dirs }));
+}
 
 // src/shared/hunks.ts
 var CONTEXT_LINES = 3;
@@ -36784,11 +36799,63 @@ var MAX_DIFF_CHARS = 500 * 1024;
 var MAX_COMMITS = 250;
 var BATCH_BYTES = 64 * 1024 * 1024;
 var EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
-async function computeDiff(repo, compare = {}) {
-  const base = compare.base ?? "HEAD";
-  const head = compare.head ?? null;
-  const threeDot = compare.threeDot ?? true;
-  checkRefs(base, head);
+var REPO_LIMIT = 4;
+async function findRepos(dir) {
+  const abs = await realpath(dir);
+  const isRepo = (d) => stat(path.join(d, ".git")).then(() => true, () => false);
+  if (!await isRepo(abs)) {
+    const names = (await readdir(abs)).sort();
+    const found = await Promise.all(names.map((n) => isRepo(path.join(abs, n))));
+    const repos = names.filter((_, i) => found[i]);
+    if (repos.length) return { root: abs, repos };
+  }
+  try {
+    return { root: (await git(abs, ["rev-parse", "--show-toplevel"])).toString("utf8").trim(), repos: null };
+  } catch {
+    throw new Error(`${dir} is not in a git repository and has no git repository directly under it.`);
+  }
+}
+async function computeDiff(dir, compare = {}) {
+  const c = { base: compare.base ?? "HEAD", head: compare.head ?? null, threeDot: compare.threeDot ?? true };
+  checkRefs(c.base, c.head);
+  const { root, repos } = await findRepos(dir);
+  if (!repos) {
+    const { repo, commits: commits2, commitCount, files } = await diffRepo(root, c, "");
+    const { baseCommit, headCommit, oldCommit } = repo;
+    return { repoRoot: root, ...c, baseCommit, headCommit, oldCommit, repos: [repo], commits: commits2, commitCount, files };
+  }
+  const parts = await mapLimit(
+    repos,
+    REPO_LIMIT,
+    (name) => diffRepo(path.join(root, name), c, name).catch(
+      (err) => ({
+        repo: { dir: name, baseCommit: null, headCommit: null, oldCommit: null, error: err instanceof Error ? err.message : String(err) },
+        commits: [],
+        commitCount: 0,
+        files: []
+      })
+    )
+  );
+  const states = parts.map((p) => p.repo);
+  if (states.every((r) => r.error !== null)) {
+    throw new Error(repoFailures(states).map((f) => `${f.error} (${f.dirs.join(", ")})`).join("; "));
+  }
+  const commits = parts.flatMap((p) => p.commits.map((commit) => ({ ...commit, repo: p.repo.dir }))).sort((a, b) => Date.parse(a.date) - Date.parse(b.date)).slice(-MAX_COMMITS);
+  return {
+    repoRoot: root,
+    ...c,
+    baseCommit: null,
+    headCommit: null,
+    oldCommit: null,
+    repos: states,
+    commits,
+    commitCount: parts.reduce((n, p) => n + p.commitCount, 0),
+    files: parts.flatMap((p) => p.files).sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0)
+  };
+}
+async function diffRepo(repo, compare, dir) {
+  const { base, head, threeDot } = compare;
+  const prefix = dir ? `${dir}/` : "";
   const repoRoot = (await git(repo, ["rev-parse", "--show-toplevel"])).toString("utf8").trim();
   const [baseCommit, headCommit, headOfRepo] = await Promise.all([
     resolveCommit(repoRoot, base),
@@ -36821,24 +36888,38 @@ async function computeDiff(repo, compare = {}) {
   const tracked = await mapLimit(
     entries.map((e, i) => [e, sections[i]]),
     8,
-    ([entry, section]) => buildTrackedFile(repoRoot, diffArgs, range, oldCommit, headCommit, blobs, entry, section)
+    ([entry, section]) => buildTrackedFile(repoRoot, prefix, diffArgs, range, oldCommit, headCommit, blobs, entry, section)
   );
-  const added = (await mapLimit(untrackedPaths, 8, (p) => buildUntrackedFile(repoRoot, p))).filter(
+  const added = (await mapLimit(untrackedPaths, 8, (p) => buildUntrackedFile(repoRoot, prefix, p))).filter(
     (f) => f !== null
   );
   const files = [...tracked, ...added].sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
-  for (const f of files) f.generated = generated.has(f.path);
-  return { repoRoot, base, head, threeDot, baseCommit, headCommit, oldCommit, ...commits, files };
+  for (const f of files) {
+    f.generated = generated.has(f.path);
+    f.path = prefix + f.path;
+    if (f.oldPath !== null) f.oldPath = prefix + f.oldPath;
+  }
+  return { repo: { dir, baseCommit, headCommit, oldCommit, error: null }, ...commits, files };
 }
 function checkRefs(base, head) {
   for (const ref of [base, head]) {
     if (ref !== null && (ref === "" || ref.startsWith("-"))) throw new Error(`Invalid git ref: ${ref}`);
   }
 }
-async function diffVersion(repo, compare = {}) {
+async function diffVersion(dir, compare = {}) {
   const base = compare.base ?? "HEAD";
   const head = compare.head ?? null;
   checkRefs(base, head);
+  const { root, repos } = await findRepos(dir);
+  if (!repos) return repoVersion(root, base, head);
+  const versions = await mapLimit(
+    repos,
+    REPO_LIMIT,
+    (name) => repoVersion(path.join(root, name), base, head).catch((err) => `! ${err instanceof Error ? err.message : String(err)}`)
+  );
+  return createHash("sha256").update(repos.map((name, i) => `${name}\0${versions[i]}`).join("\n")).digest("hex").slice(0, 16);
+}
+async function repoVersion(repo, base, head) {
   const [commits, status] = await Promise.all([
     // Exits 128 for a ref that names nothing, such as HEAD before the first commit. The output is still stable.
     git(repo, ["rev-parse", `${base}^{commit}`, `${head ?? "HEAD"}^{commit}`], [0, 128]),
@@ -36868,10 +36949,10 @@ var contentHashes = /* @__PURE__ */ new Map();
 async function fileVersion(abs, known, next) {
   try {
     const st = await lstat(abs, { bigint: true });
-    const stat = `${st.mtimeNs} ${st.size} ${st.mode}`;
-    if (!st.isFile() || st.size > MAX_CONTENT_BYTES) return stat;
+    const stat2 = `${st.mtimeNs} ${st.size} ${st.mode}`;
+    if (!st.isFile() || st.size > MAX_CONTENT_BYTES) return stat2;
     let entry = known?.get(abs);
-    if (entry?.stat !== stat) entry = { stat, hash: `${createHash("sha1").update(await readFile(abs)).digest("hex")} ${st.mode}` };
+    if (entry?.stat !== stat2) entry = { stat: stat2, hash: `${createHash("sha1").update(await readFile(abs)).digest("hex")} ${st.mode}` };
     next.set(abs, entry);
     return entry.hash;
   } catch {
@@ -36886,7 +36967,12 @@ function summarize(result) {
   const fromMergeBase = result.oldCommit !== result.baseCommit && result.oldCommit ? ` from their merge base ${result.oldCommit.slice(0, 7)}` : "";
   const what = result.head === null ? `the working tree against ${result.base}` : `${result.base}${result.threeDot ? "..." : ".."}${result.head}`;
   const commits = c ? `, ${c} commit${c === 1 ? "" : "s"}` : "";
-  return `${n} file${n === 1 ? "" : "s"} changed, +${add} -${del}, comparing ${what}${fromMergeBase}${commits}`;
+  const r = result.repos.length;
+  const where = result.repos[0]?.dir === "" ? "" : ` in ${r} repositor${r === 1 ? "y" : "ies"} under ${result.repoRoot}, each file's path starting with its repository's directory`;
+  return `${n} file${n === 1 ? "" : "s"} changed, +${add} -${del}, comparing ${what}${fromMergeBase}${where}${commits}`;
+}
+function describeFailures(result) {
+  return repoFailures(result.repos).map((f) => `Not compared in ${f.dirs.join(", ")}: ${f.error}`);
 }
 async function resolveCommit(repoRoot, ref) {
   try {
@@ -36924,8 +37010,20 @@ async function recentCommits(repoRoot, limit = 100) {
     return [];
   }
 }
-async function listRefs(repo) {
-  const repoRoot = (await git(repo, ["rev-parse", "--show-toplevel"])).toString("utf8").trim();
+async function listRefs(dir) {
+  const { root, repos } = await findRepos(dir);
+  if (!repos) return repoRefs(root);
+  const lists = await mapLimit(repos, REPO_LIMIT, (name) => repoRefs(path.join(root, name)).catch(() => null));
+  const merge2 = (pick2) => {
+    const names = lists.map((l) => l ? pick2(l) : []);
+    const out = /* @__PURE__ */ new Set();
+    for (let i = 0; names.some((n) => i < n.length); i++) for (const n of names) if (i < n.length) out.add(n[i]);
+    return [...out];
+  };
+  const commits = lists.flatMap((l, i) => l ? l.commits.map((c) => ({ ...c, repo: repos[i] })) : []).sort((a, b) => Date.parse(b.date) - Date.parse(a.date)).slice(0, 100);
+  return { branches: merge2((l) => l.branches), tags: merge2((l) => l.tags), commits };
+}
+async function repoRefs(repoRoot) {
   const refs = async (pattern) => (await git(repoRoot, ["for-each-ref", "--sort=-creatordate", "--format=%(refname:short)%00%(symref)", ...pattern])).toString("utf8").split("\n").map((l) => l.split("\0")).filter(([name, symref]) => name && !symref).map(([name]) => name);
   const [branches, tags, commits] = await Promise.all([refs(["refs/heads", "refs/remotes"]), refs(["refs/tags"]), recentCommits(repoRoot)]);
   return { branches, tags, commits };
@@ -37106,7 +37204,7 @@ function matchesBlocks(lines, blocks, side) {
     });
   });
 }
-async function buildTrackedFile(repoRoot, diffArgs, range, oldCommit, headCommit, blobs, entry, section) {
+async function buildTrackedFile(repoRoot, prefix, diffArgs, range, oldCommit, headCommit, blobs, entry, section) {
   const status = statusOf(entry.code);
   if (!section) {
     const paths = entry.oldPath ? [entry.oldPath, entry.path] : [entry.path];
@@ -37114,7 +37212,7 @@ async function buildTrackedFile(repoRoot, diffArgs, range, oldCommit, headCommit
     section = splitSections(one.toString("utf8"))[0] ?? [];
   }
   const parsed = parseSection(section);
-  const blocks = assignIds(entry.path, parsed.blocks);
+  const blocks = assignIds(prefix + entry.path, parsed.blocks);
   const absent = { kind: "absent" };
   const oldC = status === "added" || !oldCommit ? absent : blobs.get(entry.oldOid) ?? absent;
   const newC = status === "deleted" ? absent : headCommit ? blobs.get(entry.newOid) ?? absent : await readWorkTree(repoRoot, entry.path);
@@ -37145,7 +37243,7 @@ async function buildTrackedFile(repoRoot, diffArgs, range, oldCommit, headCommit
     newContent: newLines && newC.kind === "text" ? newC.text : null
   };
 }
-async function buildUntrackedFile(repoRoot, filePath) {
+async function buildUntrackedFile(repoRoot, prefix, filePath) {
   const c = await readWorkTree(repoRoot, filePath);
   if (c.kind === "absent") return null;
   const base = {
@@ -37167,7 +37265,7 @@ async function buildUntrackedFile(repoRoot, filePath) {
   if (c.kind !== "text") return base;
   const lines = splitLines(c.text);
   if (lines.length === 0) return base;
-  const blocks = assignIds(filePath, [
+  const blocks = assignIds(prefix + filePath, [
     {
       oldStart: 0,
       oldCount: 0,
@@ -37296,16 +37394,6 @@ import { readFile as readFile2 } from "node:fs/promises";
 import { createServer } from "node:http";
 import path3 from "node:path";
 
-// src/shared/comparison.ts
-function comparisonFromQuery(params) {
-  const base = params.get("base");
-  return base ? { base, head: params.get("head") || null, threeDot: params.get("dots") !== "2" } : null;
-}
-var sameComparison = (a, b) => a.base === b.base && a.head === b.head && a.threeDot === b.threeDot;
-function describeComparison(c) {
-  return `${c.base}${c.threeDot ? "..." : ".."}${c.head ?? "the working tree"}`;
-}
-
 // src/server/review.ts
 var MAX_CHARS = 6e4;
 var MAX_LINES_PER_CHANGE = 40;
@@ -37313,17 +37401,17 @@ var MAX_LINE_CHARS = 300;
 var MAX_COMMITS_LISTED = 100;
 function formatChanges(diff) {
   const count = diff.files.reduce((n, f) => n + changeIds(f).length, 0);
-  const out = [`${summarize(diff)}, ${count} change${count === 1 ? "" : "s"}. Each change starts with its id.`];
+  const out = [`${summarize(diff)}, ${count} change${count === 1 ? "" : "s"}. Each change starts with its id.`, ...describeFailures(diff)];
   let size = 0;
   let omitted = 0;
   if (diff.commits.length) {
     const shown = diff.commits.slice(-MAX_COMMITS_LISTED);
     out.push("", diff.commitCount > shown.length ? `Commits (newest ${shown.length} of ${diff.commitCount}, oldest first):` : "Commits, oldest first:");
-    for (const c of shown) out.push(`  ${c.sha.slice(0, 7)} ${c.subject}`);
+    for (const c of shown) out.push(`  ${c.sha.slice(0, 7)} ${c.repo ? `${c.repo}: ` : ""}${c.subject}`);
   }
   for (const f of diff.files) {
-    const stat = f.binary ? "binary" : `+${f.additions} -${f.deletions}${f.diffTooLarge ? ", too large to list its lines" : ""}`;
-    out.push("", `${f.oldPath ? `${f.oldPath} -> ` : ""}${f.path} (${f.status}, ${stat})`);
+    const stat2 = f.binary ? "binary" : `+${f.additions} -${f.deletions}${f.diffTooLarge ? ", too large to list its lines" : ""}`;
+    out.push("", `${f.oldPath ? `${f.oldPath} -> ` : ""}${f.path} (${f.status}, ${stat2})`);
     if (f.blocks.length === 0) {
       out.push(`  file:${f.path}`);
       continue;
@@ -38110,8 +38198,10 @@ ${unassigned.length} change(s) are in no topic and appear under "Other changes":
   const server = await getServer();
   const view = server.addView(diff.repoRoot, compare, grouped, repo, session && SESSION_ID.test(session) ? session : null);
   const shown = server.pageOpen ? "\nThe viewer page already open in the user's browser has switched to this comparison, so they do not need to open the URL again." : "";
+  const failed = describeFailures(diff).map((l) => `
+${l}`).join("");
   return `${server.url(view)}
-${summarize(diff)}${note}${shown}
+${summarize(diff)}${failed}${note}${shown}
 Wait for the user's review in the background with: ${server.waitCommand(view)}`;
 }
 async function shutdown() {
@@ -38125,7 +38215,9 @@ async function runHttpOnly(base) {
 }
 async function runMcp() {
   const mcp = new McpServer({ name: "diff-review", version: VERSION });
-  const repo = external_exports.string().optional().describe("Absolute path of a directory inside the git repository. Defaults to the server's working directory.");
+  const repo = external_exports.string().optional().describe(
+    "Absolute path of a directory inside the git repository. Defaults to the server's working directory. A directory with no .git of its own but git repositories directly under it covers all of them in one diff, each file's path starting with its repository's directory."
+  );
   const base = external_exports.string().optional().describe("Git ref for the old side, such as HEAD, main, HEAD~3, a tag or a commit. Defaults to HEAD.");
   const head = external_exports.string().optional().describe("Git ref for the new side. Omit it to compare the working tree, with staged, unstaged and untracked changes.");
   const threeDot = external_exports.boolean().optional().describe(

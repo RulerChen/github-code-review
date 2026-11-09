@@ -13,8 +13,8 @@ export interface RevealRequest {
 export type NewAnchor = Omit<LineAnchor, "commit"> | Omit<FileAnchor, "commit"> | Omit<TopicAnchor, "compare">;
 
 export interface CommentsApi {
-  /** The commit each side of the diff comes from, or null for the working tree. */
-  versions: Record<LineAnchor["side"], string | null>;
+  /** The commit each side of a file comes from, or null for the working tree. It differs by repository when the diff covers several. */
+  versions: (path: string) => Record<LineAnchor["side"], string | null>;
   threadsFor: (path: string) => Thread[];
   threadsForTopic: (title: string) => Thread[];
   /** A single comment is sent to Claude on its own at once instead of going into the pending review. */
@@ -36,7 +36,7 @@ export interface CommentsApi {
 }
 
 export const CommentsContext = createContext<CommentsApi>({
-  versions: { old: null, new: null },
+  versions: () => ({ old: null, new: null }),
   threadsFor: () => [],
   threadsForTopic: () => [],
   create: async () => {},
@@ -92,7 +92,7 @@ export function readableCount(thread: Thread): number {
 
 /** Whether a thread's lines come from the version of the file shown on its side of the diff. A comment on the whole file or a topic always does. */
 export const onShownVersion = (thread: Thread, versions: CommentsApi["versions"]) =>
-  thread.anchor.side === null || thread.anchor.commit === versions[thread.anchor.side];
+  thread.anchor.side === null || thread.anchor.commit === versions(thread.anchor.path)[thread.anchor.side];
 
 interface FormProps {
   placeholder: string;

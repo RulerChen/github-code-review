@@ -1,4 +1,4 @@
-import { summarize } from "../engine/diff.js";
+import { describeFailures, summarize } from "../engine/diff.js";
 import { describeComparison } from "../shared/comparison.js";
 import { changeIds, rangeHeader } from "../shared/hunks.js";
 import type { DiffResult, Thread, Topic } from "../shared/types.js";
@@ -11,14 +11,14 @@ const MAX_COMMITS_LISTED = 100;
 
 export function formatChanges(diff: DiffResult): string {
   const count = diff.files.reduce((n, f) => n + changeIds(f).length, 0);
-  const out = [`${summarize(diff)}, ${count} change${count === 1 ? "" : "s"}. Each change starts with its id.`];
+  const out = [`${summarize(diff)}, ${count} change${count === 1 ? "" : "s"}. Each change starts with its id.`, ...describeFailures(diff)];
   let size = 0;
   let omitted = 0;
 
   if (diff.commits.length) {
     const shown = diff.commits.slice(-MAX_COMMITS_LISTED);
     out.push("", diff.commitCount > shown.length ? `Commits (newest ${shown.length} of ${diff.commitCount}, oldest first):` : "Commits, oldest first:");
-    for (const c of shown) out.push(`  ${c.sha.slice(0, 7)} ${c.subject}`);
+    for (const c of shown) out.push(`  ${c.sha.slice(0, 7)} ${c.repo ? `${c.repo}: ` : ""}${c.subject}`);
   }
 
   for (const f of diff.files) {

@@ -179,14 +179,34 @@ export interface CommitInfo {
   author: string;
   date: string;
   subject: string;
+  /** The repository's directory, when the diff covers the repositories under a directory. */
+  repo?: string;
+}
+
+/** One repository of a diff. */
+export interface DiffRepo {
+  /** Its directory relative to repoRoot, which starts the paths of its files: "" for repoRoot itself. */
+  dir: string;
+  baseCommit: string | null;
+  headCommit: string | null;
+  oldCommit: string | null;
+  /** Why the comparison failed in this repository, which then has no files in the diff. */
+  error: string | null;
 }
 
 export interface DiffResult extends Comparison {
+  /** The repository root, or the directory whose repositories the diff covers. */
   repoRoot: string;
+  /** These three are null when the diff covers several repositories. Each one's are in repos. */
   baseCommit: string | null;
   headCommit: string | null;
   /** The commit the old side comes from: the merge base in a three-dot comparison, otherwise baseCommit. */
   oldCommit: string | null;
+  /**
+   * The repository, or each repository directly under repoRoot when repoRoot is not one itself. Their files share
+   * one diff, with paths starting with the repository's directory.
+   */
+  repos: DiffRepo[];
   /** Commits in base..head, oldest first, at most MAX_COMMITS of the newest. */
   commits: CommitInfo[];
   commitCount: number;

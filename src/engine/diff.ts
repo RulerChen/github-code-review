@@ -1,11 +1,12 @@
 import { createHash } from "node:crypto";
-import { lstat, readFile, readlink } from "node:fs/promises";
+import { lstat, readdir, readFile, readlink, realpath, stat } from "node:fs/promises";
 import path from "node:path";
+import { repoFailures } from "../shared/comparison.js";
 import { buildHunks, splitLines } from "../shared/hunks.js";
-import type { Block, CommitInfo, Comparison, DiffLine, DiffResult, DisplayHunk, FileDiff, FileStatus, RefList } from "../shared/types.js";
+import type { Block, CommitInfo, Comparison, DiffLine, DiffRepo, DiffResult, DisplayHunk, FileDiff, FileStatus, RefList } from "../shared/types.js";
 import { git } from "./git.js";
 
-export type { Block, CommitInfo, Comparison, DiffLine, DiffResult, DisplayHunk, FileDiff, FileStatus };
+export type { Block, CommitInfo, Comparison, DiffLine, DiffRepo, DiffResult, DisplayHunk, FileDiff, FileStatus };
 
 export const MAX_CONTENT_BYTES = 1024 * 1024;
 // GitHub stops showing a file's diff past 20,000 lines or 500 KB. Characters stand in for bytes.
@@ -15,11 +16,85 @@ export const MAX_COMMITS = 250;
 const BATCH_BYTES = 64 * 1024 * 1024;
 const EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 
-export async function computeDiff(repo: string, compare: Partial<Comparison> = {}): Promise<DiffResult> {
-  const base = compare.base ?? "HEAD";
-  const head = compare.head ?? null;
-  const threeDot = compare.threeDot ?? true;
-  checkRefs(base, head);
+// How many repositories under a directory to read at once. Each one already runs several git processes.
+const REPO_LIMIT = 4;
+
+/**
+ * The repository a directory is in. A directory that is not a repository itself but has repositories directly
+ * under it, such as a workspace of clones, stands for all of them instead: its own path and their names.
+ */
+async function findRepos(dir: string): Promise<{ root: string; repos: string[] | null }> {
+  const abs = await realpath(dir);
+  const isRepo = (d: string) => stat(path.join(d, ".git")).then(() => true, () => false);
+  if (!(await isRepo(abs))) {
+    const names = (await readdir(abs)).sort();
+    const found = await Promise.all(names.map((n) => isRepo(path.join(abs, n))));
+    const repos = names.filter((_, i) => found[i]);
+    if (repos.length) return { root: abs, repos };
+  }
+  try {
+    return { root: (await git(abs, ["rev-parse", "--show-toplevel"])).toString("utf8").trim(), repos: null };
+  } catch {
+    throw new Error(`${dir} is not in a git repository and has no git repository directly under it.`);
+  }
+}
+
+interface RepoPart {
+  repo: DiffRepo;
+  commits: CommitInfo[];
+  commitCount: number;
+  files: FileDiff[];
+}
+
+/**
+ * The diff of a repository, or of every repository directly under a directory that is not one. Those share one
+ * diff with paths that start with the repository's directory. A repository where the comparison fails, such as
+ * one without the ref, is left out with the reason in `repos`, unless it fails in all of them.
+ */
+export async function computeDiff(dir: string, compare: Partial<Comparison> = {}): Promise<DiffResult> {
+  const c: Comparison = { base: compare.base ?? "HEAD", head: compare.head ?? null, threeDot: compare.threeDot ?? true };
+  checkRefs(c.base, c.head);
+  const { root, repos } = await findRepos(dir);
+  if (!repos) {
+    const { repo, commits, commitCount, files } = await diffRepo(root, c, "");
+    const { baseCommit, headCommit, oldCommit } = repo;
+    return { repoRoot: root, ...c, baseCommit, headCommit, oldCommit, repos: [repo], commits, commitCount, files };
+  }
+  const parts = await mapLimit(repos, REPO_LIMIT, (name) =>
+    diffRepo(path.join(root, name), c, name).catch(
+      (err: unknown): RepoPart => ({
+        repo: { dir: name, baseCommit: null, headCommit: null, oldCommit: null, error: err instanceof Error ? err.message : String(err) },
+        commits: [],
+        commitCount: 0,
+        files: [],
+      }),
+    ),
+  );
+  const states = parts.map((p) => p.repo);
+  if (states.every((r) => r.error !== null)) {
+    throw new Error(repoFailures(states).map((f) => `${f.error} (${f.dirs.join(", ")})`).join("; "));
+  }
+  const commits = parts
+    .flatMap((p) => p.commits.map((commit) => ({ ...commit, repo: p.repo.dir })))
+    .sort((a, b) => Date.parse(a.date) - Date.parse(b.date))
+    .slice(-MAX_COMMITS);
+  return {
+    repoRoot: root,
+    ...c,
+    baseCommit: null,
+    headCommit: null,
+    oldCommit: null,
+    repos: states,
+    commits,
+    commitCount: parts.reduce((n, p) => n + p.commitCount, 0),
+    files: parts.flatMap((p) => p.files).sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)),
+  };
+}
+
+/** One repository's part of a diff, with its files' paths and change ids under `dir` when that is not "". */
+async function diffRepo(repo: string, compare: Comparison, dir: string): Promise<RepoPart> {
+  const { base, head, threeDot } = compare;
+  const prefix = dir ? `${dir}/` : "";
   const repoRoot = (await git(repo, ["rev-parse", "--show-toplevel"])).toString("utf8").trim();
   const [baseCommit, headCommit, headOfRepo] = await Promise.all([
     resolveCommit(repoRoot, base),
@@ -55,15 +130,19 @@ export async function computeDiff(repo: string, compare: Partial<Comparison> = {
   ]);
 
   const tracked = await mapLimit(entries.map((e, i) => [e, sections[i]] as const), 8, ([entry, section]) =>
-    buildTrackedFile(repoRoot, diffArgs, range, oldCommit, headCommit, blobs, entry, section),
+    buildTrackedFile(repoRoot, prefix, diffArgs, range, oldCommit, headCommit, blobs, entry, section),
   );
-  const added = (await mapLimit(untrackedPaths, 8, (p) => buildUntrackedFile(repoRoot, p))).filter(
+  const added = (await mapLimit(untrackedPaths, 8, (p) => buildUntrackedFile(repoRoot, prefix, p))).filter(
     (f): f is FileDiff => f !== null,
   );
 
   const files = [...tracked, ...added].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
-  for (const f of files) f.generated = generated.has(f.path);
-  return { repoRoot, base, head, threeDot, baseCommit, headCommit, oldCommit, ...commits, files };
+  for (const f of files) {
+    f.generated = generated.has(f.path);
+    f.path = prefix + f.path;
+    if (f.oldPath !== null) f.oldPath = prefix + f.oldPath;
+  }
+  return { repo: { dir, baseCommit, headCommit, oldCommit, error: null }, ...commits, files };
 }
 
 function checkRefs(base: string, head: string | null): void {
@@ -77,10 +156,22 @@ function checkRefs(base: string, head: string | null): void {
  * working tree, every path git status lists with a hash of its content. A file missing from git status has
  * HEAD's content. Take it before the diff, so a change made while the diff runs shows up as a new version.
  */
-export async function diffVersion(repo: string, compare: Partial<Comparison> = {}): Promise<string> {
+export async function diffVersion(dir: string, compare: Partial<Comparison> = {}): Promise<string> {
   const base = compare.base ?? "HEAD";
   const head = compare.head ?? null;
   checkRefs(base, head);
+  const { root, repos } = await findRepos(dir);
+  if (!repos) return repoVersion(root, base, head);
+  const versions = await mapLimit(repos, REPO_LIMIT, (name) =>
+    repoVersion(path.join(root, name), base, head).catch((err: unknown) => `! ${err instanceof Error ? err.message : String(err)}`),
+  );
+  return createHash("sha256")
+    .update(repos.map((name, i) => `${name}\0${versions[i]}`).join("\n"))
+    .digest("hex")
+    .slice(0, 16);
+}
+
+async function repoVersion(repo: string, base: string, head: string | null): Promise<string> {
   const [commits, status] = await Promise.all([
     // Exits 128 for a ref that names nothing, such as HEAD before the first commit. The output is still stable.
     git(repo, ["rev-parse", `${base}^{commit}`, `${head ?? "HEAD"}^{commit}`], [0, 128]),
@@ -142,7 +233,17 @@ export function summarize(result: DiffResult): string {
   const fromMergeBase = result.oldCommit !== result.baseCommit && result.oldCommit ? ` from their merge base ${result.oldCommit.slice(0, 7)}` : "";
   const what = result.head === null ? `the working tree against ${result.base}` : `${result.base}${result.threeDot ? "..." : ".."}${result.head}`;
   const commits = c ? `, ${c} commit${c === 1 ? "" : "s"}` : "";
-  return `${n} file${n === 1 ? "" : "s"} changed, +${add} -${del}, comparing ${what}${fromMergeBase}${commits}`;
+  const r = result.repos.length;
+  const where =
+    result.repos[0]?.dir === ""
+      ? ""
+      : ` in ${r} repositor${r === 1 ? "y" : "ies"} under ${result.repoRoot}, each file's path starting with its repository's directory`;
+  return `${n} file${n === 1 ? "" : "s"} changed, +${add} -${del}, comparing ${what}${fromMergeBase}${where}${commits}`;
+}
+
+/** A line for each reason the comparison failed in some of the repositories, with the ones it failed in. */
+export function describeFailures(result: DiffResult): string[] {
+  return repoFailures(result.repos).map((f) => `Not compared in ${f.dirs.join(", ")}: ${f.error}`);
 }
 
 /** The commit a ref names, or null for HEAD in a repository with no commits yet. */
@@ -192,8 +293,26 @@ export async function recentCommits(repoRoot: string, limit = 100): Promise<Comm
   }
 }
 
-export async function listRefs(repo: string): Promise<RefList> {
-  const repoRoot = (await git(repo, ["rev-parse", "--show-toplevel"])).toString("utf8").trim();
+/** The refs of the repository, or of every repository under the directory: a ref only some have still compares the rest. */
+export async function listRefs(dir: string): Promise<RefList> {
+  const { root, repos } = await findRepos(dir);
+  if (!repos) return repoRefs(root);
+  const lists = await mapLimit(repos, REPO_LIMIT, (name) => repoRefs(path.join(root, name)).catch(() => null));
+  // Each repository's newest refs come first, taken in turn from each, so one with many does not hide the rest.
+  const merge = (pick: (l: RefList) => string[]) => {
+    const names = lists.map((l) => (l ? pick(l) : []));
+    const out = new Set<string>();
+    for (let i = 0; names.some((n) => i < n.length); i++) for (const n of names) if (i < n.length) out.add(n[i]!);
+    return [...out];
+  };
+  const commits = lists
+    .flatMap((l, i) => (l ? l.commits.map((c) => ({ ...c, repo: repos[i]! })) : []))
+    .sort((a, b) => Date.parse(b.date) - Date.parse(a.date))
+    .slice(0, 100);
+  return { branches: merge((l) => l.branches), tags: merge((l) => l.tags), commits };
+}
+
+async function repoRefs(repoRoot: string): Promise<RefList> {
   const refs = async (pattern: string[]) =>
     (await git(repoRoot, ["for-each-ref", "--sort=-creatordate", "--format=%(refname:short)%00%(symref)", ...pattern]))
       .toString("utf8")
@@ -431,6 +550,7 @@ function matchesBlocks(lines: string[], blocks: Block[], side: "old" | "new"): b
 
 async function buildTrackedFile(
   repoRoot: string,
+  prefix: string,
   diffArgs: string[],
   range: string[],
   oldCommit: string | null,
@@ -446,7 +566,7 @@ async function buildTrackedFile(
     section = splitSections(one.toString("utf8"))[0] ?? [];
   }
   const parsed = parseSection(section);
-  const blocks = assignIds(entry.path, parsed.blocks);
+  const blocks = assignIds(prefix + entry.path, parsed.blocks);
 
   const absent: Content = { kind: "absent" };
   const oldC = status === "added" || !oldCommit ? absent : (blobs.get(entry.oldOid) ?? absent);
@@ -482,7 +602,7 @@ async function buildTrackedFile(
   };
 }
 
-async function buildUntrackedFile(repoRoot: string, filePath: string): Promise<FileDiff | null> {
+async function buildUntrackedFile(repoRoot: string, prefix: string, filePath: string): Promise<FileDiff | null> {
   const c = await readWorkTree(repoRoot, filePath);
   if (c.kind === "absent") return null;
   const base: FileDiff = {
@@ -504,7 +624,7 @@ async function buildUntrackedFile(repoRoot: string, filePath: string): Promise<F
   if (c.kind !== "text") return base;
   const lines = splitLines(c.text);
   if (lines.length === 0) return base;
-  const blocks = assignIds(filePath, [
+  const blocks = assignIds(prefix + filePath, [
     {
       oldStart: 0,
       oldCount: 0,

@@ -1,4 +1,4 @@
-import type { Comparison } from "./types.js";
+import type { Comparison, DiffRepo } from "./types.js";
 
 /** How the page names a comparison in its URL and requests: ?base=main&head=feature, with dots=2 for a direct one. */
 export function comparisonQuery(c: Comparison): string {
@@ -18,4 +18,11 @@ export const sameComparison = (a: Comparison, b: Comparison) => a.base === b.bas
 /** base...head, or base..head for a direct comparison. */
 export function describeComparison(c: Comparison): string {
   return `${c.base}${c.threeDot ? "..." : ".."}${c.head ?? "the working tree"}`;
+}
+
+/** The repositories where the comparison failed, grouped by why, such as the ones that lack a ref. */
+export function repoFailures(repos: DiffRepo[]): { error: string; dirs: string[] }[] {
+  const out = new Map<string, string[]>();
+  for (const r of repos) if (r.error !== null) out.set(r.error, [...(out.get(r.error) ?? []), r.dir]);
+  return [...out].map(([error, dirs]) => ({ error, dirs }));
 }

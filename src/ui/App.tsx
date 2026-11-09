@@ -1,5 +1,5 @@
 import { Fragment, type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { comparisonFromQuery, comparisonQuery, sameComparison } from "../shared/comparison";
+import { comparisonFromQuery, comparisonQuery, repoFailures, sameComparison } from "../shared/comparison";
 import type { CommitInfo, Comparison, DiffResult, FileDiff, Grouping, Review, Thread, ThreadAnchor, ViewData } from "../shared/types";
 import {
   ApiError,
@@ -200,8 +200,9 @@ export function App({ viewId }: Props) {
 
   const diff = data?.diff ?? null;
   const current = useMemo<Comparison | null>(() => diff && { base: diff.base, head: diff.head, threeDot: diff.threeDot }, [diff]);
-  const oldCommit = diff?.oldCommit ?? null;
-  const headCommit = diff?.headCommit ?? null;
+  // Each repository's directory and the commits of its two sides, as a string so that a refresh that leaves them
+  // as they were keeps `comments` as it was.
+  const repoCommits = JSON.stringify(diff?.repos.map((r) => [r.dir, r.oldCommit, r.headCommit]) ?? []);
   // A deleted thread stays in `threads` with no comments, so an older copy arriving late cannot bring it back.
   const live = useMemo(() => threads.filter((t) => t.comments.length > 0), [threads]);
   const comments = useMemo<
@@ -214,7 +215,11 @@ export function App({ viewId }: Props) {
       if (anchor.path !== null) byPath.set(anchor.path, [...(byPath.get(anchor.path) ?? []), t]);
       else if (current && sameComparison(anchor.compare, current)) byTopic.set(anchor.topic, [...(byTopic.get(anchor.topic) ?? []), t]);
     }
-    const versions = { old: oldCommit, new: headCommit };
+    const repos = JSON.parse(repoCommits) as [string, string | null, string | null][];
+    const versions = (path: string) => {
+      const r = repos.find(([dir]) => dir === "" || path.startsWith(`${dir}/`));
+      return { old: r?.[1] ?? null, new: r?.[2] ?? null };
+    };
     const update = (thread: Thread) => setThreads((prev) => mergeThreads(prev, [thread]));
     return {
       versions,
@@ -222,7 +227,7 @@ export function App({ viewId }: Props) {
       threadsForTopic: (title) => byTopic.get(title) ?? [],
       create: async (anchor, snippet, body, single) => {
         if (!viewId || !current) return;
-        const full: ThreadAnchor = anchor.path === null ? { ...anchor, compare: current } : { ...anchor, commit: versions[anchor.side ?? "new"] };
+        const full: ThreadAnchor = anchor.path === null ? { ...anchor, compare: current } : { ...anchor, commit: versions(anchor.path)[anchor.side ?? "new"] };
         update(await createThread(viewId, full, snippet, body, single));
       },
       reply: async (threadId, body, single) => {
@@ -237,7 +242,7 @@ export function App({ viewId }: Props) {
       pending: live.some((t) => t.comments.some((c) => c.draft)),
       listening,
     };
-  }, [live, viewId, oldCommit, headCommit, current, listening]);
+  }, [live, viewId, repoCommits, current, listening]);
 
   const drafts = live.reduce((n, t) => n + t.comments.filter((c) => c.draft).length, 0);
   const submit = async (body: string) => {
@@ -471,6 +476,11 @@ export function App({ viewId }: Props) {
           </aside>
 
           <main className={`files${switching ? " is-switching" : ""}`}>
+            {repoFailures(diff.repos).map((f) => (
+              <p key={f.error} className="file-note inline">
+                Not compared in {f.dirs.join(", ")}: {f.error}
+              </p>
+            ))}
             {view !== "commits" && diff.files.length === 0 && <Notice title="No changes">{noChanges(diff)}</Notice>}
             {visited.current.has("topics") && (
               <div className="view" hidden={view !== "topics"}>
