@@ -1925,10 +1925,10 @@ var require_keyword = __commonJS({
       if (def.async && !schemaEnv.$async)
         throw new Error("async keyword in sync schema");
     }
-    function useKeyword(gen, keyword, result) {
-      if (result === void 0)
+    function useKeyword(gen, keyword, result2) {
+      if (result2 === void 0)
         throw new Error(`keyword "${keyword}" failed to compile`);
-      return gen.scopeValue("keyword", typeof result == "function" ? { ref: result } : { ref: result, code: (0, codegen_1.stringify)(result) });
+      return gen.scopeValue("keyword", typeof result2 == "function" ? { ref: result2 } : { ref: result2, code: (0, codegen_1.stringify)(result2) });
     }
     function validSchemaType(schema, schemaType, allowUndefined = false) {
       return !schemaType.length || schemaType.some((st) => st === "array" ? Array.isArray(schema) : st === "object" ? schema && typeof schema == "object" && !Array.isArray(schema) : typeof schema == st || allowUndefined && typeof schema == "undefined");
@@ -2235,8 +2235,8 @@ var require_resolve = __commonJS({
       }
       return count;
     }
-    function getFullPath(resolver, id = "", normalize) {
-      if (normalize !== false)
+    function getFullPath(resolver, id = "", normalize2) {
+      if (normalize2 !== false)
         id = normalizeId(id);
       const p = resolver.parse(id);
       return _getFullPath(resolver, p);
@@ -3865,7 +3865,7 @@ var require_fast_uri = __commonJS({
       }
       return stringScheme;
     }
-    function normalize(uri, options) {
+    function normalize2(uri, options) {
       if (typeof uri === "string") {
         uri = /** @type {T} */
         normalizeString(uri, options);
@@ -4265,7 +4265,7 @@ var require_fast_uri = __commonJS({
     }
     var fastUri = {
       SCHEMES,
-      normalize,
+      normalize: normalize2,
       resolve,
       resolveComponent,
       equal,
@@ -7768,9 +7768,9 @@ var ParseInputLazyPath = class {
     return this._cachedPath;
   }
 };
-var handleResult = (ctx, result) => {
-  if (isValid(result)) {
-    return { success: true, data: result.value };
+var handleResult = (ctx, result2) => {
+  if (isValid(result2)) {
+    return { success: true, data: result2.value };
   } else {
     if (!ctx.common.issues.length) {
       throw new Error("Validation failed but no issues detected.");
@@ -7841,21 +7841,21 @@ var ZodType = class {
     };
   }
   _parseSync(input2) {
-    const result = this._parse(input2);
-    if (isAsync(result)) {
+    const result2 = this._parse(input2);
+    if (isAsync(result2)) {
       throw new Error("Synchronous parse encountered promise.");
     }
-    return result;
+    return result2;
   }
   _parseAsync(input2) {
-    const result = this._parse(input2);
-    return Promise.resolve(result);
+    const result2 = this._parse(input2);
+    return Promise.resolve(result2);
   }
   parse(data, params) {
-    const result = this.safeParse(data, params);
-    if (result.success)
-      return result.data;
-    throw result.error;
+    const result2 = this.safeParse(data, params);
+    if (result2.success)
+      return result2.data;
+    throw result2.error;
   }
   safeParse(data, params) {
     const ctx = {
@@ -7870,8 +7870,8 @@ var ZodType = class {
       data,
       parsedType: getParsedType(data)
     };
-    const result = this._parseSync({ data, path: ctx.path, parent: ctx });
-    return handleResult(ctx, result);
+    const result2 = this._parseSync({ data, path: ctx.path, parent: ctx });
+    return handleResult(ctx, result2);
   }
   "~validate"(data) {
     const ctx = {
@@ -7887,9 +7887,9 @@ var ZodType = class {
     };
     if (!this["~standard"].async) {
       try {
-        const result = this._parseSync({ data, path: [], parent: ctx });
-        return isValid(result) ? {
-          value: result.value
+        const result2 = this._parseSync({ data, path: [], parent: ctx });
+        return isValid(result2) ? {
+          value: result2.value
         } : {
           issues: ctx.common.issues
         };
@@ -7903,17 +7903,17 @@ var ZodType = class {
         };
       }
     }
-    return this._parseAsync({ data, path: [], parent: ctx }).then((result) => isValid(result) ? {
-      value: result.value
+    return this._parseAsync({ data, path: [], parent: ctx }).then((result2) => isValid(result2) ? {
+      value: result2.value
     } : {
       issues: ctx.common.issues
     });
   }
   async parseAsync(data, params) {
-    const result = await this.safeParseAsync(data, params);
-    if (result.success)
-      return result.data;
-    throw result.error;
+    const result2 = await this.safeParseAsync(data, params);
+    if (result2.success)
+      return result2.data;
+    throw result2.error;
   }
   async safeParseAsync(data, params) {
     const ctx = {
@@ -7929,8 +7929,8 @@ var ZodType = class {
       parsedType: getParsedType(data)
     };
     const maybeAsyncResult = this._parse({ data, path: ctx.path, parent: ctx });
-    const result = await (isAsync(maybeAsyncResult) ? maybeAsyncResult : Promise.resolve(maybeAsyncResult));
-    return handleResult(ctx, result);
+    const result2 = await (isAsync(maybeAsyncResult) ? maybeAsyncResult : Promise.resolve(maybeAsyncResult));
+    return handleResult(ctx, result2);
   }
   refine(check2, message) {
     const getIssueProperties = (val) => {
@@ -7943,13 +7943,13 @@ var ZodType = class {
       }
     };
     return this._refinement((val, ctx) => {
-      const result = check2(val);
+      const result2 = check2(val);
       const setError = () => ctx.addIssue({
         code: ZodIssueCode.custom,
         ...getIssueProperties(val)
       });
-      if (typeof Promise !== "undefined" && result instanceof Promise) {
-        return result.then((data) => {
+      if (typeof Promise !== "undefined" && result2 instanceof Promise) {
+        return result2.then((data) => {
           if (!data) {
             setError();
             return false;
@@ -7958,7 +7958,7 @@ var ZodType = class {
           }
         });
       }
-      if (!result) {
+      if (!result2) {
         setError();
         return false;
       } else {
@@ -9453,14 +9453,14 @@ var ZodArray = class _ZodArray extends ZodType {
     if (ctx.common.async) {
       return Promise.all([...ctx.data].map((item, i) => {
         return def.type._parseAsync(new ParseInputLazyPath(ctx, item, ctx.path, i));
-      })).then((result2) => {
-        return ParseStatus.mergeArray(status, result2);
+      })).then((result3) => {
+        return ParseStatus.mergeArray(status, result3);
       });
     }
-    const result = [...ctx.data].map((item, i) => {
+    const result2 = [...ctx.data].map((item, i) => {
       return def.type._parseSync(new ParseInputLazyPath(ctx, item, ctx.path, i));
     });
-    return ParseStatus.mergeArray(status, result);
+    return ParseStatus.mergeArray(status, result2);
   }
   get element() {
     return this._def.type;
@@ -9866,18 +9866,18 @@ var ZodUnion = class extends ZodType {
     const { ctx } = this._processInputParams(input2);
     const options = this._def.options;
     function handleResults(results) {
-      for (const result of results) {
-        if (result.result.status === "valid") {
-          return result.result;
+      for (const result2 of results) {
+        if (result2.result.status === "valid") {
+          return result2.result;
         }
       }
-      for (const result of results) {
-        if (result.result.status === "dirty") {
-          ctx.common.issues.push(...result.ctx.common.issues);
-          return result.result;
+      for (const result2 of results) {
+        if (result2.result.status === "dirty") {
+          ctx.common.issues.push(...result2.ctx.common.issues);
+          return result2.result;
         }
       }
-      const unionErrors = results.map((result) => new ZodError(result.ctx.common.issues));
+      const unionErrors = results.map((result2) => new ZodError(result2.ctx.common.issues));
       addIssueToContext(ctx, {
         code: ZodIssueCode.invalid_union,
         unionErrors
@@ -9915,15 +9915,15 @@ var ZodUnion = class extends ZodType {
           },
           parent: null
         };
-        const result = option._parseSync({
+        const result2 = option._parseSync({
           data: ctx.data,
           path: ctx.path,
           parent: childCtx
         });
-        if (result.status === "valid") {
-          return result;
-        } else if (result.status === "dirty" && !dirty) {
-          dirty = { result, ctx: childCtx };
+        if (result2.status === "valid") {
+          return result2;
+        } else if (result2.status === "dirty" && !dirty) {
+          dirty = { result: result2, ctx: childCtx };
         }
         if (childCtx.common.issues.length) {
           issues.push(childCtx.common.issues);
@@ -10472,9 +10472,9 @@ var ZodFunction = class _ZodFunction extends ZodType {
           error62.addIssue(makeArgsIssue(args, e));
           throw error62;
         });
-        const result = await Reflect.apply(fn, this, parsedArgs);
-        const parsedReturns = await me._def.returns._def.type.parseAsync(result, params).catch((e) => {
-          error62.addIssue(makeReturnsIssue(result, e));
+        const result2 = await Reflect.apply(fn, this, parsedArgs);
+        const parsedReturns = await me._def.returns._def.type.parseAsync(result2, params).catch((e) => {
+          error62.addIssue(makeReturnsIssue(result2, e));
           throw error62;
         });
         return parsedReturns;
@@ -10486,10 +10486,10 @@ var ZodFunction = class _ZodFunction extends ZodType {
         if (!parsedArgs.success) {
           throw new ZodError([makeArgsIssue(args, parsedArgs.error)]);
         }
-        const result = Reflect.apply(fn, this, parsedArgs.data);
-        const parsedReturns = me._def.returns.safeParse(result, params);
+        const result2 = Reflect.apply(fn, this, parsedArgs.data);
+        const parsedReturns = me._def.returns.safeParse(result2, params);
         if (!parsedReturns.success) {
-          throw new ZodError([makeReturnsIssue(result, parsedReturns.error)]);
+          throw new ZodError([makeReturnsIssue(result2, parsedReturns.error)]);
         }
         return parsedReturns.data;
       });
@@ -10741,43 +10741,43 @@ var ZodEffects = class extends ZodType {
         return Promise.resolve(processed).then(async (processed2) => {
           if (status.value === "aborted")
             return INVALID;
-          const result = await this._def.schema._parseAsync({
+          const result2 = await this._def.schema._parseAsync({
             data: processed2,
             path: ctx.path,
             parent: ctx
           });
-          if (result.status === "aborted")
+          if (result2.status === "aborted")
             return INVALID;
-          if (result.status === "dirty")
-            return DIRTY(result.value);
+          if (result2.status === "dirty")
+            return DIRTY(result2.value);
           if (status.value === "dirty")
-            return DIRTY(result.value);
-          return result;
+            return DIRTY(result2.value);
+          return result2;
         });
       } else {
         if (status.value === "aborted")
           return INVALID;
-        const result = this._def.schema._parseSync({
+        const result2 = this._def.schema._parseSync({
           data: processed,
           path: ctx.path,
           parent: ctx
         });
-        if (result.status === "aborted")
+        if (result2.status === "aborted")
           return INVALID;
-        if (result.status === "dirty")
-          return DIRTY(result.value);
+        if (result2.status === "dirty")
+          return DIRTY(result2.value);
         if (status.value === "dirty")
-          return DIRTY(result.value);
-        return result;
+          return DIRTY(result2.value);
+        return result2;
       }
     }
     if (effect.type === "refinement") {
       const executeRefinement = (acc) => {
-        const result = effect.refinement(acc, checkCtx);
+        const result2 = effect.refinement(acc, checkCtx);
         if (ctx.common.async) {
-          return Promise.resolve(result);
+          return Promise.resolve(result2);
         }
-        if (result instanceof Promise) {
+        if (result2 instanceof Promise) {
           throw new Error("Async refinement encountered during synchronous parse operation. Use .parseAsync instead.");
         }
         return acc;
@@ -10815,18 +10815,18 @@ var ZodEffects = class extends ZodType {
         });
         if (!isValid(base))
           return INVALID;
-        const result = effect.transform(base.value, checkCtx);
-        if (result instanceof Promise) {
+        const result2 = effect.transform(base.value, checkCtx);
+        if (result2 instanceof Promise) {
           throw new Error(`Asynchronous transform encountered during synchronous parse operation. Use .parseAsync instead.`);
         }
-        return { status: status.value, value: result };
+        return { status: status.value, value: result2 };
       } else {
         return this._def.schema._parseAsync({ data: ctx.data, path: ctx.path, parent: ctx }).then((base) => {
           if (!isValid(base))
             return INVALID;
-          return Promise.resolve(effect.transform(base.value, checkCtx)).then((result) => ({
+          return Promise.resolve(effect.transform(base.value, checkCtx)).then((result2) => ({
             status: status.value,
-            value: result
+            value: result2
           }));
         });
       }
@@ -10923,18 +10923,18 @@ var ZodCatch = class extends ZodType {
         issues: []
       }
     };
-    const result = this._def.innerType._parse({
+    const result2 = this._def.innerType._parse({
       data: newCtx.data,
       path: newCtx.path,
       parent: {
         ...newCtx
       }
     });
-    if (isAsync(result)) {
-      return result.then((result2) => {
+    if (isAsync(result2)) {
+      return result2.then((result3) => {
         return {
           status: "valid",
-          value: result2.status === "valid" ? result2.value : this._def.catchValue({
+          value: result3.status === "valid" ? result3.value : this._def.catchValue({
             get error() {
               return new ZodError(newCtx.common.issues);
             },
@@ -10945,7 +10945,7 @@ var ZodCatch = class extends ZodType {
     } else {
       return {
         status: "valid",
-        value: result.status === "valid" ? result.value : this._def.catchValue({
+        value: result2.status === "valid" ? result2.value : this._def.catchValue({
           get error() {
             return new ZodError(newCtx.common.issues);
           },
@@ -11058,14 +11058,14 @@ var ZodPipeline = class _ZodPipeline extends ZodType {
 };
 var ZodReadonly = class extends ZodType {
   _parse(input2) {
-    const result = this._def.innerType._parse(input2);
+    const result2 = this._def.innerType._parse(input2);
     const freeze = (data) => {
       if (isValid(data)) {
         data.value = Object.freeze(data.value);
       }
       return data;
     };
-    return isAsync(result) ? result.then((data) => freeze(data)) : freeze(result);
+    return isAsync(result2) ? result2.then((data) => freeze(data)) : freeze(result2);
   }
   unwrap() {
     return this._def.innerType;
@@ -12565,7 +12565,7 @@ function formatError(error62, mapper = (issue2) => issue2.message) {
   return fieldErrors;
 }
 function treeifyError(error62, mapper = (issue2) => issue2.message) {
-  const result = { errors: [] };
+  const result2 = { errors: [] };
   const processError = (error63, path5 = []) => {
     var _a3;
     for (const issue2 of error63.issues) {
@@ -12578,10 +12578,10 @@ function treeifyError(error62, mapper = (issue2) => issue2.message) {
       } else {
         const fullpath = [...path5, ...issue2.path];
         if (fullpath.length === 0) {
-          result.errors.push(mapper(issue2));
+          result2.errors.push(mapper(issue2));
           continue;
         }
-        let curr = result;
+        let curr = result2;
         let i = 0;
         while (i < fullpath.length) {
           const el = fullpath[i];
@@ -12611,7 +12611,7 @@ function treeifyError(error62, mapper = (issue2) => issue2.message) {
     }
   };
   processError(error62);
-  return result;
+  return result2;
 }
 function toDotPath(_path) {
   const segs = [];
@@ -12649,16 +12649,16 @@ function finalizeParams(callee, params) {
 var _parse = (_Err) => {
   const fn = (schema, value, _ctx, _params) => {
     const ctx = _ctx ? { ..._ctx, async: false } : { async: false };
-    const result = schema._zod.run({ value, issues: [] }, ctx);
-    if (result instanceof Promise) {
+    const result2 = schema._zod.run({ value, issues: [] }, ctx);
+    if (result2 instanceof Promise) {
       throw new $ZodAsyncError();
     }
-    if (result.issues.length) {
-      const e = new (_params?.Err ?? _Err)(result.issues.map((iss) => finalizeIssue(iss, ctx, config())));
+    if (result2.issues.length) {
+      const e = new (_params?.Err ?? _Err)(result2.issues.map((iss) => finalizeIssue(iss, ctx, config())));
       captureStackTrace(e, _params?.callee ?? fn);
       throw e;
     }
-    return result.value;
+    return result2.value;
   };
   return fn;
 };
@@ -12666,26 +12666,26 @@ var parse = /* @__PURE__ */ _parse($ZodRealError);
 var _parseAsync = (_Err) => {
   const fn = async (schema, value, _ctx, params) => {
     const ctx = _ctx ? { ..._ctx, async: true } : { async: true };
-    let result = schema._zod.run({ value, issues: [] }, ctx);
-    if (result instanceof Promise)
-      result = await result;
-    if (result.issues.length) {
-      const e = new (params?.Err ?? _Err)(result.issues.map((iss) => finalizeIssue(iss, ctx, config())));
+    let result2 = schema._zod.run({ value, issues: [] }, ctx);
+    if (result2 instanceof Promise)
+      result2 = await result2;
+    if (result2.issues.length) {
+      const e = new (params?.Err ?? _Err)(result2.issues.map((iss) => finalizeIssue(iss, ctx, config())));
       captureStackTrace(e, params?.callee ?? fn);
       throw e;
     }
-    return result.value;
+    return result2.value;
   };
   return fn;
 };
 var parseAsync = /* @__PURE__ */ _parseAsync($ZodRealError);
 var _safeParse = (_Err) => (schema, value, _ctx) => {
   const ctx = _ctx ? { ..._ctx, async: false } : { async: false };
-  const result = schema._zod.run({ value, issues: [] }, ctx);
-  if (result instanceof Promise) {
+  const result2 = schema._zod.run({ value, issues: [] }, ctx);
+  if (result2 instanceof Promise) {
     throw new $ZodAsyncError();
   }
-  return result.issues.length ? failure(_Err, result.issues, ctx) : { success: true, data: result.value };
+  return result2.issues.length ? failure(_Err, result2.issues, ctx) : { success: true, data: result2.value };
 };
 var safeParse = /* @__PURE__ */ _safeParse($ZodRealError);
 function failure(Err, issues, ctx) {
@@ -12709,10 +12709,10 @@ function failure(Err, issues, ctx) {
 }
 var _safeParseAsync = (_Err) => async (schema, value, _ctx) => {
   const ctx = _ctx ? { ..._ctx, async: true } : { async: true };
-  let result = schema._zod.run({ value, issues: [] }, ctx);
-  if (result instanceof Promise)
-    result = await result;
-  return result.issues.length ? failure(_Err, result.issues, ctx) : { success: true, data: result.value };
+  let result2 = schema._zod.run({ value, issues: [] }, ctx);
+  if (result2 instanceof Promise)
+    result2 = await result2;
+  return result2.issues.length ? failure(_Err, result2.issues, ctx) : { success: true, data: result2.value };
 };
 var safeParseAsync = /* @__PURE__ */ _safeParseAsync($ZodRealError);
 var COMPILE_INVALID = /* @__PURE__ */ Symbol.for("zod.compile.invalid");
@@ -12730,24 +12730,24 @@ var validate = ((schema, value, _ctx) => {
 function validateFallback(schema, value, _ctx) {
   const ctx = _ctx ? { ..._ctx, async: false, abortEarly: true } : { async: false, abortEarly: true };
   const fallbackRun = schema._zod.bag.fallbackRun;
-  let result;
+  let result2;
   if (fallbackRun) {
     ctx[COMPILE_FALLBACK] = true;
-    result = fallbackRun({ value, issues: [] }, ctx);
+    result2 = fallbackRun({ value, issues: [] }, ctx);
   } else {
-    result = schema._zod.run({ value, issues: [] }, ctx);
+    result2 = schema._zod.run({ value, issues: [] }, ctx);
   }
-  if (result instanceof Promise) {
+  if (result2 instanceof Promise) {
     throw new $ZodAsyncError();
   }
-  return result.issues.length === 0;
+  return result2.issues.length === 0;
 }
 var validateAsync = async (schema, value, _ctx) => {
   const ctx = _ctx ? { ..._ctx, async: true, abortEarly: true } : { async: true, abortEarly: true };
-  let result = schema._zod.run({ value, issues: [] }, ctx);
-  if (result instanceof Promise)
-    result = await result;
-  return result.issues.length === 0;
+  let result2 = schema._zod.run({ value, issues: [] }, ctx);
+  if (result2 instanceof Promise)
+    result2 = await result2;
+  return result2.issues.length === 0;
 };
 var _encode = (_Err) => {
   const parse3 = _parse(_Err);
@@ -13381,22 +13381,22 @@ var $ZodCheckEndsWith = /* @__PURE__ */ $constructor("$ZodCheckEndsWith", (inst,
     });
   };
 });
-function handleCheckPropertyResult(result, payload, property) {
-  if (result.issues.length) {
-    payload.issues.push(...prefixIssues(property, result.issues));
+function handleCheckPropertyResult(result2, payload, property) {
+  if (result2.issues.length) {
+    payload.issues.push(...prefixIssues(property, result2.issues));
   }
 }
 var $ZodCheckProperty = /* @__PURE__ */ $constructor("$ZodCheckProperty", (inst, def) => {
   $ZodCheck.init(inst, def);
   inst._zod.check = (payload) => {
-    const result = def.schema._zod.run({
+    const result2 = def.schema._zod.run({
       value: payload.value[def.property],
       issues: []
     }, {});
-    if (result instanceof Promise) {
-      return result.then((result2) => handleCheckPropertyResult(result2, payload, def.property));
+    if (result2 instanceof Promise) {
+      return result2.then((result3) => handleCheckPropertyResult(result3, payload, def.property));
     }
-    handleCheckPropertyResult(result, payload, def.property);
+    handleCheckPropertyResult(result2, payload, def.property);
     return;
   };
 });
@@ -13415,12 +13415,12 @@ var $ZodCheckProperties = /* @__PURE__ */ $constructor("$ZodCheckProperties", (i
     const input2 = payload.value;
     let proms;
     for (const [key, schema] of entries) {
-      const result = schema._zod.run({ value: input2[key], issues: [] }, {});
-      if (result instanceof Promise) {
+      const result2 = schema._zod.run({ value: input2[key], issues: [] }, {});
+      if (result2 instanceof Promise) {
         proms ?? (proms = []);
-        proms.push(result.then((result2) => handleCheckPropertyResult(result2, payload, key)));
+        proms.push(result2.then((result3) => handleCheckPropertyResult(result3, payload, key)));
       } else {
-        handleCheckPropertyResult(result, payload, key);
+        handleCheckPropertyResult(result2, payload, key);
       }
     }
     if (proms)
@@ -13590,13 +13590,13 @@ var $ZodType = /* @__PURE__ */ $constructor("$ZodType", (inst, def) => {
         }
         return handleCanaryResult(canary, payload, ctx);
       }
-      const result = inst._zod.parse(payload, ctx);
-      if (result instanceof Promise) {
+      const result2 = inst._zod.parse(payload, ctx);
+      if (result2 instanceof Promise) {
         if (ctx.async === false)
           throw new $ZodAsyncError();
-        return result.then((result2) => runChecks(result2, checks, ctx));
+        return result2.then((result3) => runChecks(result3, checks, ctx));
       }
-      return runChecks(result, checks, ctx);
+      return runChecks(result2, checks, ctx);
     };
   }
 }, {
@@ -13961,13 +13961,13 @@ var CC_SANITIZE = /[- ]/g;
 function isLuhnAlgo(digits) {
   let length = digits.length;
   let bit = 1;
-  let sum = 0;
+  let sum2 = 0;
   while (length) {
     const value = digits.charCodeAt(--length) - 48;
     bit ^= 1;
-    sum += bit ? [0, 2, 4, 6, 8, 1, 3, 5, 7, 9][value] : value;
+    sum2 += bit ? [0, 2, 4, 6, 8, 1, 3, 5, 7, 9][value] : value;
   }
-  return sum % 10 === 0;
+  return sum2 % 10 === 0;
 }
 function isValidCreditCard(input2) {
   if (!creditCard.test(input2))
@@ -14276,11 +14276,11 @@ function capSize(inst, size) {
 var arraySize = (input2) => Array.isArray(input2) ? input2.length : -1;
 var mapSize = (input2) => input2 instanceof Map ? input2.size : -1;
 var setSize = (input2) => input2 instanceof Set ? input2.size : -1;
-function handleArrayResult(result, final, index) {
-  if (result.issues.length) {
-    final.issues.push(...prefixIssues(index, result.issues));
+function handleArrayResult(result2, final, index) {
+  if (result2.issues.length) {
+    final.issues.push(...prefixIssues(index, result2.issues));
   }
-  final.value[index] = result.value;
+  final.value[index] = result2.value;
 }
 var $ZodArray = /* @__PURE__ */ $constructor("$ZodArray", (inst, def) => {
   $ZodType.init(inst, def);
@@ -14302,15 +14302,15 @@ var $ZodArray = /* @__PURE__ */ $constructor("$ZodArray", (inst, def) => {
     const abortEarly = ctx?.abortEarly;
     for (let i = 0; i < input2.length; i++) {
       const item = input2[i];
-      const result = def.element._zod.run({
+      const result2 = def.element._zod.run({
         value: item,
         issues: []
       }, ctx);
-      if (result instanceof Promise) {
-        proms.push(result.then((result2) => handleArrayResult(result2, payload, i)));
+      if (result2 instanceof Promise) {
+        proms.push(result2.then((result3) => handleArrayResult(result3, payload, i)));
       } else {
-        handleArrayResult(result, payload, i);
-        if (abortEarly && result.issues.length !== 0 && aborted(result))
+        handleArrayResult(result2, payload, i);
+        if (abortEarly && result2.issues.length !== 0 && aborted(result2))
           break;
       }
     }
@@ -14321,20 +14321,20 @@ var $ZodArray = /* @__PURE__ */ $constructor("$ZodArray", (inst, def) => {
   };
   capSize(inst, arraySize);
 });
-function handlePropertyResult(result, final, key, input2, optin, optout) {
+function handlePropertyResult(result2, final, key, input2, optin, optout) {
   const isPresent = key in input2;
   const isOptionalOut = optout === "optional";
   if (!isPresent && isOptionalOut && optin === "optional") {
     return;
   }
-  if (result.issues.length) {
+  if (result2.issues.length) {
     if (optin !== void 0 && isOptionalOut && !isPresent) {
       return;
     }
-    final.issues.push(...prefixIssues(key, result.issues));
+    final.issues.push(...prefixIssues(key, result2.issues));
   }
   if (!isPresent && optin === void 0) {
-    if (!result.issues.length) {
+    if (!result2.issues.length) {
       final.issues.push({
         code: "invalid_type",
         expected: "nonoptional",
@@ -14344,12 +14344,12 @@ function handlePropertyResult(result, final, key, input2, optin, optout) {
     }
     return;
   }
-  if (result.value === void 0) {
+  if (result2.value === void 0) {
     if (isPresent || optin === "defaulted" && !isOptionalOut) {
       final.value[key] = void 0;
     }
   } else {
-    final.value[key] = result.value;
+    final.value[key] = result2.value;
   }
 }
 var NO_SYMBOL_KEYS = [];
@@ -14628,9 +14628,9 @@ var $ZodObjectJIT = /* @__PURE__ */ $constructor("$ZodObjectJIT", (inst, def) =>
   };
 });
 function handleUnionResults(results, final, inst, ctx) {
-  for (const result of results) {
-    if (result.issues.length === 0) {
-      final.value = result.value;
+  for (const result2 of results) {
+    if (result2.issues.length === 0) {
+      final.value = result2.value;
       return final;
     }
   }
@@ -14643,7 +14643,7 @@ function handleUnionResults(results, final, inst, ctx) {
     code: "invalid_union",
     input: final.value,
     inst,
-    errors: results.map((result) => result.issues.map((iss) => finalizeIssue(iss, ctx, config())))
+    errors: results.map((result2) => result2.issues.map((iss) => finalizeIssue(iss, ctx, config())))
   });
   return final;
 }
@@ -14672,17 +14672,17 @@ var $ZodUnion = /* @__PURE__ */ $constructor("$ZodUnion", (inst, def) => {
     let async = false;
     const results = [];
     for (const option of def.options) {
-      const result = option._zod.run({
+      const result2 = option._zod.run({
         value: payload.value,
         issues: []
       }, ctx);
-      if (result instanceof Promise) {
-        results.push(result);
+      if (result2 instanceof Promise) {
+        results.push(result2);
         async = true;
       } else {
-        if (result.issues.length === 0)
-          return result;
-        results.push(result);
+        if (result2.issues.length === 0)
+          return result2;
+        results.push(result2);
       }
     }
     if (!async)
@@ -14707,7 +14707,7 @@ function handleExclusiveUnionResults(results, final, inst, ctx) {
       code: "invalid_union",
       input: final.value,
       inst,
-      errors: results.map((result) => result.issues.map((iss) => finalizeIssue(iss, ctx, config())))
+      errors: results.map((result2) => result2.issues.map((iss) => finalizeIssue(iss, ctx, config())))
     });
   } else {
     final.issues.push({
@@ -14732,15 +14732,15 @@ var $ZodXor = /* @__PURE__ */ $constructor("$ZodXor", (inst, def) => {
     let async = false;
     const results = [];
     for (const option of def.options) {
-      const result = option._zod.run({
+      const result2 = option._zod.run({
         value: payload.value,
         issues: []
       }, ctx);
-      if (result instanceof Promise) {
-        results.push(result);
+      if (result2 instanceof Promise) {
+        results.push(result2);
         async = true;
       } else {
-        results.push(result);
+        results.push(result2);
       }
     }
     if (!async)
@@ -14908,7 +14908,7 @@ function mergeValues2(a, b) {
   }
   return { valid: false, mergeErrorPath: [] };
 }
-function handleIntersectionResults(result, left, right) {
+function handleIntersectionResults(result2, left, right) {
   const unrecKeys = /* @__PURE__ */ new Map();
   let unrecIssue;
   const keyIssues = /* @__PURE__ */ new Map();
@@ -14934,30 +14934,30 @@ function handleIntersectionResults(result, left, right) {
   };
   for (const iss of left.issues) {
     if (!collect(iss, "l"))
-      result.issues.push(iss);
+      result2.issues.push(iss);
   }
   for (const iss of right.issues) {
     if (!collect(iss, "r"))
-      result.issues.push(iss);
+      result2.issues.push(iss);
   }
   const bothKeys = [...unrecKeys].filter(([, f]) => f.l && f.r).map(([k]) => k);
   if (bothKeys.length) {
     const aggregated = unrecIssue ? bothKeys.filter((k) => unrecIssue.keys.includes(k)) : [];
     if (aggregated.length)
-      result.issues.push({ ...unrecIssue, keys: aggregated });
+      result2.issues.push({ ...unrecIssue, keys: aggregated });
     for (const k of bothKeys) {
       if (!aggregated.includes(k) && keyIssues.has(k))
-        result.issues.push(keyIssues.get(k));
+        result2.issues.push(keyIssues.get(k));
     }
   }
   const merged = mergeValues2(left.value, right.value);
   if (!merged.valid) {
-    if (aborted(result))
-      return result;
+    if (aborted(result2))
+      return result2;
     throw new Error(`Unmergable intersection. Error path: ${JSON.stringify(merged.mergeErrorPath)}`);
   }
-  result.value = merged.data;
-  return result;
+  result2.value = merged.data;
+  return result2;
 }
 var $ZodTuple = /* @__PURE__ */ $constructor("$ZodTuple", (inst, def) => {
   $ZodType.init(inst, def);
@@ -15028,11 +15028,11 @@ var $ZodTuple = /* @__PURE__ */ $constructor("$ZodTuple", (inst, def) => {
           seen = payload.issues.length;
         }
         i++;
-        const result = def.rest._zod.run({ value: el, issues: [] }, ctx);
-        if (result instanceof Promise) {
-          proms.push(result.then((r) => handleTupleResult(r, payload, i)));
+        const result2 = def.rest._zod.run({ value: el, issues: [] }, ctx);
+        if (result2 instanceof Promise) {
+          proms.push(result2.then((r) => handleTupleResult(r, payload, i)));
         } else {
-          handleTupleResult(result, payload, i);
+          handleTupleResult(result2, payload, i);
         }
       }
     }
@@ -15050,11 +15050,11 @@ function getTupleOptStart(items, key) {
   }
   return 0;
 }
-function handleTupleResult(result, final, index) {
-  if (result.issues.length) {
-    final.issues.push(...prefixIssues(index, result.issues));
+function handleTupleResult(result2, final, index) {
+  if (result2.issues.length) {
+    final.issues.push(...prefixIssues(index, result2.issues));
   }
-  final.value[index] = result.value;
+  final.value[index] = result2.value;
 }
 function handleTupleResults(itemResults, final, items, input2, optoutStart) {
   for (let i = 0; i < items.length; i++) {
@@ -15125,19 +15125,19 @@ var $ZodRecord = /* @__PURE__ */ $constructor("$ZodRecord", (inst, def) => {
           const outKey = keyResult.value;
           if (outKey === "__proto__")
             continue;
-          const result = def.valueType._zod.run({ value: input2[key], issues: [] }, ctx);
-          if (result instanceof Promise) {
-            proms.push(result.then((result2) => {
-              if (result2.issues.length) {
-                payload.issues.push(...prefixIssues(key, result2.issues));
+          const result2 = def.valueType._zod.run({ value: input2[key], issues: [] }, ctx);
+          if (result2 instanceof Promise) {
+            proms.push(result2.then((result3) => {
+              if (result3.issues.length) {
+                payload.issues.push(...prefixIssues(key, result3.issues));
               }
-              payload.value[outKey] = result2.value;
+              payload.value[outKey] = result3.value;
             }));
           } else {
-            if (result.issues.length) {
-              payload.issues.push(...prefixIssues(key, result.issues));
+            if (result2.issues.length) {
+              payload.issues.push(...prefixIssues(key, result2.issues));
             }
-            payload.value[outKey] = result.value;
+            payload.value[outKey] = result2.value;
           }
         }
       }
@@ -15206,19 +15206,19 @@ var $ZodRecord = /* @__PURE__ */ $constructor("$ZodRecord", (inst, def) => {
         const outKey = keyResult.value;
         if (outKey === "__proto__")
           continue;
-        const result = def.valueType._zod.run({ value: input2[key], issues: [] }, ctx);
-        if (result instanceof Promise) {
-          proms.push(result.then((result2) => {
-            if (result2.issues.length) {
-              payload.issues.push(...prefixIssues(key, result2.issues));
+        const result2 = def.valueType._zod.run({ value: input2[key], issues: [] }, ctx);
+        if (result2 instanceof Promise) {
+          proms.push(result2.then((result3) => {
+            if (result3.issues.length) {
+              payload.issues.push(...prefixIssues(key, result3.issues));
             }
-            payload.value[outKey] = result2.value;
+            payload.value[outKey] = result3.value;
           }));
         } else {
-          if (result.issues.length) {
-            payload.issues.push(...prefixIssues(key, result.issues));
+          if (result2.issues.length) {
+            payload.issues.push(...prefixIssues(key, result2.issues));
           }
-          payload.value[outKey] = result.value;
+          payload.value[outKey] = result2.value;
         }
       }
       if (unrecognized && unrecognized.length > 0) {
@@ -15333,11 +15333,11 @@ var $ZodSet = /* @__PURE__ */ $constructor("$ZodSet", (inst, def) => {
           break;
         seen = payload.issues.length;
       }
-      const result = def.valueType._zod.run({ value: item, issues: [] }, ctx);
-      if (result instanceof Promise) {
-        proms.push(result.then((result2) => handleSetResult(result2, payload)));
+      const result2 = def.valueType._zod.run({ value: item, issues: [] }, ctx);
+      if (result2 instanceof Promise) {
+        proms.push(result2.then((result3) => handleSetResult(result3, payload)));
       } else
-        handleSetResult(result, payload);
+        handleSetResult(result2, payload);
     }
     if (proms.length)
       return Promise.all(proms).then(() => payload);
@@ -15345,11 +15345,11 @@ var $ZodSet = /* @__PURE__ */ $constructor("$ZodSet", (inst, def) => {
   };
   capSize(inst, setSize);
 });
-function handleSetResult(result, final) {
-  if (result.issues.length) {
-    final.issues.push(...result.issues);
+function handleSetResult(result2, final) {
+  if (result2.issues.length) {
+    final.issues.push(...result2.issues);
   }
-  final.value.add(result.value);
+  final.value.add(result2.value);
 }
 var $ZodEnum = /* @__PURE__ */ $constructor("$ZodEnum", (inst, def) => {
   $ZodType.init(inst, def);
@@ -15434,8 +15434,8 @@ var $ZodTransform = /* @__PURE__ */ $constructor("$ZodTransform", (inst, def) =>
     return payload;
   };
 });
-function handleOptionalResult(payload, result) {
-  payload.value = result.issues.length ? void 0 : result.value;
+function handleOptionalResult(payload, result2) {
+  payload.value = result2.issues.length ? void 0 : result2.value;
   return payload;
 }
 var $ZodOptional = /* @__PURE__ */ $constructor("$ZodOptional", (inst, def) => {
@@ -15454,10 +15454,10 @@ var $ZodOptional = /* @__PURE__ */ $constructor("$ZodOptional", (inst, def) => {
     if (payload.value === void 0) {
       if (def.innerType._zod.optin !== "defaulted")
         return payload;
-      const result = def.innerType._zod.run({ value: payload.value, issues: [] }, ctx);
-      if (result instanceof Promise)
-        return result.then((result2) => handleOptionalResult(payload, result2));
-      return handleOptionalResult(payload, result);
+      const result2 = def.innerType._zod.run({ value: payload.value, issues: [] }, ctx);
+      if (result2 instanceof Promise)
+        return result2.then((result3) => handleOptionalResult(payload, result3));
+      return handleOptionalResult(payload, result2);
     }
     return def.innerType._zod.run(payload, ctx);
   };
@@ -15499,11 +15499,11 @@ var $ZodDefault = /* @__PURE__ */ $constructor("$ZodDefault", (inst, def) => {
       payload.value = def.defaultValue;
       return payload;
     }
-    const result = def.innerType._zod.run(payload, ctx);
-    if (result instanceof Promise) {
-      return result.then((result2) => handleDefaultResult(result2, def));
+    const result2 = def.innerType._zod.run(payload, ctx);
+    if (result2 instanceof Promise) {
+      return result2.then((result3) => handleDefaultResult(result3, def));
     }
-    return handleDefaultResult(result, def);
+    return handleDefaultResult(result2, def);
   };
 });
 function handleDefaultResult(payload, def) {
@@ -15533,11 +15533,11 @@ var $ZodNonOptional = /* @__PURE__ */ $constructor("$ZodNonOptional", (inst, def
     return v ? new Set([...v].filter((x) => x !== void 0)) : void 0;
   });
   inst._zod.parse = (payload, ctx) => {
-    const result = def.innerType._zod.run(payload, ctx);
-    if (result instanceof Promise) {
-      return result.then((result2) => handleNonOptionalResult(result2, inst));
+    const result2 = def.innerType._zod.run(payload, ctx);
+    if (result2 instanceof Promise) {
+      return result2.then((result3) => handleNonOptionalResult(result3, inst));
     }
-    return handleNonOptionalResult(result, inst);
+    return handleNonOptionalResult(result2, inst);
   };
 });
 function handleNonOptionalResult(payload, inst) {
@@ -15557,29 +15557,29 @@ var $ZodSuccess = /* @__PURE__ */ $constructor("$ZodSuccess", (inst, def) => {
     if (ctx.direction === "backward") {
       throw new $ZodEncodeError("ZodSuccess");
     }
-    const result = def.innerType._zod.run(payload, ctx);
-    if (result instanceof Promise) {
-      return result.then((result2) => {
-        payload.value = result2.issues.length === 0;
+    const result2 = def.innerType._zod.run(payload, ctx);
+    if (result2 instanceof Promise) {
+      return result2.then((result3) => {
+        payload.value = result3.issues.length === 0;
         return payload;
       });
     }
-    payload.value = result.issues.length === 0;
+    payload.value = result2.issues.length === 0;
     return payload;
   };
 });
-function handleCatchResult(payload, result, def, ctx) {
-  if (!result.issues.length) {
-    payload.value = result.value;
-    if (result.memo)
+function handleCatchResult(payload, result2, def, ctx) {
+  if (!result2.issues.length) {
+    payload.value = result2.value;
+    if (result2.memo)
       payload.memo = true;
     return payload;
   }
   payload.value = def.catchValue({
-    ...result,
+    ...result2,
     value: payload.value,
     error: {
-      issues: result.issues.map((iss) => finalizeIssue(iss, ctx, config()))
+      issues: result2.issues.map((iss) => finalizeIssue(iss, ctx, config()))
     },
     input: payload.value
   });
@@ -15594,11 +15594,11 @@ var $ZodCatch = /* @__PURE__ */ $constructor("$ZodCatch", (inst, def) => {
     if (ctx.direction === "backward") {
       return def.innerType._zod.run(payload, ctx);
     }
-    const result = def.innerType._zod.run({ value: payload.value, issues: [] }, ctx);
-    if (result instanceof Promise) {
-      return result.then((result2) => handleCatchResult(payload, result2, def, ctx));
+    const result2 = def.innerType._zod.run({ value: payload.value, issues: [] }, ctx);
+    if (result2 instanceof Promise) {
+      return result2.then((result3) => handleCatchResult(payload, result3, def, ctx));
     }
-    return handleCatchResult(payload, result, def, ctx);
+    return handleCatchResult(payload, result2, def, ctx);
   };
 });
 var $ZodNaN = /* @__PURE__ */ $constructor("$ZodNaN", (inst, def) => {
@@ -15667,24 +15667,24 @@ var $ZodCodec = /* @__PURE__ */ $constructor("$ZodCodec", (inst, def) => {
     }
   };
 });
-function handleCodecAResult(result, def, ctx) {
-  if (result.issues.length) {
-    result.aborted = true;
-    return result;
+function handleCodecAResult(result2, def, ctx) {
+  if (result2.issues.length) {
+    result2.aborted = true;
+    return result2;
   }
   const direction = ctx.direction || "forward";
   if (direction === "forward") {
-    const transformed = def.transform(result.value, result);
+    const transformed = def.transform(result2.value, result2);
     if (transformed instanceof Promise) {
-      return transformed.then((value) => handleCodecTxResult(result, value, def.out, ctx));
+      return transformed.then((value) => handleCodecTxResult(result2, value, def.out, ctx));
     }
-    return handleCodecTxResult(result, transformed, def.out, ctx);
+    return handleCodecTxResult(result2, transformed, def.out, ctx);
   } else {
-    const transformed = def.reverseTransform(result.value, result);
+    const transformed = def.reverseTransform(result2.value, result2);
     if (transformed instanceof Promise) {
-      return transformed.then((value) => handleCodecTxResult(result, value, def.in, ctx));
+      return transformed.then((value) => handleCodecTxResult(result2, value, def.in, ctx));
     }
-    return handleCodecTxResult(result, transformed, def.in, ctx);
+    return handleCodecTxResult(result2, transformed, def.in, ctx);
   }
 }
 function handleCodecTxResult(left, value, nextSchema, ctx) {
@@ -15707,11 +15707,11 @@ var $ZodReadonly = /* @__PURE__ */ $constructor("$ZodReadonly", (inst, def) => {
     if (ctx.direction === "backward") {
       return def.innerType._zod.run(payload, ctx);
     }
-    const result = def.innerType._zod.run(payload, ctx);
-    if (result instanceof Promise) {
-      return result.then(handleReadonlyResult);
+    const result2 = def.innerType._zod.run(payload, ctx);
+    if (result2 instanceof Promise) {
+      return result2.then(handleReadonlyResult);
     }
-    return handleReadonlyResult(result);
+    return handleReadonlyResult(result2);
   };
 });
 function handleReadonlyResult(payload) {
@@ -15816,11 +15816,11 @@ var $ZodFunction = /* @__PURE__ */ $constructor("$ZodFunction", (inst, def) => {
     }
     return Object.defineProperty(function(...args) {
       const parsedArgs = inst._def.input ? parse(inst._def.input, args) : args;
-      const result = Reflect.apply(func, this, parsedArgs);
+      const result2 = Reflect.apply(func, this, parsedArgs);
       if (inst._def.output) {
-        return parse(inst._def.output, result);
+        return parse(inst._def.output, result2);
       }
-      return result;
+      return result2;
     }, "_zod", { value: inst._zod, enumerable: false });
   };
   inst.implementAsync = (func) => {
@@ -15829,11 +15829,11 @@ var $ZodFunction = /* @__PURE__ */ $constructor("$ZodFunction", (inst, def) => {
     }
     return Object.defineProperty(async function(...args) {
       const parsedArgs = inst._def.input ? await parseAsync(inst._def.input, args) : args;
-      const result = await Reflect.apply(func, this, parsedArgs);
+      const result2 = await Reflect.apply(func, this, parsedArgs);
       if (inst._def.output) {
-        return await parseAsync(inst._def.output, result);
+        return await parseAsync(inst._def.output, result2);
       }
-      return result;
+      return result2;
     }, "_zod", { value: inst._zod, enumerable: false });
   };
   inst._zod.parse = (payload, _ctx) => {
@@ -15922,8 +15922,8 @@ var $ZodCustom = /* @__PURE__ */ $constructor("$ZodCustom", (inst, def) => {
     return;
   };
 });
-function handleRefineResult(result, payload, input2, inst) {
-  if (!result) {
+function handleRefineResult(result2, payload, input2, inst) {
+  if (!result2) {
     const _iss = {
       code: "custom",
       input: input2,
@@ -15966,12 +15966,12 @@ function isRecursive(inst, stack, resolve) {
   if (stack.has(inst))
     return PROVEN;
   stack.add(inst);
-  let result = NONE;
+  let result2 = NONE;
   const check2 = (child) => {
-    if (result !== PROVEN && child?._zod) {
+    if (result2 !== PROVEN && child?._zod) {
       const answer = isRecursive(child, stack, resolve);
-      if (answer > result)
-        result = answer;
+      if (answer > result2)
+        result2 = answer;
     }
   };
   const shape = (sh, spread) => {
@@ -15987,8 +15987,8 @@ function isRecursive(inst, stack, resolve) {
     return answer;
   };
   const merge2 = (answer) => {
-    if (answer > result)
-      result = answer;
+    if (answer > result2)
+      result2 = answer;
   };
   const def = inst._zod.def;
   const kind = def.type;
@@ -16089,7 +16089,7 @@ function isRecursive(inst, stack, resolve) {
     }
   }
   stack.delete(inst);
-  return settle(inst, result);
+  return settle(inst, result2);
 }
 function settle(inst, answer) {
   if (answer !== ASSUMED)
@@ -16189,19 +16189,19 @@ var memo = {
         }
         handoff = bucket;
         const depth = open.length;
-        const result = base(payload, ctx);
+        const result2 = base(payload, ctx);
         handoff = void 0;
         const entry = open.length > depth ? open.pop() : void 0;
-        if (result instanceof Promise) {
-          return result.then((r) => {
+        if (result2 instanceof Promise) {
+          return result2.then((r) => {
             if (entry)
               entry.issues = r.issues.length ? cloneIssues(r.issues) : NO_ISSUES;
             return r;
           });
         }
         if (entry)
-          entry.issues = result.issues.length ? cloneIssues(result.issues) : NO_ISSUES;
-        return result;
+          entry.issues = result2.issues.length ? cloneIssues(result2.issues) : NO_ISSUES;
+        return result2;
       };
       inst._zod.parse = wrapped;
       if (inst._zod.run === base)
@@ -20327,12 +20327,12 @@ var error33 = () => {
     }
   };
   function getSizing(origin, unitType, inclusive, targetShouldBe) {
-    const result = Sizable[origin] ?? null;
-    if (result === null)
-      return result;
+    const result2 = Sizable[origin] ?? null;
+    if (result2 === null)
+      return result2;
     return {
-      unit: result.unit[unitType],
-      verb: result.verb[targetShouldBe][inclusive ? "inclusive" : "notInclusive"]
+      unit: result2.unit[unitType],
+      verb: result2.verb[targetShouldBe][inclusive ? "inclusive" : "notInclusive"]
     };
   }
   const FormatDictionary = {
@@ -21603,8 +21603,8 @@ var error43 = () => {
       case "not_multiple_of":
         return `N\xFAmero inv\xE1lido: deve ser m\xFAltiplo de ${issue2.divisor}`;
       case "unrecognized_keys": {
-        const plural2 = issue2.keys.length > 1 ? "s" : "";
-        return `Chave${plural2} inv\xE1lida${plural2}: ${joinValues(issue2.keys, ", ")}`;
+        const plural3 = issue2.keys.length > 1 ? "s" : "";
+        return `Chave${plural3} inv\xE1lida${plural3}: ${joinValues(issue2.keys, ", ")}`;
       }
       case "invalid_key":
         return `Entrada inv\xE1lida n${translateOriginWithArticle(issue2.origin, "definite")}`;
@@ -21748,8 +21748,8 @@ var error44 = () => {
       case "not_multiple_of":
         return `N\xFAmero inv\xE1lido: deve ser m\xFAltiplo de ${issue2.divisor}`;
       case "unrecognized_keys": {
-        const plural2 = issue2.keys.length > 1 ? "s" : "";
-        return `Chave${plural2} inv\xE1lida${plural2}: ${joinValues(issue2.keys, ", ")}`;
+        const plural3 = issue2.keys.length > 1 ? "s" : "";
+        return `Chave${plural3} inv\xE1lida${plural3}: ${joinValues(issue2.keys, ", ")}`;
       }
       case "invalid_key":
         return `Entrada inv\xE1lida n${translateOriginWithArticle(issue2.origin, "definite")}`;
@@ -23981,10 +23981,10 @@ function newVar(ctx) {
   return `v${ctx.varCounter++}`;
 }
 function runtimeRun(schema, value) {
-  const result = schema._zod.run({ value, issues: [] }, {});
-  if (result && typeof result.then === "function")
+  const result2 = schema._zod.run({ value, issues: [] }, {});
+  if (result2 && typeof result2.then === "function")
     return INVALID2;
-  const r = result;
+  const r = result2;
   return r.issues.length === 0 ? r.value : INVALID2;
 }
 function compileChild(doc, ctx, schema, accessor, needsValue = true) {
@@ -24256,8 +24256,8 @@ function generateCustomRefineCheck(doc, ctx, check2, accessor) {
     const checkFn = check2._zod.check;
     const helperFn = (value) => {
       const fakePayload = { value, issues: [], addIssue: pushIssue };
-      const result = checkFn(fakePayload);
-      if (result instanceof Promise)
+      const result2 = checkFn(fakePayload);
+      if (result2 instanceof Promise)
         throwAsync();
       return fakePayload.issues.length === 0 ? fakePayload.value : INVALID2;
     };
@@ -25355,10 +25355,10 @@ function generatePipeCheck(doc, ctx, schema, accessor) {
     const transformFn = def.transform;
     const helperFn = (value) => {
       const fakePayload = { value, issues: [], addIssue: pushIssue };
-      const result = transformFn(value, fakePayload);
-      if (result instanceof Promise)
+      const result2 = transformFn(value, fakePayload);
+      if (result2 instanceof Promise)
         return INVALID2;
-      return fakePayload.issues.length === 0 ? result : INVALID2;
+      return fakePayload.issues.length === 0 ? result2 : INVALID2;
     };
     const helperConst = addUserConstant(ctx, helperFn);
     const transformedVar = newVar(ctx);
@@ -25390,10 +25390,10 @@ function generateCustomCheck(doc, ctx, schema, accessor) {
   return accessor;
 }
 function runtimeCatch(innerSchema, catchValue, value) {
-  const result = innerSchema._zod.run({ value, issues: [] }, {});
-  if (result && typeof result.then === "function")
+  const result2 = innerSchema._zod.run({ value, issues: [] }, {});
+  if (result2 && typeof result2.then === "function")
     return INVALID2;
-  const r = result;
+  const r = result2;
   if (r.issues.length === 0)
     return r.value;
   return catchValue();
@@ -25430,10 +25430,10 @@ function generateTransformCheck(doc, ctx, schema, accessor) {
     const transformFn = def.transform;
     const helperFn = (value) => {
       const fakePayload = { value, issues: [], addIssue: pushIssue };
-      const result = transformFn(value, fakePayload);
-      if (result instanceof Promise)
+      const result2 = transformFn(value, fakePayload);
+      if (result2 instanceof Promise)
         return INVALID2;
-      return fakePayload.issues.length === 0 ? result : INVALID2;
+      return fakePayload.issues.length === 0 ? result2 : INVALID2;
     };
     const helperConst = addUserConstant(ctx, helperFn);
     const outputVar = newVar(ctx);
@@ -26540,12 +26540,12 @@ function initializeContext(params) {
   };
 }
 function handleUnrepresentable(schema, ctx, json2, params, message) {
-  const result = typeof ctx.unrepresentable === "function" ? ctx.unrepresentable({ zodSchema: schema, path: params.path, message }) : ctx.unrepresentable;
-  if (result === "any")
+  const result2 = typeof ctx.unrepresentable === "function" ? ctx.unrepresentable({ zodSchema: schema, path: params.path, message }) : ctx.unrepresentable;
+  if (result2 === "any")
     return false;
-  if (result === void 0 || result === "throw")
+  if (result2 === void 0 || result2 === "throw")
     throw new Error(message);
-  Object.assign(json2, result);
+  Object.assign(json2, result2);
   return true;
 }
 function processSchema(schema, ctx, _params = { path: [], schemaPath: [] }) {
@@ -26560,13 +26560,13 @@ function processSchema(schema, ctx, _params = { path: [], schemaPath: [] }) {
     }
     return seen.schema;
   }
-  const result = { schema: {}, count: 1, cycle: void 0, path: _params.path };
-  ctx.seen.set(schema, result);
+  const result2 = { schema: {}, count: 1, cycle: void 0, path: _params.path };
+  ctx.seen.set(schema, result2);
   ctx.sharedDefsExtractedFor = void 0;
   ctx.sharedEmitDoneFor = void 0;
   const overrideSchema = schema._zod.toJSONSchema?.();
   if (overrideSchema) {
-    result.schema = overrideSchema;
+    result2.schema = overrideSchema;
   } else {
     const params = {
       ..._params,
@@ -26574,9 +26574,9 @@ function processSchema(schema, ctx, _params = { path: [], schemaPath: [] }) {
       path: _params.path
     };
     if (schema._zod.processJSONSchema) {
-      schema._zod.processJSONSchema(ctx, result.schema, params);
+      schema._zod.processJSONSchema(ctx, result2.schema, params);
     } else {
-      const _json = result.schema;
+      const _json = result2.schema;
       const processor = ctx.processors[def.type];
       if (!processor) {
         throw new Error(`[toJSONSchema]: Non-representable type encountered: ${def.type}`);
@@ -26585,22 +26585,22 @@ function processSchema(schema, ctx, _params = { path: [], schemaPath: [] }) {
     }
     const parent = schema._zod.parent;
     if (parent) {
-      if (!result.ref)
-        result.ref = parent;
+      if (!result2.ref)
+        result2.ref = parent;
       processSchema(parent, ctx, params);
       ctx.seen.get(parent).isParent = true;
     }
   }
   const meta3 = ctx.metadataRegistry.get(schema);
   if (meta3)
-    assignProps(result.schema, meta3);
+    assignProps(result2.schema, meta3);
   if (ctx.io === "input" && isTransforming(schema)) {
-    delete result.schema.examples;
-    delete result.schema.default;
+    delete result2.schema.examples;
+    delete result2.schema.default;
   }
-  if (ctx.io === "input" && "_prefault" in result.schema)
-    (_a3 = result.schema).default ?? (_a3.default = result.schema._prefault);
-  delete result.schema._prefault;
+  if (ctx.io === "input" && "_prefault" in result2.schema)
+    (_a3 = result2.schema).default ?? (_a3.default = result2.schema._prefault);
+  delete result2.schema._prefault;
   const _result = ctx.seen.get(schema);
   return _result.schema;
 }
@@ -26905,13 +26905,13 @@ function finalize(ctx, schema) {
       }
     }
   }
-  const result = {};
+  const result2 = {};
   if (ctx.target === "draft-2020-12") {
-    result.$schema = "https://json-schema.org/draft/2020-12/schema";
+    result2.$schema = "https://json-schema.org/draft/2020-12/schema";
   } else if (ctx.target === "draft-07") {
-    result.$schema = "http://json-schema.org/draft-07/schema#";
+    result2.$schema = "http://json-schema.org/draft-07/schema#";
   } else if (ctx.target === "draft-04") {
-    result.$schema = "http://json-schema.org/draft-04/schema#";
+    result2.$schema = "http://json-schema.org/draft-04/schema#";
   } else if (ctx.target === "openapi-3.0") {
   } else {
   }
@@ -26919,12 +26919,12 @@ function finalize(ctx, schema) {
     const id = ctx.external.registry.get(schema)?.id;
     if (!id)
       throw new Error("Schema is missing an `id` property");
-    result.$id = ctx.external.uri(id);
+    result2.$id = ctx.external.uri(id);
   }
-  assignProps(result, root.defId ? root.schema : root.def ?? root.schema);
+  assignProps(result2, root.defId ? root.schema : root.def ?? root.schema);
   const rootMetaId = ctx.metadataRegistry.get(schema)?.id;
-  if (rootMetaId !== void 0 && result.id === rootMetaId)
-    delete result.id;
+  if (rootMetaId !== void 0 && result2.id === rootMetaId)
+    delete result2.id;
   const defs = ctx.external?.defs ?? {};
   if (!ctx.external || ctx.sharedEmitDoneFor !== ctx.external) {
     for (const entry of ctx.seen.entries()) {
@@ -26942,14 +26942,14 @@ function finalize(ctx, schema) {
   } else {
     if (Object.keys(defs).length > 0) {
       if (ctx.target === "draft-2020-12") {
-        result.$defs = defs;
+        result2.$defs = defs;
       } else {
-        result.definitions = defs;
+        result2.definitions = defs;
       }
     }
   }
   try {
-    const finalized = JSON.parse(JSON.stringify(result));
+    const finalized = JSON.parse(JSON.stringify(result2));
     Object.defineProperty(finalized, "~standard", {
       value: {
         ...schema["~standard"],
@@ -27853,8 +27853,8 @@ var JSONSchemaGenerator = class {
     this.ctx.sharedDefsExtractedFor = void 0;
     this.ctx.sharedEmitDoneFor = void 0;
     extractDefs(this.ctx, schema);
-    const result = finalize(this.ctx, schema);
-    const { "~standard": _, ...plainResult } = result;
+    const result2 = finalize(this.ctx, schema);
+    const { "~standard": _, ...plainResult } = result2;
     return plainResult;
   }
 };
@@ -28102,21 +28102,21 @@ function objectFromShape(shape) {
 }
 function safeParse2(schema, data) {
   if (isZ4Schema(schema)) {
-    const result2 = safeParse(schema, data);
-    return result2;
+    const result3 = safeParse(schema, data);
+    return result3;
   }
   const v3Schema = schema;
-  const result = v3Schema.safeParse(data);
-  return result;
+  const result2 = v3Schema.safeParse(data);
+  return result2;
 }
 async function safeParseAsync2(schema, data) {
   if (isZ4Schema(schema)) {
-    const result2 = await safeParseAsync(schema, data);
-    return result2;
+    const result3 = await safeParseAsync(schema, data);
+    return result3;
   }
   const v3Schema = schema;
-  const result = await v3Schema.safeParseAsync(data);
-  return result;
+  const result2 = await v3Schema.safeParseAsync(data);
+  return result2;
 }
 function getObjectShape(schema) {
   if (!schema)
@@ -30444,13 +30444,13 @@ function checkObjectGuards(objectSchema, guards) {
     }
     if (guards.keySchema) {
       for (const key of keys) {
-        const result = guards.keySchema.safeParse(key);
-        if (result.success)
+        const result2 = guards.keySchema.safeParse(key);
+        if (result2.success)
           continue;
         payload.issues.push({
           code: "invalid_key",
           origin: "record",
-          issues: result.error.issues,
+          issues: result2.error.issues,
           input: key,
           path: [key],
           continue: true
@@ -30816,11 +30816,11 @@ function convertBaseSchema(schema, ctx) {
         } else if (schemasToIntersect.length === 1) {
           zodSchema = schemasToIntersect[0];
         } else {
-          let result = z.intersection(schemasToIntersect[0], schemasToIntersect[1]);
+          let result2 = z.intersection(schemasToIntersect[0], schemasToIntersect[1]);
           for (let i = 2; i < schemasToIntersect.length; i++) {
-            result = z.intersection(result, schemasToIntersect[i]);
+            result2 = z.intersection(result2, schemasToIntersect[i]);
           }
-          zodSchema = result;
+          zodSchema = result2;
         }
         if (schema.additionalProperties === false) {
           const propertyKeys = Object.keys(shape);
@@ -30947,12 +30947,12 @@ function convertSchema(schema, ctx) {
     if (schema.allOf.length === 0) {
       baseSchema = hasExplicitType ? baseSchema : z.any();
     } else {
-      let result = hasExplicitType ? baseSchema : convertSchema(schema.allOf[0], ctx);
+      let result2 = hasExplicitType ? baseSchema : convertSchema(schema.allOf[0], ctx);
       const startIdx = hasExplicitType ? 0 : 1;
       for (let i = startIdx; i < schema.allOf.length; i++) {
-        result = z.intersection(result, convertSchema(schema.allOf[i], ctx));
+        result2 = z.intersection(result2, convertSchema(schema.allOf[i], ctx));
       }
-      baseSchema = result;
+      baseSchema = result2;
     }
   }
   if (schema.nullable === true && ctx.version === "openapi-3.0") {
@@ -33144,14 +33144,14 @@ function escapeLiteralCheckValue(literal2, refs) {
 }
 var ALPHA_NUMERIC = new Set("ABCDEFGHIJKLMNOPQRSTUVXYZabcdefghijklmnopqrstuvxyz0123456789");
 function escapeNonAlphaNumeric(source) {
-  let result = "";
+  let result2 = "";
   for (let i = 0; i < source.length; i++) {
     if (!ALPHA_NUMERIC.has(source[i])) {
-      result += "\\";
+      result2 += "\\";
     }
-    result += source[i];
+    result2 += source[i];
   }
-  return result;
+  return result2;
 }
 function addFormat(schema, value, message, refs) {
   if (schema.format || schema.anyOf?.some((x) => x.format)) {
@@ -33548,7 +33548,7 @@ function parseNumberDef(def, refs) {
 // node_modules/zod-to-json-schema/dist/esm/parsers/object.js
 function parseObjectDef(def, refs) {
   const forceOptionalIntoNullable = refs.target === "openAi";
-  const result = {
+  const result2 = {
     type: "object",
     properties: {}
   };
@@ -33577,19 +33577,19 @@ function parseObjectDef(def, refs) {
     if (parsedDef === void 0) {
       continue;
     }
-    result.properties[propName] = parsedDef;
+    result2.properties[propName] = parsedDef;
     if (!propOptional) {
       required2.push(propName);
     }
   }
   if (required2.length) {
-    result.required = required2;
+    result2.required = required2;
   }
   const additionalProperties = decideAdditionalProperties(def, refs);
   if (additionalProperties !== void 0) {
-    result.additionalProperties = additionalProperties;
+    result2.additionalProperties = additionalProperties;
   }
-  return result;
+  return result2;
 }
 function decideAdditionalProperties(def, refs) {
   if (def.catchall._def.typeName !== "ZodNever") {
@@ -33953,11 +33953,11 @@ function getMethodLiteral(schema) {
   return value;
 }
 function parseWithCompat(schema, data) {
-  const result = safeParse2(schema, data);
-  if (!result.success) {
-    throw result.error;
+  const result2 = safeParse2(schema, data);
+  if (!result2.success) {
+    throw result2.error;
   }
-  return result.data;
+  return result2.data;
 }
 
 // node_modules/@modelcontextprotocol/sdk/dist/esm/shared/protocol.js
@@ -34038,12 +34038,12 @@ var Protocol = class {
             return await handleTaskResult();
           }
           if (isTerminal(task.status)) {
-            const result = await this._taskStore.getTaskResult(taskId, extra.sessionId);
+            const result2 = await this._taskStore.getTaskResult(taskId, extra.sessionId);
             this._clearTaskQueue(taskId, extra.sessionId);
             return {
-              ...result,
+              ...result2,
               _meta: {
-                ...result._meta,
+                ...result2._meta,
                 [RELATED_TASK_META_KEY]: {
                   taskId
                 }
@@ -34287,12 +34287,12 @@ var Protocol = class {
       if (taskCreationParams) {
         this.assertTaskHandlerCapability(request.method);
       }
-    }).then(() => handler(request, fullExtra)).then(async (result) => {
+    }).then(() => handler(request, fullExtra)).then(async (result2) => {
       if (abortController.signal.aborted) {
         return;
       }
       const response = {
-        result,
+        result: result2,
         jsonrpc: "2.0",
         id: request.id
       };
@@ -34378,9 +34378,9 @@ var Protocol = class {
     this._cleanupTimeout(messageId);
     let isTaskResponse = false;
     if (isJSONRPCResultResponse(response) && response.result && typeof response.result === "object") {
-      const result = response.result;
-      if (result.task && typeof result.task === "object") {
-        const task = result.task;
+      const result2 = response.result;
+      if (result2.task && typeof result2.task === "object") {
+        const task = result2.task;
         if (typeof task.taskId === "string") {
           isTaskResponse = true;
           this._taskProgressTokens.set(task.taskId, messageId);
@@ -34437,8 +34437,8 @@ var Protocol = class {
     const { task } = options ?? {};
     if (!task) {
       try {
-        const result = await this.request(request, resultSchema, options);
-        yield { type: "result", result };
+        const result2 = await this.request(request, resultSchema, options);
+        yield { type: "result", result: result2 };
       } catch (error62) {
         yield {
           type: "error",
@@ -34461,8 +34461,8 @@ var Protocol = class {
         yield { type: "taskStatus", task: task2 };
         if (isTerminal(task2.status)) {
           if (task2.status === "completed") {
-            const result = await this.getTaskResult({ taskId }, resultSchema, options);
-            yield { type: "result", result };
+            const result2 = await this.getTaskResult({ taskId }, resultSchema, options);
+            yield { type: "result", result: result2 };
           } else if (task2.status === "failed") {
             yield {
               type: "error",
@@ -34477,8 +34477,8 @@ var Protocol = class {
           return;
         }
         if (task2.status === "input_required") {
-          const result = await this.getTaskResult({ taskId }, resultSchema, options);
-          yield { type: "result", result };
+          const result2 = await this.getTaskResult({ taskId }, resultSchema, options);
+          yield { type: "result", result: result2 };
           return;
         }
         const pollInterval = task2.pollInterval ?? this._options?.defaultTaskPollInterval ?? 1e3;
@@ -34873,8 +34873,8 @@ var Protocol = class {
         }
         return task;
       },
-      storeTaskResult: async (taskId, status, result) => {
-        await taskStore.storeTaskResult(taskId, status, result, sessionId);
+      storeTaskResult: async (taskId, status, result2) => {
+        await taskStore.storeTaskResult(taskId, status, result2, sessionId);
         const task = await taskStore.getTask(taskId, sessionId);
         if (task) {
           const notification = TaskStatusNotificationSchema.parse({
@@ -34921,20 +34921,20 @@ function isPlainObject2(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 function mergeCapabilities(base, additional) {
-  const result = { ...base };
+  const result2 = { ...base };
   for (const key in additional) {
     const k = key;
     const addValue = additional[k];
     if (addValue === void 0)
       continue;
-    const baseValue = result[k];
+    const baseValue = result2[k];
     if (isPlainObject2(baseValue) && isPlainObject2(addValue)) {
-      result[k] = { ...baseValue, ...addValue };
+      result2[k] = { ...baseValue, ...addValue };
     } else {
-      result[k] = addValue;
+      result2[k] = addValue;
     }
   }
-  return result;
+  return result2;
 }
 
 // node_modules/@modelcontextprotocol/sdk/dist/esm/validation/ajv-provider.js
@@ -35332,16 +35332,16 @@ var Server = class extends Protocol {
           throw new McpError(ErrorCode.InvalidParams, `Invalid tools/call request: ${errorMessage2}`);
         }
         const { params } = validatedRequest.data;
-        const result = await Promise.resolve(handler(request, extra));
+        const result2 = await Promise.resolve(handler(request, extra));
         if (params.task) {
-          const taskValidationResult = safeParse2(CreateTaskResultSchema, result);
+          const taskValidationResult = safeParse2(CreateTaskResultSchema, result2);
           if (!taskValidationResult.success) {
             const errorMessage2 = taskValidationResult.error instanceof Error ? taskValidationResult.error.message : String(taskValidationResult.error);
             throw new McpError(ErrorCode.InvalidParams, `Invalid task creation result: ${errorMessage2}`);
           }
           return taskValidationResult.data;
         }
-        const validationResult = safeParse2(CallToolResultSchema, result);
+        const validationResult = safeParse2(CallToolResultSchema, result2);
         if (!validationResult.success) {
           const errorMessage2 = validationResult.error instanceof Error ? validationResult.error.message : String(validationResult.error);
           throw new McpError(ErrorCode.InvalidParams, `Invalid tools/call result: ${errorMessage2}`);
@@ -35550,11 +35550,11 @@ var Server = class extends Protocol {
           throw new Error("Client does not support form elicitation.");
         }
         const formParams = params.mode === "form" ? params : { ...params, mode: "form" };
-        const result = await this.request({ method: "elicitation/create", params: formParams }, ElicitResultSchema, options);
-        if (result.action === "accept" && result.content && formParams.requestedSchema) {
+        const result2 = await this.request({ method: "elicitation/create", params: formParams }, ElicitResultSchema, options);
+        if (result2.action === "accept" && result2.content && formParams.requestedSchema) {
           try {
             const validator = this._jsonSchemaValidator.getValidator(formParams.requestedSchema);
-            const validationResult = validator(result.content);
+            const validationResult = validator(result2.content);
             if (!validationResult.valid) {
               throw new McpError(ErrorCode.InvalidParams, `Elicitation response content does not match requested schema: ${validationResult.errorMessage}`);
             }
@@ -35565,7 +35565,7 @@ var Server = class extends Protocol {
             throw new McpError(ErrorCode.InternalError, `Error validating elicitation response: ${error62 instanceof Error ? error62.message : String(error62)}`);
           }
         }
-        return result;
+        return result2;
       }
     }
   }
@@ -35691,9 +35691,9 @@ function issueToolNameWarning(name, warnings) {
   }
 }
 function validateAndWarnToolName(name) {
-  const result = validateToolName(name);
-  issueToolNameWarning(name, result.warnings);
-  return result.isValid;
+  const result2 = validateToolName(name);
+  issueToolNameWarning(name, result2.warnings);
+  return result2.isValid;
 }
 
 // node_modules/@modelcontextprotocol/sdk/dist/esm/experimental/tasks/mcp-server.js
@@ -35861,12 +35861,12 @@ var McpServer = class {
           return await this.handleAutomaticTaskPolling(tool, request, extra);
         }
         const args = await this.validateToolInput(tool, request.params.arguments, request.params.name);
-        const result = await this.executeToolHandler(tool, args, extra);
+        const result2 = await this.executeToolHandler(tool, args, extra);
         if (isTaskRequest) {
-          return result;
+          return result2;
         }
-        await this.validateToolOutput(tool, result, request.params.name);
-        return result;
+        await this.validateToolOutput(tool, result2, request.params.name);
+        return result2;
       } catch (error62) {
         if (error62 instanceof McpError) {
           if (error62.code === ErrorCode.UrlElicitationRequired) {
@@ -35918,21 +35918,21 @@ var McpServer = class {
   /**
    * Validates tool output against the tool's output schema.
    */
-  async validateToolOutput(tool, result, toolName) {
+  async validateToolOutput(tool, result2, toolName) {
     if (!tool.outputSchema) {
       return;
     }
-    if (!("content" in result)) {
+    if (!("content" in result2)) {
       return;
     }
-    if (result.isError) {
+    if (result2.isError) {
       return;
     }
-    if (!result.structuredContent) {
+    if (!result2.structuredContent) {
       throw new McpError(ErrorCode.InvalidParams, `Output validation error: Tool ${toolName} has an output schema but no structured content was provided`);
     }
     const outputObj = normalizeObjectSchema(tool.outputSchema);
-    const parseResult = await safeParseAsync2(outputObj, result.structuredContent);
+    const parseResult = await safeParseAsync2(outputObj, result2.structuredContent);
     if (!parseResult.success) {
       const error62 = "error" in parseResult ? parseResult.error : "Unknown error";
       const errorMessage2 = getParseErrorMessage(error62);
@@ -36076,8 +36076,8 @@ var McpServer = class {
         if (!template.resourceTemplate.listCallback) {
           continue;
         }
-        const result = await template.resourceTemplate.listCallback(extra);
-        for (const resource of result.resources) {
+        const result2 = await template.resourceTemplate.listCallback(extra);
+        for (const resource of result2.resources) {
           templateResources.push({
             ...template.metadata,
             // the defined resource metadata should override the template metadata if present
@@ -36664,11 +36664,26 @@ import { createHash } from "node:crypto";
 import { lstat, readdir, readFile, readlink, realpath, stat } from "node:fs/promises";
 import path from "node:path";
 
+// src/shared/util.ts
+function errorMessage(err) {
+  return err instanceof Error ? err.message : String(err);
+}
+function plural2(n, word, many = `${word}s`) {
+  return `${n} ${n === 1 ? word : many}`;
+}
+function sum(items, value) {
+  return items.reduce((total, item) => total + value(item), 0);
+}
+var compareText = (a, b) => a < b ? -1 : a > b ? 1 : 0;
+function isRecord(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
 // src/shared/comparison.ts
 var rangeOf = (r) => ({ base: r.base, head: r.head, threeDot: r.threeDot });
 var sameRange = (a, b) => a.base === b.base && a.head === b.head && a.threeDot === b.threeDot;
 var rangeFor = (c, dir) => c.overrides.find((o) => o.dir === dir) ?? rangeOf(c);
-var sortOverrides = (overrides) => [...overrides].sort((a, b) => a.dir < b.dir ? -1 : a.dir > b.dir ? 1 : 0);
+var sortOverrides = (overrides) => [...overrides].sort((a, b) => compareText(a.dir, b.dir));
 function comparisonFromQuery(params) {
   const read = (suffix) => {
     const base = params.get(`base${suffix}`);
@@ -36686,8 +36701,9 @@ function comparisonFromQuery(params) {
 function sameComparison(a, b) {
   return sameRange(a, b) && a.overrides.length === b.overrides.length && a.overrides.every((o, i) => o.dir === b.overrides[i].dir && sameRange(o, b.overrides[i]));
 }
-function describeComparison(c) {
-  const range = (r) => `${r.base}${r.threeDot ? "..." : ".."}${r.head ?? "the working tree"}`;
+var isFor = (repo, c) => (r) => r.repo === repo && sameComparison(r.compare, c);
+function describeComparison(c, ref = (r) => r ?? "the working tree") {
+  const range = (r) => `${ref(r.base)}${r.threeDot ? "..." : ".."}${ref(r.head)}`;
   const own2 = c.overrides.map((o) => `${o.dir}: ${range(o)}`);
   return own2.length ? `${range(c)} (${own2.join("; ")})` : range(c);
 }
@@ -36705,6 +36721,7 @@ function splitLines(text) {
   if (lines[lines.length - 1] === "") lines.pop();
   return lines;
 }
+var stripCr = (s) => s.endsWith("\r") ? s.slice(0, -1) : s;
 function changeIds(file2) {
   return file2.blocks.length ? file2.blocks.map((b) => b.id) : [`file:${file2.path}`];
 }
@@ -36713,16 +36730,18 @@ function rangeHeader(start0, count) {
   if (count === 1) return `${start0 + 1}`;
   return `${start0 + 1},${count}`;
 }
+function hunkHeader(oldStart, oldCount, newStart, newCount, section) {
+  return `@@ -${rangeHeader(oldStart, oldCount)} +${rangeHeader(newStart, newCount)} @@${section ? ` ${section}` : ""}`;
+}
 function buildHunks(blocks, oldLines, newLines, all = blocks, expansion = null) {
   if (blocks.length === 0) return [];
   const hasCtx = newLines !== null || oldLines !== null;
-  const C = hasCtx ? CONTEXT_LINES : 0;
   const total = newLines ? newLines.length : oldLines ? oldLines.length : 0;
   const endOf = (b) => newLines ? b.newStart + b.newCount : b.oldStart + b.oldCount;
   const startOf = (b) => newLines ? b.newStart : b.oldStart;
   const ctxText = (o, n) => (newLines ? newLines[n] : oldLines?.[o]) ?? "";
-  const wantAbove = (b) => hasCtx ? C + (expansion?.above[b.id] ?? 0) : 0;
-  const wantBelow = (b) => hasCtx ? C + (expansion?.below[b.id] ?? 0) : 0;
+  const wantAbove = (b) => hasCtx ? CONTEXT_LINES + (expansion?.above[b.id] ?? 0) : 0;
+  const wantBelow = (b) => hasCtx ? CONTEXT_LINES + (expansion?.below[b.id] ?? 0) : 0;
   const index = new Map(all.map((b, i) => [b, i]));
   const shown = new Set(blocks);
   const runBefore = (i) => Math.max(0, (i < all.length ? startOf(all[i]) : total) - (i > 0 ? endOf(all[i - 1]) : 0));
@@ -36771,43 +36790,28 @@ function buildHunks(blocks, oldLines, newLines, all = blocks, expansion = null) 
       });
     }
     context(after);
-    const header = `@@ -${rangeHeader(startO, o - startO)} +${rangeHeader(startN, n - startN)} @@${first.section ? ` ${first.section}` : ""}`;
+    const header = hunkHeader(startO, o - startO, startN, n - startN, first.section);
     return { header, lines, firstId: first.id, lastId: last.id, hiddenAbove, hiddenBelow, joinsPrevious };
   });
 }
 
 // src/engine/git.ts
 import { execFile } from "node:child_process";
-var GitError = class extends Error {
-  constructor(message, exitCode) {
-    super(message);
-    this.exitCode = exitCode;
-  }
-  exitCode;
-};
+var MAX_OUTPUT = 512 * 1024 * 1024;
 function git(cwd, args, okCodes = [0], input2) {
   return new Promise((resolve, reject) => {
-    const child = execFile(
-      "git",
-      args,
-      {
-        cwd,
-        encoding: "buffer",
-        maxBuffer: 512 * 1024 * 1024,
-        env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" }
-      },
-      (err, stdout, stderr) => {
-        if (!err) return resolve(stdout);
-        const code = typeof err.code === "number" ? err.code : null;
-        if (code !== null && okCodes.includes(code)) return resolve(stdout);
-        const detail = stderr.toString("utf8").trim() || err.message;
-        reject(new GitError(`git ${args[0]} failed: ${detail}`, code));
-      }
-    );
+    const env = { ...process.env, GIT_OPTIONAL_LOCKS: "0" };
+    const child = execFile("git", args, { cwd, encoding: "buffer", maxBuffer: MAX_OUTPUT, env }, (err, stdout, stderr) => {
+      if (!err || typeof err.code === "number" && okCodes.includes(err.code)) return resolve(stdout);
+      reject(new Error(`git ${args[0]} failed: ${stderr.toString("utf8").trim() || err.message}`));
+    });
     child.stdin?.on("error", () => {
     });
     child.stdin?.end(input2);
   });
+}
+async function gitText(cwd, args, okCodes) {
+  return (await git(cwd, args, okCodes)).toString("utf8").trim();
 }
 
 // src/engine/diff.ts
@@ -36815,9 +36819,35 @@ var MAX_CONTENT_BYTES = 1024 * 1024;
 var MAX_DIFF_LINES = 2e4;
 var MAX_DIFF_CHARS = 500 * 1024;
 var MAX_COMMITS = 250;
+var MAX_RECENT_COMMITS = 100;
 var BATCH_BYTES = 64 * 1024 * 1024;
 var EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 var REPO_LIMIT = 4;
+var FILE_LIMIT = 8;
+var STAT_LIMIT = 16;
+var COMMIT_FORMAT = "%H%x1f%P%x1f%an%x1f%aI%x1f%s";
+var DIFF_ARGS = ["diff", "--no-color", "--no-ext-diff", "--no-textconv", "--submodule=short", "--find-renames"];
+var HUNK_RE = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)$/;
+var STATUS = { A: "added", D: "deleted", R: "renamed" };
+var ABSENT = { kind: "absent" };
+var contentHashes = /* @__PURE__ */ new Map();
+var byPath = (a, b) => compareText(a.path, b.path);
+var byDate = (a, b) => Date.parse(a.date) - Date.parse(b.date);
+var statusOf = (code) => STATUS[code] ?? "modified";
+function normalize(compare) {
+  const c = {
+    base: compare.base ?? "HEAD",
+    head: compare.head ?? null,
+    threeDot: compare.threeDot ?? true,
+    overrides: compare.overrides ?? []
+  };
+  for (const { base, head } of [c, ...c.overrides]) {
+    for (const ref of [base, head]) {
+      if (ref !== null && (ref === "" || ref.startsWith("-"))) throw new Error(`Invalid git ref: ${ref}`);
+    }
+  }
+  return c;
+}
 async function findRepos(dir) {
   const abs = await realpath(dir);
   const isRepo = (d) => stat(path.join(d, ".git")).then(() => true, () => false);
@@ -36828,42 +36858,28 @@ async function findRepos(dir) {
     if (repos.length) return { root: abs, repos };
   }
   try {
-    return { root: (await git(abs, ["rev-parse", "--show-toplevel"])).toString("utf8").trim(), repos: null };
+    return { root: await gitText(abs, ["rev-parse", "--show-toplevel"]), repos: null };
   } catch {
     throw new Error(`${dir} is not in a git repository and has no git repository directly under it.`);
   }
 }
 async function computeDiff(dir, compare = {}) {
-  const c = {
-    base: compare.base ?? "HEAD",
-    head: compare.head ?? null,
-    threeDot: compare.threeDot ?? true,
-    overrides: compare.overrides ?? []
-  };
-  for (const r of [c, ...c.overrides]) checkRefs(r.base, r.head);
+  const c = normalize(compare);
   const { root, repos } = await findRepos(dir);
   checkOverrides(root, repos, c.overrides);
   if (!repos) {
-    const { repo, commits: commits2, commitCount, files } = await diffRepo(root, c, "");
+    const { repo, commits, commitCount, files } = await diffRepo(root, c, "");
     const { baseCommit, headCommit, oldCommit } = repo;
-    return { repoRoot: root, ...c, baseCommit, headCommit, oldCommit, repos: [repo], commits: commits2, commitCount, files };
+    return { repoRoot: root, ...c, baseCommit, headCommit, oldCommit, repos: [repo], commits, commitCount, files };
   }
   const parts = await mapLimit(repos, REPO_LIMIT, (name) => {
     const range = rangeFor(c, name);
-    return diffRepo(path.join(root, name), range, name).catch(
-      (err) => ({
-        repo: { dir: name, ...range, baseCommit: null, headCommit: null, oldCommit: null, error: err instanceof Error ? err.message : String(err) },
-        commits: [],
-        commitCount: 0,
-        files: []
-      })
-    );
+    return diffRepo(path.join(root, name), range, name).catch((err) => failedPart(name, range, err));
   });
   const states = parts.map((p) => p.repo);
   if (states.every((r) => r.error !== null)) {
     throw new Error(repoFailures(states).map((f) => `${f.error} (${f.dirs.join(", ")})`).join("; "));
   }
-  const commits = parts.flatMap((p) => p.commits.map((commit) => ({ ...commit, repo: p.repo.dir }))).sort((a, b) => Date.parse(a.date) - Date.parse(b.date)).slice(-MAX_COMMITS);
   return {
     repoRoot: root,
     ...c,
@@ -36871,10 +36887,14 @@ async function computeDiff(dir, compare = {}) {
     headCommit: null,
     oldCommit: null,
     repos: states,
-    commits,
-    commitCount: parts.reduce((n, p) => n + p.commitCount, 0),
-    files: parts.flatMap((p) => p.files).sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0)
+    commits: parts.flatMap((p) => p.commits.map((commit) => ({ ...commit, repo: p.repo.dir }))).sort(byDate).slice(-MAX_COMMITS),
+    commitCount: sum(parts, (p) => p.commitCount),
+    files: parts.flatMap((p) => p.files).sort(byPath)
   };
+}
+function failedPart(dir, range, err) {
+  const repo = { dir, ...range, baseCommit: null, headCommit: null, oldCommit: null, error: errorMessage(err) };
+  return { repo, commits: [], commitCount: 0, files: [] };
 }
 function checkOverrides(root, repos, overrides) {
   const unknown2 = overrides.filter((o) => !repos?.includes(o.dir)).map((o) => o.dir);
@@ -36882,73 +36902,58 @@ function checkOverrides(root, repos, overrides) {
   if (!repos) throw new Error(`${root} is a single repository, so no repository in it can compare a range of its own.`);
   throw new Error(`No repository named ${unknown2.join(", ")} directly under ${root}.`);
 }
-async function diffRepo(repo, refs, dir) {
-  const { base, head, threeDot } = refs;
-  const prefix = dir ? `${dir}/` : "";
-  const repoRoot = (await git(repo, ["rev-parse", "--show-toplevel"])).toString("utf8").trim();
+async function diffRepo(repo, { base, head, threeDot }, dir) {
+  const root = await gitText(repo, ["rev-parse", "--show-toplevel"]);
   const [baseCommit, headCommit, headOfRepo] = await Promise.all([
-    resolveCommit(repoRoot, base),
-    head === null ? null : resolveCommit(repoRoot, head),
-    head === null ? resolveCommit(repoRoot, "HEAD") : null
+    resolveCommit(root, base),
+    head === null ? null : resolveCommit(root, head),
+    head === null ? resolveCommit(root, "HEAD") : null
   ]);
   if (head !== null && headCommit === null) throw new Error(`Unknown git ref: ${head}`);
   const tip = headCommit ?? headOfRepo;
-  const oldCommit = threeDot && baseCommit && tip ? await mergeBase(repoRoot, baseCommit, tip, base, head) : baseCommit;
+  const oldCommit = threeDot && baseCommit && tip ? await mergeBase(root, baseCommit, tip, base, head) : baseCommit;
   const range = headCommit ? [oldCommit ?? EMPTY_TREE, headCommit] : [oldCommit ?? EMPTY_TREE];
-  const diffArgs = ["diff", "--no-color", "--no-ext-diff", "--no-textconv", "--submodule=short", "--find-renames"];
   const [raw, patch, untracked, commits] = await Promise.all([
-    git(repoRoot, [...diffArgs, "--raw", "-z", "--no-abbrev", ...range, "--"]),
-    git(repoRoot, [...diffArgs, "-U0", ...range, "--"]),
-    head === null ? git(repoRoot, ["ls-files", "--others", "--exclude-standard", "-z"]) : Buffer.alloc(0),
-    listCommits(repoRoot, baseCommit, tip)
+    git(root, [...DIFF_ARGS, "--raw", "-z", "--no-abbrev", ...range, "--"]),
+    git(root, [...DIFF_ARGS, "-U0", ...range, "--"]),
+    head === null ? git(root, ["ls-files", "--others", "--exclude-standard", "-z"]) : Buffer.alloc(0),
+    listCommits(root, baseCommit, tip)
   ]);
   const entries = parseRaw(raw);
-  let sections = splitSections(patch.toString("utf8"));
-  if (sections.length !== entries.length) sections = [];
+  const sections = splitSections(patch.toString("utf8"));
+  const aligned = sections.length === entries.length;
   const untrackedPaths = untracked.toString("utf8").split("\0").filter(Boolean);
   const blobIds = entries.flatMap((e) => {
     const status = statusOf(e.code);
     return [status !== "added" && oldCommit ? e.oldOid : null, status !== "deleted" && headCommit ? e.newOid : null];
   });
   const [blobs, generated] = await Promise.all([
-    readBlobs(repoRoot, blobIds.filter((id) => id !== null)),
-    generatedPaths(repoRoot, [...entries.map((e) => e.path), ...untrackedPaths], headCommit)
+    readBlobs(root, blobIds.filter((id) => id !== null)),
+    generatedPaths(root, [...entries.map((e) => e.path), ...untrackedPaths], headCommit)
   ]);
-  const tracked = await mapLimit(
-    entries.map((e, i) => [e, sections[i]]),
-    8,
-    ([entry, section]) => buildTrackedFile(repoRoot, prefix, diffArgs, range, oldCommit, headCommit, blobs, entry, section)
-  );
-  const added = (await mapLimit(untrackedPaths, 8, (p) => buildUntrackedFile(repoRoot, prefix, p))).filter(
-    (f) => f !== null
-  );
-  const files = [...tracked, ...added].sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
+  const ctx = { root, prefix: dir ? `${dir}/` : "", range, oldCommit, headCommit, blobs };
+  const tracked = await mapLimit(entries, FILE_LIMIT, (entry, i) => trackedFile(ctx, entry, aligned ? sections[i] : void 0));
+  const added = await mapLimit(untrackedPaths, FILE_LIMIT, (p) => untrackedFile(ctx, p));
+  const files = [...tracked, ...added.filter((f) => f !== null)].sort(byPath);
   for (const f of files) {
     f.generated = generated.has(f.path);
-    f.path = prefix + f.path;
-    if (f.oldPath !== null) f.oldPath = prefix + f.oldPath;
+    f.path = ctx.prefix + f.path;
+    if (f.oldPath !== null) f.oldPath = ctx.prefix + f.oldPath;
   }
   return { repo: { dir, base, head, threeDot, baseCommit, headCommit, oldCommit, error: null }, ...commits, files };
 }
-function checkRefs(base, head) {
-  for (const ref of [base, head]) {
-    if (ref !== null && (ref === "" || ref.startsWith("-"))) throw new Error(`Invalid git ref: ${ref}`);
-  }
-}
 async function diffVersion(dir, compare = {}) {
-  const c = { base: compare.base ?? "HEAD", head: compare.head ?? null, threeDot: true, overrides: compare.overrides ?? [] };
-  for (const r of [c, ...c.overrides]) checkRefs(r.base, r.head);
+  const c = normalize(compare);
   const { root, repos } = await findRepos(dir);
   if (!repos) return repoVersion(root, c.base, c.head);
   const versions = await mapLimit(repos, REPO_LIMIT, (name) => {
     const { base, head } = rangeFor(c, name);
-    return repoVersion(path.join(root, name), base, head).catch((err) => `! ${err instanceof Error ? err.message : String(err)}`);
+    return repoVersion(path.join(root, name), base, head).catch((err) => `! ${errorMessage(err)}`);
   });
   return createHash("sha256").update(repos.map((name, i) => `${name}\0${versions[i]}`).join("\n")).digest("hex").slice(0, 16);
 }
 async function repoVersion(repo, base, head) {
   const [commits, status] = await Promise.all([
-    // Exits 128 for a ref that names nothing, such as HEAD before the first commit. The output is still stable.
     git(repo, ["rev-parse", `${base}^{commit}`, `${head ?? "HEAD"}^{commit}`], [0, 128]),
     head === null ? git(repo, ["status", "--porcelain", "-z", "--untracked-files=all"]) : null
   ]);
@@ -36966,13 +36971,12 @@ async function repoVersion(repo, base, head) {
     }
     const known = contentHashes.get(repo);
     const next = /* @__PURE__ */ new Map();
-    const versions = await mapLimit(paths, 16, (p) => fileVersion(path.join(repo, p), known, next));
+    const versions = await mapLimit(paths, STAT_LIMIT, (p) => fileVersion(path.join(repo, p), known, next));
     contentHashes.set(repo, next);
     hash2.update(entries.join("\0")).update(versions.join("\0"));
   }
   return hash2.digest("hex").slice(0, 16);
 }
-var contentHashes = /* @__PURE__ */ new Map();
 async function fileVersion(abs, known, next) {
   try {
     const st = await lstat(abs, { bigint: true });
@@ -36986,57 +36990,46 @@ async function fileVersion(abs, known, next) {
     return "-";
   }
 }
-function summarize(result) {
-  const add = result.files.reduce((s, f) => s + f.additions, 0);
-  const del = result.files.reduce((s, f) => s + f.deletions, 0);
-  const n = result.files.length;
-  const c = result.commitCount;
-  const fromMergeBase = result.oldCommit !== result.baseCommit && result.oldCommit ? ` from their merge base ${result.oldCommit.slice(0, 7)}` : "";
-  const what = (r2) => r2.head === null ? `the working tree against ${r2.base}` : `${r2.base}${r2.threeDot ? "..." : ".."}${r2.head}`;
-  const commits = c ? `, ${c} commit${c === 1 ? "" : "s"}` : "";
-  const r = result.repos.length;
-  const own2 = result.overrides.map((o) => `${o.dir} compares ${what(o)}`).join("; ");
-  const where = result.repos[0]?.dir === "" ? "" : ` in ${r} repositor${r === 1 ? "y" : "ies"} under ${result.repoRoot}${own2 ? ` (${own2})` : ""}, each file's path starting with its repository's directory`;
-  return `${n} file${n === 1 ? "" : "s"} changed, +${add} -${del}, comparing ${what(result)}${fromMergeBase}${where}${commits}`;
+function summarize(result2) {
+  const what = (r) => r.head === null ? `the working tree against ${r.base}` : `${r.base}${r.threeDot ? "..." : ".."}${r.head}`;
+  const fromMergeBase = result2.oldCommit && result2.oldCommit !== result2.baseCommit ? ` from their merge base ${result2.oldCommit.slice(0, 7)}` : "";
+  const own2 = result2.overrides.map((o) => `${o.dir} compares ${what(o)}`).join("; ");
+  const where = result2.repos[0]?.dir === "" ? "" : ` in ${plural2(result2.repos.length, "repository", "repositories")} under ${result2.repoRoot}${own2 ? ` (${own2})` : ""}, each file's path starting with its repository's directory`;
+  const commits = result2.commitCount ? `, ${plural2(result2.commitCount, "commit")}` : "";
+  const add = sum(result2.files, (f) => f.additions);
+  const del = sum(result2.files, (f) => f.deletions);
+  return `${plural2(result2.files.length, "file")} changed, +${add} -${del}, comparing ${what(result2)}${fromMergeBase}${where}${commits}`;
 }
-function describeFailures(result) {
-  return repoFailures(result.repos).map((f) => `Not compared in ${f.dirs.join(", ")}: ${f.error}`);
+function describeFailures(result2) {
+  return repoFailures(result2.repos).map((f) => `Not compared in ${f.dirs.join(", ")}: ${f.error}`);
 }
-async function resolveCommit(repoRoot, ref) {
+async function resolveCommit(root, ref) {
   try {
-    return (await git(repoRoot, ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`])).toString("utf8").trim();
+    return await gitText(root, ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`]);
   } catch {
     if (ref === "HEAD") return null;
     throw new Error(`Unknown git ref: ${ref}`);
   }
 }
-async function mergeBase(repoRoot, a, b, base, head) {
-  const out = (await git(repoRoot, ["merge-base", a, b], [0, 1])).toString("utf8").trim();
+async function mergeBase(root, a, b, base, head) {
+  const out = await gitText(root, ["merge-base", a, b], [0, 1]);
   if (out) return out;
   throw new Error(`${base} and ${head ?? "HEAD"} share no history, so there is no merge base. Compare them directly instead.`);
 }
-var COMMIT_FORMAT = "%H%x1f%P%x1f%an%x1f%aI%x1f%s";
-async function listCommits(repoRoot, from, to) {
+async function listCommits(root, from, to) {
   if (!from || !to) return { commits: [], commitCount: 0 };
   const range = `${from}..${to}`;
   const [log, count] = await Promise.all([
-    git(repoRoot, ["log", "-z", `-n${MAX_COMMITS}`, "--reverse", `--format=${COMMIT_FORMAT}`, range, "--"]),
-    git(repoRoot, ["rev-list", "--count", range, "--"])
+    git(root, ["log", "-z", `-n${MAX_COMMITS}`, "--reverse", `--format=${COMMIT_FORMAT}`, range, "--"]),
+    gitText(root, ["rev-list", "--count", range, "--"])
   ]);
-  return { commits: parseCommits(log), commitCount: Number(count.toString("utf8").trim()) };
+  return { commits: parseCommits(log), commitCount: Number(count) };
 }
 function parseCommits(buf) {
   return buf.toString("utf8").split("\0").filter(Boolean).map((rec) => {
     const [sha = "", parents = "", author = "", date5 = "", subject = ""] = rec.split("");
     return { sha, parents: parents.split(" ").filter(Boolean), author, date: date5, subject };
   });
-}
-async function recentCommits(repoRoot, limit = 100) {
-  try {
-    return parseCommits(await git(repoRoot, ["log", "-z", `-n${limit}`, `--format=${COMMIT_FORMAT}`, "HEAD", "--"]));
-  } catch {
-    return [];
-  }
 }
 async function listRefs(dir, repo = null) {
   const { root, repos } = await findRepos(dir);
@@ -37052,34 +37045,30 @@ async function listRefs(dir, repo = null) {
     for (let i = 0; names.some((n) => i < n.length); i++) for (const n of names) if (i < n.length) out.add(n[i]);
     return [...out];
   };
-  const commits = lists.flatMap((l, i) => l ? l.commits.map((c) => ({ ...c, repo: repos[i] })) : []).sort((a, b) => Date.parse(b.date) - Date.parse(a.date)).slice(0, 100);
+  const commits = lists.flatMap((l, i) => l ? l.commits.map((c) => ({ ...c, repo: repos[i] })) : []).sort((a, b) => byDate(b, a)).slice(0, MAX_RECENT_COMMITS);
   return { branches: merge2((l) => l.branches), tags: merge2((l) => l.tags), commits };
 }
-async function repoRefs(repoRoot) {
-  const refs = async (pattern) => (await git(repoRoot, ["for-each-ref", "--sort=-creatordate", "--format=%(refname:short)%00%(symref)", ...pattern])).toString("utf8").split("\n").map((l) => l.split("\0")).filter(([name, symref]) => name && !symref).map(([name]) => name);
-  const [branches, tags, commits] = await Promise.all([refs(["refs/heads", "refs/remotes"]), refs(["refs/tags"]), recentCommits(repoRoot)]);
+async function repoRefs(root) {
+  const refs = async (pattern) => (await git(root, ["for-each-ref", "--sort=-creatordate", "--format=%(refname:short)%00%(symref)", ...pattern])).toString("utf8").split("\n").map((l) => l.split("\0")).filter(([name, symref]) => name && !symref).map(([name]) => name);
+  const recent = git(root, ["log", "-z", `-n${MAX_RECENT_COMMITS}`, `--format=${COMMIT_FORMAT}`, "HEAD", "--"]).then(parseCommits, () => []);
+  const [branches, tags, commits] = await Promise.all([refs(["refs/heads", "refs/remotes"]), refs(["refs/tags"]), recent]);
   return { branches, tags, commits };
 }
 function parseRaw(buf) {
   const parts = buf.toString("utf8").split("\0");
   const out = [];
-  let i = 0;
-  while (i < parts.length - 1) {
+  for (let i = 0; i < parts.length - 1; ) {
     const [, , oldOid = "", newOid = "", code = ""] = parts[i++].slice(1).split(" ");
-    if (code.startsWith("R") || code.startsWith("C")) {
-      const oldPath = parts[i++];
-      out.push({ code: code[0], path: parts[i++], oldPath, oldOid, newOid });
-    } else {
-      out.push({ code: code[0], path: parts[i++], oldPath: null, oldOid, newOid });
-    }
+    const oldPath = code.startsWith("R") || code.startsWith("C") ? parts[i++] : null;
+    out.push({ code: code[0], path: parts[i++], oldPath, oldOid, newOid });
   }
   return out;
 }
-async function readBlobs(repoRoot, ids) {
+async function readBlobs(root, ids) {
   const out = /* @__PURE__ */ new Map();
   const unique = [...new Set(ids)];
   if (unique.length === 0) return out;
-  const checks = (await git(repoRoot, ["cat-file", "--batch-check"], [0], `${unique.join("\n")}
+  const checks = (await git(root, ["cat-file", "--batch-check"], [0], `${unique.join("\n")}
 `)).toString("utf8").split("\n");
   const batches = [[]];
   let bytes = 0;
@@ -37087,7 +37076,7 @@ async function readBlobs(repoRoot, ids) {
     const [, type, sizeText] = checks[i].split(" ");
     const size = Number(sizeText);
     if (type !== "blob") {
-      out.set(id, { kind: "absent" });
+      out.set(id, ABSENT);
       continue;
     }
     if (size > MAX_CONTENT_BYTES) {
@@ -37103,7 +37092,7 @@ async function readBlobs(repoRoot, ids) {
   }
   for (const wanted of batches) {
     if (wanted.length === 0) continue;
-    const buf = await git(repoRoot, ["cat-file", "--batch"], [0], `${wanted.join("\n")}
+    const buf = await git(root, ["cat-file", "--batch"], [0], `${wanted.join("\n")}
 `);
     let pos = 0;
     for (const id of wanted) {
@@ -37115,10 +37104,10 @@ async function readBlobs(repoRoot, ids) {
   }
   return out;
 }
-async function generatedPaths(repoRoot, paths, source) {
+async function generatedPaths(root, paths, source) {
   if (paths.length === 0) return /* @__PURE__ */ new Set();
   const input2 = `${paths.join("\0")}\0`;
-  const read = (from) => git(repoRoot, ["check-attr", "-z", "--stdin", ...from ? ["--source", from] : [], "linguist-generated"], [0], input2);
+  const read = (from) => git(root, ["check-attr", "-z", "--stdin", ...from ? ["--source", from] : [], "linguist-generated"], [0], input2);
   const parts = (await read(source).catch((err) => source ? read(null) : Promise.reject(err))).toString("utf8").split("\0");
   const out = /* @__PURE__ */ new Set();
   for (let i = 0; i + 2 < parts.length; i += 3) {
@@ -37127,16 +37116,7 @@ async function generatedPaths(repoRoot, paths, source) {
   return out;
 }
 function diffTooLarge(blocks) {
-  if (blocks.reduce((n, b) => n + b.oldCount + b.newCount, 0) > MAX_DIFF_LINES) return true;
-  let chars = 0;
-  for (const b of blocks) for (const line of [b.del, b.add].flat()) chars += line.length + 2;
-  return chars > MAX_DIFF_CHARS;
-}
-function statusOf(code) {
-  if (code === "A") return "added";
-  if (code === "D") return "deleted";
-  if (code === "R") return "renamed";
-  return "modified";
+  return sum(blocks, (b) => b.oldCount + b.newCount) > MAX_DIFF_LINES || sum(blocks, (b) => sum([...b.del, ...b.add], (line) => line.length + 2)) > MAX_DIFF_CHARS;
 }
 function splitSections(patch) {
   const sections = [];
@@ -37150,7 +37130,6 @@ function splitSections(patch) {
   }
   return sections;
 }
-var HUNK_RE = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)$/;
 function parseSection(lines) {
   let binary = false;
   let oldMode = null;
@@ -37214,76 +37193,37 @@ function classify(buf) {
   if (buf.subarray(0, 8e3).includes(0)) return { kind: "binary" };
   return { kind: "text", text: buf.toString("utf8") };
 }
-async function readWorkTree(repoRoot, filePath) {
-  const abs = path.join(repoRoot, filePath);
+async function readWorkTree(root, filePath) {
+  const abs = path.join(root, filePath);
   try {
     const st = await lstat(abs);
     if (st.isSymbolicLink()) return { kind: "text", text: await readlink(abs) };
-    if (!st.isFile()) return { kind: "absent" };
+    if (!st.isFile()) return ABSENT;
     if (st.size > MAX_CONTENT_BYTES) return { kind: "tooLarge" };
     return classify(await readFile(abs));
   } catch {
-    return { kind: "absent" };
+    return ABSENT;
   }
 }
-var stripCr = (s) => s.endsWith("\r") ? s.slice(0, -1) : s;
-function matchesBlocks(lines, blocks, side) {
-  return blocks.every((b) => {
+function matchingText(c, blocks, side) {
+  if (c.kind !== "text") return null;
+  const lines = splitLines(c.text);
+  const matches = blocks.every((b) => {
     const [start, want] = side === "old" ? [b.oldStart, b.del] : [b.newStart, b.add];
     return want.every((t, k) => {
       const got = lines[start + k];
       return got !== void 0 && stripCr(got) === stripCr(t);
     });
   });
+  return matches ? { text: c.text, lines } : null;
 }
-async function buildTrackedFile(repoRoot, prefix, diffArgs, range, oldCommit, headCommit, blobs, entry, section) {
-  const status = statusOf(entry.code);
-  if (!section) {
-    const paths = entry.oldPath ? [entry.oldPath, entry.path] : [entry.path];
-    const one = await git(repoRoot, [...diffArgs, "-U0", ...range, "--", ...paths]);
-    section = splitSections(one.toString("utf8"))[0] ?? [];
-  }
-  const parsed = parseSection(section);
-  const blocks = assignIds(prefix + entry.path, parsed.blocks);
-  const absent = { kind: "absent" };
-  const oldC = status === "added" || !oldCommit ? absent : blobs.get(entry.oldOid) ?? absent;
-  const newC = status === "deleted" ? absent : headCommit ? blobs.get(entry.newOid) ?? absent : await readWorkTree(repoRoot, entry.path);
-  const binary = parsed.binary || oldC.kind === "binary" || newC.kind === "binary";
-  const tooLarge = oldC.kind === "tooLarge" || newC.kind === "tooLarge";
-  const file2 = {
-    path: entry.path,
-    oldPath: status === "renamed" ? entry.oldPath : null,
-    status,
-    binary,
-    tooLarge,
-    generated: false,
-    diffTooLarge: false,
-    modeChange: parsed.modeChange,
-    additions: blocks.reduce((s, b) => s + b.newCount, 0),
-    deletions: blocks.reduce((s, b) => s + b.oldCount, 0)
-  };
-  if (!binary && diffTooLarge(blocks)) return withoutLines(file2, blocks);
-  let oldLines = oldC.kind === "text" ? splitLines(oldC.text) : null;
-  let newLines = newC.kind === "text" ? splitLines(newC.text) : null;
-  if (oldLines && !matchesBlocks(oldLines, blocks, "old")) oldLines = null;
-  if (newLines && !matchesBlocks(newLines, blocks, "new")) newLines = null;
+function fileDiff(filePath, fields) {
   return {
-    ...file2,
-    blocks: binary ? [] : blocks,
-    hunks: binary ? [] : buildHunks(blocks, oldLines, newLines),
-    oldContent: oldLines && oldC.kind === "text" ? oldC.text : null,
-    newContent: newLines && newC.kind === "text" ? newC.text : null
-  };
-}
-async function buildUntrackedFile(repoRoot, prefix, filePath) {
-  const c = await readWorkTree(repoRoot, filePath);
-  if (c.kind === "absent") return null;
-  const base = {
     path: filePath,
     oldPath: null,
     status: "added",
-    binary: c.kind === "binary",
-    tooLarge: c.kind === "tooLarge",
+    binary: false,
+    tooLarge: false,
     generated: false,
     diffTooLarge: false,
     modeChange: null,
@@ -37292,36 +37232,68 @@ async function buildUntrackedFile(repoRoot, prefix, filePath) {
     blocks: [],
     hunks: [],
     oldContent: null,
-    newContent: null
+    newContent: null,
+    ...fields
   };
-  if (c.kind !== "text") return base;
-  const lines = splitLines(c.text);
-  if (lines.length === 0) return base;
-  const blocks = assignIds(prefix + filePath, [
-    {
-      oldStart: 0,
-      oldCount: 0,
-      newStart: 0,
-      newCount: lines.length,
-      del: [],
-      add: lines,
-      oldNoEol: false,
-      newNoEol: !c.text.endsWith("\n"),
-      section: ""
-    }
-  ]);
-  if (diffTooLarge(blocks)) return withoutLines({ ...base, additions: lines.length }, blocks);
-  return { ...base, additions: lines.length, blocks, hunks: buildHunks(blocks, null, lines), newContent: c.text };
 }
 function withoutLines(file2, blocks) {
+  return { ...file2, diffTooLarge: true, blocks: blocks.map((b) => ({ ...b, del: [], add: [] })) };
+}
+async function trackedFile(ctx, entry, section) {
+  const status = statusOf(entry.code);
+  if (!section) {
+    const paths = entry.oldPath ? [entry.oldPath, entry.path] : [entry.path];
+    const one = await git(ctx.root, [...DIFF_ARGS, "-U0", ...ctx.range, "--", ...paths]);
+    section = splitSections(one.toString("utf8"))[0] ?? [];
+  }
+  const parsed = parseSection(section);
+  const blocks = assignIds(ctx.prefix + entry.path, parsed.blocks);
+  const oldC = status === "added" || !ctx.oldCommit ? ABSENT : ctx.blobs.get(entry.oldOid) ?? ABSENT;
+  const newC = status === "deleted" ? ABSENT : ctx.headCommit ? ctx.blobs.get(entry.newOid) ?? ABSENT : await readWorkTree(ctx.root, entry.path);
+  const binary = parsed.binary || oldC.kind === "binary" || newC.kind === "binary";
+  const file2 = fileDiff(entry.path, {
+    oldPath: status === "renamed" ? entry.oldPath : null,
+    status,
+    binary,
+    tooLarge: oldC.kind === "tooLarge" || newC.kind === "tooLarge",
+    modeChange: parsed.modeChange,
+    additions: sum(blocks, (b) => b.newCount),
+    deletions: sum(blocks, (b) => b.oldCount)
+  });
+  if (binary) return file2;
+  if (diffTooLarge(blocks)) return withoutLines(file2, blocks);
+  const old = matchingText(oldC, blocks, "old");
+  const next = matchingText(newC, blocks, "new");
   return {
     ...file2,
-    diffTooLarge: true,
-    blocks: blocks.map((b) => ({ ...b, del: [], add: [] })),
-    hunks: [],
-    oldContent: null,
-    newContent: null
+    blocks,
+    hunks: buildHunks(blocks, old?.lines ?? null, next?.lines ?? null),
+    oldContent: old?.text ?? null,
+    newContent: next?.text ?? null
   };
+}
+async function untrackedFile(ctx, filePath) {
+  const c = await readWorkTree(ctx.root, filePath);
+  if (c.kind === "absent") return null;
+  const file2 = fileDiff(filePath, { binary: c.kind === "binary", tooLarge: c.kind === "tooLarge" });
+  if (c.kind !== "text") return file2;
+  const lines = splitLines(c.text);
+  if (lines.length === 0) return file2;
+  const raw = {
+    oldStart: 0,
+    oldCount: 0,
+    newStart: 0,
+    newCount: lines.length,
+    del: [],
+    add: lines,
+    oldNoEol: false,
+    newNoEol: !c.text.endsWith("\n"),
+    section: ""
+  };
+  const blocks = assignIds(ctx.prefix + filePath, [raw]);
+  const added = { ...file2, additions: lines.length };
+  if (diffTooLarge(blocks)) return withoutLines(added, blocks);
+  return { ...added, blocks, hunks: buildHunks(blocks, null, lines), newContent: c.text };
 }
 async function mapLimit(items, limit, fn) {
   const out = new Array(items.length);
@@ -37329,7 +37301,7 @@ async function mapLimit(items, limit, fn) {
   const worker = async () => {
     while (next < items.length) {
       const i = next++;
-      out[i] = await fn(items[i]);
+      out[i] = await fn(items[i], i);
     }
   };
   await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
@@ -37366,7 +37338,7 @@ function ask(o) {
     const timer = setTimeout(() => child.kill(), TIMEOUT_MS);
     let settled = false;
     let sessionId = null;
-    let result = null;
+    let result2 = null;
     let failure2 = null;
     let streamed = "";
     let stderr = "";
@@ -37376,7 +37348,7 @@ function ask(o) {
       clearTimeout(timer);
       running.delete(child);
       if (err) reject(err);
-      else if (result !== null) resolve({ sessionId, text: result });
+      else if (result2 !== null) resolve({ sessionId, text: result2 });
       else reject(new Error(failure2 ?? (stderr.trim() || "Claude stopped without an answer.")));
     };
     child.stderr.on("data", (d) => {
@@ -37402,7 +37374,7 @@ function ask(o) {
         }
       } else if (m.type === "result") {
         if (m.is_error || m.subtype !== "success") failure2 = m.result || `Claude stopped: ${m.subtype ?? "error"}`;
-        else result = m.result ?? streamed;
+        else result2 = m.result ?? streamed;
       }
     });
     child.on("error", (err) => {
@@ -37427,14 +37399,21 @@ import { createServer } from "node:http";
 import { isIP } from "node:net";
 import path3 from "node:path";
 
+// src/shared/comments.ts
+var MENTION = /(^|\s)@claude\b/i;
+var lineNumbers = ({ start, end }) => start === end ? `${start}` : `${start}\u2013${end}`;
+var lineRange = (lines) => `${lines.start === lines.end ? "line" : "lines"} ${lineNumbers(lines)}`;
+
 // src/server/review.ts
 var MAX_CHARS = 6e4;
 var MAX_LINES_PER_CHANGE = 40;
 var MAX_LINE_CHARS = 300;
 var MAX_COMMITS_LISTED = 100;
+var MAX_SNIPPET_LINES = 8;
+var indent = (text, prefix) => text.replace(/^/gm, prefix);
 function formatChanges(diff) {
-  const count = diff.files.reduce((n, f) => n + changeIds(f).length, 0);
-  const out = [`${summarize(diff)}, ${count} change${count === 1 ? "" : "s"}. Each change starts with its id.`, ...describeFailures(diff)];
+  const count = sum(diff.files, (f) => changeIds(f).length);
+  const out = [`${summarize(diff)}, ${plural2(count, "change")}. Each change starts with its id.`, ...describeFailures(diff)];
   let size = 0;
   let omitted = 0;
   if (diff.commits.length) {
@@ -37450,7 +37429,7 @@ function formatChanges(diff) {
       continue;
     }
     for (const b of f.blocks) {
-      out.push(`  ${b.id}  @@ -${rangeHeader(b.oldStart, b.oldCount)} +${rangeHeader(b.newStart, b.newCount)} @@${b.section ? ` ${b.section}` : ""}`);
+      out.push(`  ${b.id}  ${hunkHeader(b.oldStart, b.oldCount, b.newStart, b.newCount, b.section)}`);
       if (size > MAX_CHARS) {
         omitted++;
         continue;
@@ -37464,35 +37443,29 @@ function formatChanges(diff) {
       if (lines.length > MAX_LINES_PER_CHANGE) out.push(`    \u2026 ${lines.length - MAX_LINES_PER_CHANGE} more lines`);
     }
   }
-  if (omitted) out.push("", `The lines of ${omitted} change${omitted === 1 ? " were" : "s were"} left out to keep this short. Read the files for them.`);
+  if (omitted) out.push("", `The lines of ${plural2(omitted, "change")} were left out to keep this short. Read the files for them.`);
   return out.join("\n");
 }
 function formatReviewComments(threads, submissions, after, read) {
   const withDrafts = after === null;
   const unread = submissions.filter((s) => s.n > (after ?? read));
-  const reviews = after === null && !unread.length ? submissions.slice(-1) : unread;
+  const reviews = withDrafts && !unread.length ? submissions.slice(-1) : unread;
   const numbers = new Set(reviews.map((s) => s.n));
   const submitted = threads.filter((t) => t.comments.some((c) => c.review !== null && numbers.has(c.review)));
   const drafts = withDrafts ? threads.filter((t) => !submitted.includes(t) && t.comments.some((c) => c.draft)) : [];
   const asked = withDrafts ? threads.filter((t) => t.comments.every((c) => c.author !== "user" || !c.draft && c.review === null)) : [];
   if (!reviews.length && !drafts.length && !asked.length) return null;
   const out = [];
+  const section = (title, list, showDrafts) => out.push(title, ...list.flatMap((t) => ["", formatThread(t, showDrafts)]));
   for (const s of reviews) {
     out.push(`Review ${s.n}, submitted at ${new Date(s.submittedAt).toLocaleTimeString("en-GB")}.`);
     if (s.body) out.push("  Comment on the whole review:", indent(s.body, "    "));
   }
-  if (reviews.length) {
-    out.push(`Comments in ${submitted.length} thread${submitted.length === 1 ? "" : "s"}:`);
-    for (const t of submitted) out.push("", formatThread(t, withDrafts));
-  }
-  if (drafts.length) {
-    out.push("", `Draft comments the user has not submitted yet, in ${drafts.length} thread${drafts.length === 1 ? "" : "s"}:`);
-    for (const t of drafts) out.push("", formatThread(t, true));
-  }
-  if (asked.length) {
-    out.push("", `Questions the user asked @claude, answered in the page, in ${asked.length} thread${asked.length === 1 ? "" : "s"}:`);
-    for (const t of asked) out.push("", formatThread(t, true));
-  }
+  if (reviews.length) section(`Comments in ${plural2(submitted.length, "thread")}:`, submitted, withDrafts);
+  if (drafts.length) section(`
+Draft comments the user has not submitted yet, in ${plural2(drafts.length, "thread")}:`, drafts, true);
+  if (asked.length) section(`
+Questions the user asked @claude, answered in the page, in ${plural2(asked.length, "thread")}:`, asked, true);
   return out.join("\n");
 }
 function formatThread(t, withDrafts) {
@@ -37507,11 +37480,10 @@ function formatThread(t, withDrafts) {
     return [title, ...files ? [`  ${files}`] : [], ...comments].join("\n");
   }
   const version2 = anchor2.commit ? ` at commit ${anchor2.commit}` : anchor2.side !== "old" ? " in the working tree" : "";
-  const where = anchor2.side === null ? "the whole file" : `${anchor2.side} ${anchor2.start === anchor2.end ? `line ${anchor2.start}` : `lines ${anchor2.start}-${anchor2.end}`}`;
-  const snippet = anchor2.side === null ? [] : t.snippet.split("\n").slice(0, 8).map((l) => `  > ${l}`);
+  const where = anchor2.side === null ? "the whole file" : `${anchor2.side} ${lineRange(anchor2)}`;
+  const snippet = anchor2.side === null ? [] : t.snippet.split("\n").slice(0, MAX_SNIPPET_LINES).map((l) => `  > ${l}`);
   return [`Thread ${t.id}: ${anchor2.path}, ${where}${version2}`, ...snippet, ...comments].join("\n");
 }
-var indent = (text, prefix) => text.replace(/^/gm, prefix);
 function checkTopics(diff, topics) {
   const known = new Set(diff.files.flatMap(changeIds));
   const used = new Set(topics.flatMap((t) => t.ids));
@@ -37596,48 +37568,39 @@ function unknownIds(diff, topics) {
   const { unknown: unknown2 } = checkTopics(diff, topics);
   return unknown2.length ? `These ids are not in the list of changes: ${unknown2.join(", ")}.` : null;
 }
-function isRecord(value) {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
 
 // src/server/threads.ts
 import { randomBytes } from "node:crypto";
-
-// src/shared/comments.ts
-var MENTION = /(^|\s)@claude\b/i;
-
-// src/server/threads.ts
 var EMIT_INTERVAL_MS = 100;
+var REVIEWING = "The user is reviewing the code changes in a diff viewer";
+var ANSWER = "Answer the last comment directly and concisely, in the language it is written in, using Markdown. You can read files to check details, but do not change anything.";
 var newId = () => randomBytes(6).toString("base64url");
+var now = () => (/* @__PURE__ */ new Date()).toISOString();
 var RepoThreads = class {
+  constructor(cwd) {
+    this.cwd = cwd;
+  }
+  cwd;
   threads = [];
   submissions = [];
-  /** The newest review get_review_comments has returned, so that without `after` it returns the ones after it. */
   read = 0;
-  cwd;
   parentSession = null;
   fork = null;
   queue = Promise.resolve();
   listeners = /* @__PURE__ */ new Set();
   listeningListeners = /* @__PURE__ */ new Set();
   waiters = /* @__PURE__ */ new Set();
-  constructor(cwd) {
-    this.cwd = cwd;
-  }
   subscribe(fn) {
     this.listeners.add(fn);
     return () => this.listeners.delete(fn);
   }
-  /** Whether Claude is running the wait command, so a submitted review reaches it at once. */
   get listening() {
     return this.waiters.size > 0;
   }
-  /** Calls fn whenever `listening` changes. */
   subscribeListening(fn) {
     this.listeningListeners.add(fn);
     return () => this.listeningListeners.delete(fn);
   }
-  /** A single comment is submitted on its own at once, as a review of one comment, instead of waiting in the pending review. */
   create(anchor2, snippet, body, single) {
     const thread = { id: newId(), rev: 0, anchor: anchor2, snippet, comments: [] };
     this.threads.push(thread);
@@ -37645,28 +37608,22 @@ var RepoThreads = class {
     return thread;
   }
   reply(threadId, body, single) {
-    const thread = this.threads.find((t) => t.id === threadId);
-    if (!thread) return null;
-    this.addComment(thread, body, single);
+    const thread = this.find(threadId);
+    if (thread) this.addComment(thread, body, single);
     return thread;
   }
-  /** Changes the text of a comment the user wrote. It does not ask Claude again. */
   edit(threadId, commentId, body) {
-    const thread = this.threads.find((t) => t.id === threadId);
+    const thread = this.find(threadId);
     const c = thread?.comments.find((x) => x.id === commentId && x.author === "user");
     if (!thread || !c) return null;
     c.body = body;
-    c.editedAt = (/* @__PURE__ */ new Date()).toISOString();
+    c.editedAt = now();
     this.emit(thread);
     return thread;
   }
-  /**
-   * Deletes a comment the user wrote. Deleting the first one deletes the thread with its replies: the page gets
-   * the thread with no comments and drops it.
-   */
   remove(threadId, commentId) {
-    const thread = this.threads.find((t) => t.id === threadId);
-    const i = thread ? thread.comments.findIndex((x) => x.id === commentId && x.author === "user") : -1;
+    const thread = this.find(threadId);
+    const i = thread?.comments.findIndex((x) => x.id === commentId && x.author === "user") ?? -1;
     if (!thread || i < 0) return null;
     if (i === 0) {
       this.threads.splice(this.threads.indexOf(thread), 1);
@@ -37677,15 +37634,12 @@ var RepoThreads = class {
     this.emit(thread);
     return thread;
   }
-  /** A reply from the Claude Code session that addressed the review. */
   replyFromSession(threadId, body) {
-    const thread = this.threads.find((t) => t.id === threadId);
-    if (!thread) return false;
+    const thread = this.find(threadId);
+    if (!thread) return;
     thread.comments.push(comment("claude", body, "done"));
     this.emit(thread);
-    return true;
   }
-  /** Submits every draft comment as one review and wakes whoever waits for it. Null when there is nothing to submit. */
   submit(body) {
     const changed = this.threads.filter((t) => t.comments.some((c) => c.draft));
     if (!changed.length && !body) return null;
@@ -37700,20 +37654,6 @@ var RepoThreads = class {
     }
     return { submission, delivered: this.wake(submission), threads: changed };
   }
-  newSubmission(body) {
-    const submission = { n: this.submissions.length + 1, body, submittedAt: (/* @__PURE__ */ new Date()).toISOString() };
-    this.submissions.push(submission);
-    return submission;
-  }
-  /** Hands a submitted review to whoever waits for one. Returns whether anyone was waiting. */
-  wake(submission) {
-    const delivered = this.waiters.size > 0;
-    for (const wake of this.waiters) wake(submission);
-    this.waiters.clear();
-    if (delivered) this.emitListening();
-    return delivered;
-  }
-  /** Calls onReview once a review numbered above `after` is submitted, right away if one already is. Returns a function that stops waiting. */
   waitForReview(after, onReview) {
     const latest = this.submissions.at(-1);
     if (latest && latest.n > after) {
@@ -37727,6 +37667,21 @@ var RepoThreads = class {
       if (this.waiters.delete(onReview) && this.waiters.size === 0) this.emitListening();
     };
   }
+  find(threadId) {
+    return this.threads.find((t) => t.id === threadId) ?? null;
+  }
+  newSubmission(body) {
+    const submission = { n: this.submissions.length + 1, body, submittedAt: now() };
+    this.submissions.push(submission);
+    return submission;
+  }
+  wake(submission) {
+    const delivered = this.waiters.size > 0;
+    for (const wake of this.waiters) wake(submission);
+    this.waiters.clear();
+    if (delivered) this.emitListening();
+    return delivered;
+  }
   emitListening() {
     for (const fn of this.listeningListeners) fn(this.listening);
   }
@@ -37735,23 +37690,15 @@ var RepoThreads = class {
     for (const fn of this.listeners) fn(thread);
   }
   addComment(thread, body, single) {
-    const asking = MENTION.test(body);
     const c = comment("user", body, "done");
     thread.comments.push(c);
-    if (asking) {
-      this.answer(thread);
-      this.emit(thread);
-      return;
-    }
-    if (!single) {
-      c.draft = true;
-      this.emit(thread);
-      return;
-    }
-    const submission = this.newSubmission("");
-    c.review = submission.n;
+    const asking = MENTION.test(body);
+    const submission = !asking && single ? this.newSubmission("") : null;
+    if (asking) this.answer(thread);
+    c.draft = !asking && !single;
+    c.review = submission?.n ?? null;
     this.emit(thread);
-    this.wake(submission);
+    if (submission) this.wake(submission);
   }
   answer(thread) {
     const prompt = buildPrompt2(thread);
@@ -37787,7 +37734,7 @@ var RepoThreads = class {
         res = await ask({ cwd: this.cwd, resume: known ? known.session : parent, fork: forking, prompt, onText, onActivity });
       } catch (err) {
         if (!forking) throw err;
-        note = `_Answered without the original conversation, because it could not be resumed: ${errorText(err)}_
+        note = `_Answered without the original conversation, because it could not be resumed: ${errorMessage(err)}_
 
 `;
         res = await ask({ cwd: this.cwd, resume: null, fork: false, prompt, onText, onActivity });
@@ -37797,7 +37744,7 @@ var RepoThreads = class {
       reply.body = note + res.text;
       reply.status = "done";
     } catch (err) {
-      reply.body = errorText(err);
+      reply.body = errorMessage(err);
       reply.status = "error";
     }
     reply.activity = null;
@@ -37805,50 +37752,35 @@ var RepoThreads = class {
   }
 };
 function comment(author, body, status) {
-  return { id: newId(), author, body, status, activity: null, createdAt: (/* @__PURE__ */ new Date()).toISOString(), draft: false, review: null, editedAt: null };
+  return { id: newId(), author, body, status, activity: null, createdAt: now(), draft: false, review: null, editedAt: null };
 }
 function buildPrompt2(thread) {
-  const { anchor: anchor2 } = thread;
-  const version2 = anchor2.commit ? ` as of commit ${anchor2.commit}. The files on disk are the working tree and can differ from that commit` : anchor2.side !== "old" ? " in the working tree" : "";
   const history = thread.comments.filter((c) => c.status === "done").map((c) => `${c.author === "user" ? "User" : "Claude"}: ${c.body}`).join("\n\n");
-  const answer = "Answer the last comment directly and concisely, in the language it is written in, using Markdown. You can read files to check details, but do not change anything.";
+  const [intro, ...context] = promptContext(thread.anchor, thread.snippet);
+  return [intro, ANSWER, ...context, "", "Thread:", history].join("\n");
+}
+function promptContext(anchor2, snippet) {
   if (anchor2.path === null) {
+    const topic = `the topic "${anchor2.topic}" of ${describeComparison(anchor2.compare)}`;
     return [
-      `The user is reviewing the code changes in a diff viewer, where you grouped the changes into topics. They wrote in a comment thread on the topic "${anchor2.topic}" of ${describeComparison(anchor2.compare)} as a whole.`,
-      answer,
+      `${REVIEWING}, where you grouped the changes into topics. They wrote in a comment thread on ${topic} as a whole.`,
       "",
       "The topic:",
-      thread.snippet,
-      "",
-      "Thread:",
-      history
-    ].join("\n");
+      snippet
+    ];
   }
+  const version2 = anchor2.commit ? ` as of commit ${anchor2.commit}. The files on disk are the working tree and can differ from that commit` : anchor2.side !== "old" ? " in the working tree" : "";
   if (anchor2.side === null) {
-    return [
-      `The user is reviewing the code changes in a diff viewer. They wrote in a comment thread on the whole file ${anchor2.path}${version2}, not on particular lines.`,
-      answer,
-      "",
-      "Thread:",
-      history
-    ].join("\n");
+    return [`${REVIEWING}. They wrote in a comment thread on the whole file ${anchor2.path}${version2}, not on particular lines.`];
   }
-  const lines = anchor2.start === anchor2.end ? `line ${anchor2.start}` : `lines ${anchor2.start}-${anchor2.end}`;
   return [
-    `The user is reviewing the code changes in a diff viewer. They selected ${lines} of the ${anchor2.side} version of ${anchor2.path}${version2}. They wrote in a comment thread on these lines.`,
-    answer,
+    `${REVIEWING}. They selected ${lineRange(anchor2)} of the ${anchor2.side} version of ${anchor2.path}${version2}. They wrote in a comment thread on these lines.`,
     "",
     "Selected lines:",
     "```",
-    thread.snippet,
-    "```",
-    "",
-    "Thread:",
-    history
-  ].join("\n");
-}
-function errorText(err) {
-  return err instanceof Error ? err.message : String(err);
+    snippet,
+    "```"
+  ];
 }
 
 // src/server/http.ts
@@ -37862,6 +37794,17 @@ var MIME = {
 };
 var FIRST_PORT = 7800;
 var PORT_COUNT = 10;
+var MAX_REQUEST_BYTES = 256 * 1024;
+var MAX_COMMENT = 20 * 1024;
+var MAX_SNIPPET = 64 * 1024;
+var MAX_FOCUS = 2e3;
+var MAX_REF = 1024;
+var MAX_OVERRIDES = 1e3;
+var MAX_PATH = 4096;
+var PING_MS = 25e3;
+var PAGE = /^\/v\/[\w-]+$/;
+var API = /^\/api\/views\/([\w-]+)\/(diff|events|refs|threads|review|wait|version|topics)(?:\/([\w-]+)\/comments(?:\/([\w-]+))?)?$/;
+var SHA = /^[0-9a-f]{40,64}$/;
 var sshAddress = process.env.SSH_CONNECTION?.split(" ")[2] ?? "";
 var SSH_HOST = isIP(sshAddress) ? sshAddress : null;
 var CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'";
@@ -37870,14 +37813,11 @@ var ReviewServer = class {
   repos = /* @__PURE__ */ new Map();
   reviews = [];
   groupings = [];
-  // Each open page's event stream.
   pages = /* @__PURE__ */ new Set();
+  token = randomBytes2(32).toString("base64url");
   uiDir;
   server = null;
   port = 0;
-  // Anyone who can reach the port could otherwise read the repository and have @claude read any file, so every
-  // request but the static assets needs this token, from the URL or from the cookie the page gets for it.
-  token = randomBytes2(32).toString("base64url");
   constructor(uiDir) {
     this.uiDir = path3.resolve(uiDir);
   }
@@ -37888,8 +37828,8 @@ var ReviewServer = class {
         else res.destroy();
       });
     });
-    let bound = false;
     const host = SSH_HOST ? void 0 : "127.0.0.1";
+    let bound = false;
     for (let port = FIRST_PORT; !bound && port < FIRST_PORT + PORT_COUNT; port++) bound = await listen(server, port, host);
     if (!bound) await listen(server, 0, host);
     this.port = server.address().port;
@@ -37900,32 +37840,39 @@ var ReviewServer = class {
     this.server?.close();
     this.server = null;
   }
-  /** Whether a page is open, so it shows each view Claude opens instead of the user opening its URL. */
   get pageOpen() {
     return this.pages.size > 0;
   }
-  /** A view for Claude's comparison, with its topics when it grouped the changes. Open pages switch to it. */
   addView(repo, compare, grouped, cwd, session) {
     let id;
     do
       id = Array.from({ length: 8 }, () => String.fromCharCode(97 + randomInt(26))).join("");
     while (this.views.has(id));
     const view = { id, repo, compare };
-    this.views.set(view.id, view);
-    let threads = this.repos.get(repo);
-    if (!threads) {
-      threads = new RepoThreads(cwd);
-      this.repos.set(repo, threads);
-    }
+    this.views.set(id, view);
+    const threads = this.repos.get(repo) ?? new RepoThreads(cwd);
+    this.repos.set(repo, threads);
     threads.cwd = cwd;
     if (session) threads.parentSession = session;
     if (grouped) this.addReview(view, compare, grouped.focus, grouped.topics);
-    this.broadcast("view", { view: view.id, repo, compare });
+    this.broadcast("view", { view: id, repo, compare });
     return view;
   }
-  // A newer review of the same comparison replaces the older one.
+  repoThreads() {
+    const newest = /* @__PURE__ */ new Map();
+    for (const v of this.views.values()) newest.set(v.repo, v);
+    return [...this.repos].map(([repo, threads]) => ({ repo, threads, view: newest.get(repo) }));
+  }
+  url(view) {
+    const host = !SSH_HOST ? "127.0.0.1" : isIP(SSH_HOST) === 6 ? `[${SSH_HOST}]` : SSH_HOST;
+    return `http://${host}:${this.port}/v/${view.id}?token=${this.token}`;
+  }
+  waitCommand(view) {
+    const after = this.repos.get(view.repo)?.submissions.length ?? 0;
+    return `curl -sSf "http://127.0.0.1:${this.port}/api/views/${view.id}/wait?after=${after}&token=${this.token}"`;
+  }
   addReview(view, compare, focus, topics) {
-    const same = (r) => r.repo === view.repo && sameComparison(r.compare, compare);
+    const same = isFor(view.repo, compare);
     const old = this.reviews.findIndex(same);
     if (old >= 0) this.reviews.splice(old, 1);
     this.reviews.push({ repo: view.repo, compare, focus, topics, createdAt: (/* @__PURE__ */ new Date()).toISOString(), view: view.id });
@@ -37934,9 +37881,8 @@ var ReviewServer = class {
     this.broadcast("reviews", this.reviews);
     this.broadcast("groupings", this.groupings);
   }
-  /** Asks Claude to group the comparison into topics, unless it is already at it. Progress and the review reach the pages as events. */
   group(view, compare, focus, threads) {
-    const i = this.groupings.findIndex((g) => g.repo === view.repo && sameComparison(g.compare, compare));
+    const i = this.groupings.findIndex(isFor(view.repo, compare));
     if (i >= 0 && this.groupings[i].error === null) return;
     if (i >= 0) this.groupings.splice(i, 1);
     const job = { repo: view.repo, compare, focus, activity: "Starting", error: null };
@@ -37963,146 +37909,104 @@ var ReviewServer = class {
   broadcast(event, data) {
     for (const send of this.pages) send(event, data);
   }
-  /** Each repository's threads, with the newest view opened for it. */
-  repoThreads() {
-    const newest = /* @__PURE__ */ new Map();
-    for (const v of this.views.values()) newest.set(v.repo, v);
-    return [...this.repos].map(([repo, threads]) => ({ repo, threads, view: newest.get(repo) }));
-  }
-  url(view) {
-    const host = !SSH_HOST ? "127.0.0.1" : isIP(SSH_HOST) === 6 ? `[${SSH_HOST}]` : SSH_HOST;
-    return `http://${host}:${this.port}/v/${view.id}?token=${this.token}`;
-  }
-  /** A shell command that exits once the user submits a review newer than the ones submitted so far. */
-  waitCommand(view) {
-    const after = this.repos.get(view.repo)?.submissions.length ?? 0;
-    return `curl -sSf "http://127.0.0.1:${this.port}/api/views/${view.id}/wait?after=${after}&token=${this.token}"`;
-  }
   async handle(req, res) {
     const { pathname, searchParams } = new URL(req.url ?? "/", "http://127.0.0.1");
-    if (!pathname.startsWith("/assets/")) {
-      const given = searchParams.get("token");
-      const cookie = `diff-review-${this.port}`;
-      if (given !== null && this.validToken(given) && req.method === "GET" && /^\/v\/[\w-]+$/.test(pathname)) {
-        searchParams.delete("token");
-        const query = searchParams.toString();
-        res.writeHead(302, {
-          Location: query ? `${pathname}?${query}` : pathname,
-          // Cookies ignore the port, so each port's server has its own.
-          "Set-Cookie": `${cookie}=${this.token}; Path=/; HttpOnly; SameSite=Strict`,
-          "Cache-Control": "no-store"
-        });
-        return void res.end();
-      }
-      const fromCookie = req.headers.cookie?.split(/;\s*/).find((c) => c.startsWith(`${cookie}=`))?.slice(cookie.length + 1);
-      if (!this.validToken(given ?? fromCookie)) {
-        const error62 = "Open the URL Claude printed. It carries the access token.";
-        return pathname.startsWith("/api/") ? sendJson(res, 401, { error: error62 }) : sendText(res, 401, error62);
-      }
+    const assets = pathname.startsWith("/assets/");
+    if (!assets && !this.authorize(req, res, pathname, searchParams)) return;
+    const api = API.exec(pathname);
+    if (api) return this.api(req, res, searchParams, api);
+    if (req.method !== "GET") return sendText(res, 405, "Method not allowed");
+    if (PAGE.test(pathname)) return this.sendFile(res, "index.html", "no-store");
+    if (assets) return this.sendFile(res, pathname.slice(1), "public, max-age=31536000, immutable");
+    return sendText(res, 404, "Not found");
+  }
+  authorize(req, res, pathname, query) {
+    const given = query.get("token");
+    const cookie = `diff-review-${this.port}`;
+    if (given !== null && this.validToken(given) && req.method === "GET" && PAGE.test(pathname)) {
+      query.delete("token");
+      const rest = query.toString();
+      res.writeHead(302, {
+        Location: rest ? `${pathname}?${rest}` : pathname,
+        "Set-Cookie": `${cookie}=${this.token}; Path=/; HttpOnly; SameSite=Strict`,
+        "Cache-Control": "no-store"
+      });
+      res.end();
+      return false;
     }
-    const api = /^\/api\/views\/([\w-]+)\/(diff|events|refs|threads|review|wait|version|topics)(?:\/([\w-]+)\/comments(?:\/([\w-]+))?)?$/.exec(pathname);
-    if (api) {
-      const view = this.views.get(api[1]);
-      if (!view) return sendJson(res, 404, { error: "Unknown view. Ask Claude to open the viewer again." });
-      const threads = this.repos.get(view.repo);
-      const route = api[2];
-      const threadId = api[3];
-      const commentId = api[4];
-      if (req.method === "GET" && route === "diff" && !threadId) {
-        try {
-          const compare = comparisonFromQuery(searchParams) ?? view.compare;
-          const version2 = await diffVersion(view.repo, compare);
-          const diff = await computeDiff(view.repo, compare);
-          const data = {
-            diff,
-            version: version2,
-            opened: view.compare,
-            reviews: this.reviews,
-            groupings: this.groupings,
-            threads: threads.threads,
-            listening: threads.listening
-          };
-          return sendJson(res, 200, data);
-        } catch (err) {
-          return sendJson(res, 500, { error: errorMessage(err) });
-        }
+    const fromCookie = req.headers.cookie?.split(/;\s*/).find((c) => c.startsWith(`${cookie}=`))?.slice(cookie.length + 1);
+    if (this.validToken(given ?? fromCookie)) return true;
+    const error62 = "Open the URL Claude printed. It carries the access token.";
+    if (pathname.startsWith("/api/")) sendJson(res, 401, { error: error62 });
+    else sendText(res, 401, error62);
+    return false;
+  }
+  async api(req, res, query, match) {
+    const [, viewId, route, threadId, commentId] = match;
+    const view = this.views.get(viewId);
+    if (!view) return sendJson(res, 404, { error: "Unknown view. Ask Claude to open the viewer again." });
+    if (req.method !== "GET" && !this.sameOrigin(req)) return sendJson(res, 403, { error: "Cross-site request refused" });
+    const threads = this.repos.get(view.repo);
+    const compare = comparisonFromQuery(query) ?? view.compare;
+    const target = commentId ? `${route}/comment` : threadId ? `${route}/thread` : route;
+    switch (`${req.method} ${target}`) {
+      case "GET diff": {
+        const version2 = await diffVersion(view.repo, compare);
+        const diff = await computeDiff(view.repo, compare);
+        const data = {
+          diff,
+          version: version2,
+          opened: view.compare,
+          reviews: this.reviews,
+          groupings: this.groupings,
+          threads: threads.threads,
+          listening: threads.listening
+        };
+        return sendJson(res, 200, data);
       }
-      if (req.method === "GET" && route === "version" && !threadId) {
-        try {
-          return sendJson(res, 200, { version: await diffVersion(view.repo, comparisonFromQuery(searchParams) ?? view.compare) });
-        } catch (err) {
-          return sendJson(res, 500, { error: errorMessage(err) });
-        }
-      }
-      if (req.method === "GET" && route === "refs" && !threadId) {
-        try {
-          return sendJson(res, 200, await listRefs(view.repo, searchParams.get("repo")));
-        } catch (err) {
-          return sendJson(res, 500, { error: errorMessage(err) });
-        }
-      }
-      if (req.method === "GET" && route === "events" && !threadId) return this.events(req, res, threads);
-      if (req.method === "POST" && route === "topics" && !threadId) {
-        if (!this.sameOrigin(req)) return sendJson(res, 403, { error: "Cross-site request refused" });
-        const { focus } = await readJson(req) ?? {};
-        if (focus !== void 0 && focus !== null && !isText(focus, 2e3)) return sendJson(res, 400, { error: "Invalid focus" });
-        this.group(view, comparisonFromQuery(searchParams) ?? view.compare, focus?.trim() || null, threads);
+      case "GET version":
+        return sendJson(res, 200, { version: await diffVersion(view.repo, compare) });
+      case "GET refs":
+        return sendJson(res, 200, await listRefs(view.repo, query.get("repo")));
+      case "GET events":
+        return this.events(req, res, threads);
+      case "GET wait":
+        return wait(res, query, view, threads);
+      case "POST topics": {
+        const { focus } = await readJson(req);
+        if (focus !== void 0 && focus !== null && !isText(focus, MAX_FOCUS)) return sendJson(res, 400, { error: "Invalid focus" });
+        this.group(view, compare, focus?.trim() || null, threads);
         return sendJson(res, 202, { groupings: this.groupings });
       }
-      if (route === "threads" && threadId && commentId && (req.method === "PATCH" || req.method === "DELETE")) {
-        if (!this.sameOrigin(req)) return sendJson(res, 403, { error: "Cross-site request refused" });
-        if (req.method === "DELETE") {
-          const thread2 = threads.remove(threadId, commentId);
-          return thread2 ? sendJson(res, 200, { thread: thread2 }) : sendJson(res, 404, { error: "Unknown comment" });
-        }
-        const { body: text } = await readJson(req) ?? {};
-        if (!isText(text, 20 * 1024, true)) return sendJson(res, 400, { error: "Invalid comment" });
-        const thread = threads.edit(threadId, commentId, text.trim());
-        return thread ? sendJson(res, 200, { thread }) : sendJson(res, 404, { error: "Unknown comment" });
-      }
-      if (req.method === "POST" && route === "threads" && !commentId) {
-        if (!this.sameOrigin(req)) return sendJson(res, 403, { error: "Cross-site request refused" });
-        const { anchor: anchor2, snippet, body: text, single } = await readJson(req) ?? {};
-        if (!isText(text, 20 * 1024, true) || single !== void 0 && typeof single !== "boolean") {
+      case "POST threads": {
+        const { anchor: anchor2, snippet, body, single } = await readJson(req);
+        if (!isComment(body, single) || !isAnchor(anchor2) || !isText(snippet, MAX_SNIPPET)) {
           return sendJson(res, 400, { error: "Invalid comment" });
         }
-        if (!threadId) {
-          if (!isAnchor(anchor2) || !isText(snippet, 64 * 1024)) return sendJson(res, 400, { error: "Invalid comment" });
-          return sendJson(res, 201, { thread: threads.create(anchor2, snippet, text.trim(), single === true) });
-        }
-        const thread = threads.reply(threadId, text.trim(), single === true);
-        if (!thread) return sendJson(res, 404, { error: "Unknown thread" });
-        return sendJson(res, 200, { thread });
+        return sendJson(res, 201, { thread: threads.create(anchor2, snippet, body.trim(), single === true) });
       }
-      if (req.method === "POST" && route === "review" && !threadId) {
-        if (!this.sameOrigin(req)) return sendJson(res, 403, { error: "Cross-site request refused" });
-        const { body: text } = await readJson(req) ?? {};
-        if (!isText(text, 20 * 1024)) return sendJson(res, 400, { error: "Invalid review" });
-        const result = threads.submit(text.trim());
-        if (!result) return sendJson(res, 400, { error: "Nothing to submit. Leave a comment first." });
-        return sendJson(res, 200, { review: result.submission.n, delivered: result.delivered, threads: result.threads });
+      case "POST threads/thread": {
+        const { body, single } = await readJson(req);
+        if (!isComment(body, single)) return sendJson(res, 400, { error: "Invalid comment" });
+        return sendThread(res, threads.reply(threadId, body.trim(), single === true), "Unknown thread");
       }
-      if (req.method === "GET" && route === "wait" && !threadId) {
-        const after = Number(searchParams.get("after") ?? 0);
-        if (!Number.isInteger(after) || after < 0) return sendText(res, 400, "Invalid after");
-        const stop = threads.waitForReview(
-          after,
-          (s) => sendText(
-            res,
-            200,
-            `The user submitted review ${s.n} in ${view.repo}. Call get_review_comments from the diff-review MCP server with repo set to ${JSON.stringify(view.repo)} and after set to ${after}.
-`
-          )
-        );
-        res.on("close", stop);
-        return;
+      case "PATCH threads/comment": {
+        const { body } = await readJson(req);
+        if (!isComment(body, void 0)) return sendJson(res, 400, { error: "Invalid comment" });
+        return sendThread(res, threads.edit(threadId, commentId, body.trim()), "Unknown comment");
       }
-      return sendText(res, 405, "Method not allowed");
+      case "DELETE threads/comment":
+        return sendThread(res, threads.remove(threadId, commentId), "Unknown comment");
+      case "POST review": {
+        const { body } = await readJson(req);
+        if (!isText(body, MAX_COMMENT)) return sendJson(res, 400, { error: "Invalid review" });
+        const result2 = threads.submit(body.trim());
+        if (!result2) return sendJson(res, 400, { error: "Nothing to submit. Leave a comment first." });
+        return sendJson(res, 200, { review: result2.submission.n, delivered: result2.delivered, threads: result2.threads });
+      }
+      default:
+        return sendText(res, 405, "Method not allowed");
     }
-    if (req.method !== "GET") return sendText(res, 405, "Method not allowed");
-    if (/^\/v\/[\w-]+$/.test(pathname)) return this.sendFile(res, "index.html", "no-store");
-    if (pathname.startsWith("/assets/")) return this.sendFile(res, pathname.slice(1), "public, max-age=31536000, immutable");
-    return sendText(res, 404, "Not found");
   }
   validToken(value) {
     const given = Buffer.from(value ?? "");
@@ -38111,9 +38015,9 @@ var ReviewServer = class {
   }
   sameOrigin(req) {
     const type = req.headers["content-type"] ?? "";
-    const origin = req.headers.origin;
+    const { origin, host } = req.headers;
     const site = req.headers["sec-fetch-site"];
-    return type.startsWith("application/json") && (origin === void 0 || origin === `http://${req.headers.host}`) && (site === void 0 || site === "same-origin");
+    return type.startsWith("application/json") && (origin === void 0 || origin === `http://${host}`) && (site === void 0 || site === "same-origin");
   }
   events(req, res, threads) {
     res.writeHead(200, {
@@ -38132,7 +38036,7 @@ data: ${JSON.stringify(data)}
     send("groupings", this.groupings);
     const unlisten = threads.subscribeListening((on) => send("listening", on));
     this.pages.add(send);
-    const ping = setInterval(() => res.write(": ping\n\n"), 25e3);
+    const ping = setInterval(() => res.write(": ping\n\n"), PING_MS);
     req.on("close", () => {
       clearInterval(ping);
       unsubscribe();
@@ -38159,6 +38063,20 @@ data: ${JSON.stringify(data)}
     res.end(body);
   }
 };
+function wait(res, query, view, threads) {
+  const after = Number(query.get("after") ?? 0);
+  if (!Number.isInteger(after) || after < 0) return sendText(res, 400, "Invalid after");
+  const stop = threads.waitForReview(
+    after,
+    (s) => sendText(
+      res,
+      200,
+      `The user submitted review ${s.n} in ${view.repo}. Call get_review_comments from the diff-review MCP server with repo set to ${JSON.stringify(view.repo)} and after set to ${after}.
+`
+    )
+  );
+  res.on("close", stop);
+}
 function listen(server, port, host) {
   return new Promise((resolve, reject) => {
     const onError = (err) => {
@@ -38175,45 +38093,47 @@ function listen(server, port, host) {
     server.listen(port, host);
   });
 }
-async function readJson(req, limit = 256 * 1024) {
+async function readJson(req) {
   const chunks = [];
   let size = 0;
   for await (const chunk of req) {
     size += chunk.length;
-    if (size > limit) return null;
+    if (size > MAX_REQUEST_BYTES) return {};
     chunks.push(chunk);
   }
   try {
     const value = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-    return value !== null && typeof value === "object" ? value : null;
+    return isRecord(value) ? value : {};
   } catch {
-    return null;
+    return {};
   }
 }
 function isText(value, max, nonEmpty = false) {
   return typeof value === "string" && value.length <= max && (!nonEmpty || value.trim() !== "");
 }
-function isAnchor(value) {
-  if (value === null || typeof value !== "object") return false;
-  const a = value;
+function isComment(body, single) {
+  return isText(body, MAX_COMMENT, true) && (single === void 0 || typeof single === "boolean");
+}
+function isAnchor(a) {
+  if (!isRecord(a)) return false;
   const line = (n) => Number.isInteger(n) && n > 0;
   if (a.path === null) {
-    return isText(a.topic, 1024, true) && isComparison(a.compare) && a.side === null && a.start === null && a.end === null && a.commit === null;
+    return isText(a.topic, MAX_REF, true) && isComparison(a.compare) && a.side === null && a.start === null && a.end === null && a.commit === null;
   }
-  if (!isText(a.path, 4096, true)) return false;
-  if (a.commit !== null && !(typeof a.commit === "string" && /^[0-9a-f]{40,64}$/.test(a.commit))) return false;
+  if (!isText(a.path, MAX_PATH, true)) return false;
+  if (a.commit !== null && !(typeof a.commit === "string" && SHA.test(a.commit))) return false;
   if (a.side === null) return a.start === null && a.end === null;
   return (a.side === "old" || a.side === "new") && line(a.start) && line(a.end) && a.start <= a.end;
 }
-function isComparison(value) {
-  if (value === null || typeof value !== "object") return false;
-  const c = value;
-  return isRange(c) && Array.isArray(c.overrides) && c.overrides.length <= 1e3 && c.overrides.every((o) => isRange(o) && isText(o.dir, 1024, true));
+function isComparison(c) {
+  return isRange(c) && Array.isArray(c.overrides) && c.overrides.length <= MAX_OVERRIDES && c.overrides.every((o) => isRange(o) && isText(o.dir, MAX_REF, true));
 }
-function isRange(value) {
-  if (value === null || typeof value !== "object") return false;
-  const r = value;
-  return isText(r.base, 1024, true) && (r.head === null || isText(r.head, 1024, true)) && typeof r.threeDot === "boolean";
+function isRange(r) {
+  return isRecord(r) && isText(r.base, MAX_REF, true) && (r.head === null || isText(r.head, MAX_REF, true)) && typeof r.threeDot === "boolean";
+}
+function sendThread(res, thread, missing) {
+  if (thread) sendJson(res, 200, { thread });
+  else sendJson(res, 404, { error: missing });
 }
 function sendJson(res, status, body) {
   res.writeHead(status, {
@@ -38226,9 +38146,6 @@ function sendJson(res, status, body) {
 function sendText(res, status, body) {
   res.writeHead(status, { "Content-Type": "text/plain; charset=utf-8", "X-Content-Type-Options": "nosniff" });
   res.end(body);
-}
-function errorMessage(err) {
-  return err instanceof Error ? err.message : String(err);
 }
 
 // src/server/main.ts
@@ -38245,6 +38162,17 @@ function getServer() {
   return serverPromise;
 }
 var SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function result(text, isError = false) {
+  const content = [{ type: "text", text }];
+  return isError ? { content, isError } : { content };
+}
+async function attempt(failure2, run) {
+  try {
+    return result(await run());
+  } catch (err) {
+    return result(`${failure2}: ${errorMessage(err)}`, true);
+  }
+}
 async function openViewer(repo, compare, focus, topics, session) {
   const diff = await computeDiff(repo, compare);
   let grouped = null;
@@ -38311,14 +38239,7 @@ async function runMcp() {
       inputSchema: { repo, base, head, threeDot, overrides },
       annotations: { readOnlyHint: true, openWorldHint: false }
     },
-    async (args) => {
-      try {
-        const diff = await computeDiff(args.repo ?? process.cwd(), comparison(args));
-        return { content: [{ type: "text", text: formatChanges(diff) }] };
-      } catch (err) {
-        return { content: [{ type: "text", text: `Could not list changes: ${errorMessage(err)}` }], isError: true };
-      }
-    }
+    (args) => attempt("Could not list changes", async () => formatChanges(await computeDiff(args.repo ?? process.cwd(), comparison(args))))
   );
   mcp.registerTool(
     "open_diff_viewer",
@@ -38344,15 +38265,10 @@ async function runMcp() {
       },
       annotations: { readOnlyHint: true, openWorldHint: false }
     },
-    async (args) => {
-      try {
-        const topics = args.topics?.map((t) => ({ ...t, related: t.related ?? true }));
-        const text = await openViewer(args.repo ?? process.cwd(), comparison(args), args.focus, topics, args.session);
-        return { content: [{ type: "text", text }] };
-      } catch (err) {
-        return { content: [{ type: "text", text: `Could not open the diff viewer: ${errorMessage(err)}` }], isError: true };
-      }
-    }
+    (args) => attempt("Could not open the diff viewer", () => {
+      const topics = args.topics?.map((t) => ({ ...t, related: t.related ?? true }));
+      return openViewer(args.repo ?? process.cwd(), comparison(args), args.focus, topics, args.session);
+    })
   );
   mcp.registerTool(
     "get_review_comments",
@@ -38374,8 +38290,7 @@ async function runMcp() {
       const containing = wanted ? all.filter((r) => wanted === r.repo || wanted.startsWith(r.repo + path4.sep)) : all;
       const repos = wanted ? containing.filter((r) => !containing.some((o) => o.repo.length > r.repo.length)) : all;
       if (args.after !== void 0 && !wanted && repos.filter((r) => r.threads.submissions.length).length > 1) {
-        const text = "Several repositories have reviews, numbered separately. Set repo to the one the wait command named.";
-        return { content: [{ type: "text", text }], isError: true };
+        return result("Several repositories have reviews, numbered separately. Set repo to the one the wait command named.", true);
       }
       const parts = repos.flatMap(({ repo: repo2, threads, view }) => {
         const text = formatReviewComments(threads.threads, threads.submissions, args.after ?? null, threads.read);
@@ -38389,7 +38304,7 @@ ${text}
 When you have addressed it, reply on each thread with reply_to_review. Then wait for the next review by running this in the background: ${server.waitCommand(view)}`
         ];
       });
-      return { content: [{ type: "text", text: parts.length ? parts.join("\n\n") : "No review comments yet." }] };
+      return result(parts.length ? parts.join("\n\n") : "No review comments yet.");
     }
   );
   mcp.registerTool(
@@ -38411,11 +38326,9 @@ When you have addressed it, reply on each thread with reply_to_review. Then wait
       const repos = serverPromise ? (await serverPromise).repoThreads() : [];
       const owner = (id) => repos.find((r) => r.threads.threads.some((t) => t.id === id))?.threads;
       const unknown2 = replies.filter((r) => !owner(r.thread)).map((r) => r.thread);
-      if (unknown2.length) {
-        return { content: [{ type: "text", text: `Unknown thread ids: ${unknown2.join(", ")}. Nothing was posted.` }], isError: true };
-      }
+      if (unknown2.length) return result(`Unknown thread ids: ${unknown2.join(", ")}. Nothing was posted.`, true);
       for (const r of replies) owner(r.thread).replyFromSession(r.thread, r.body.trim());
-      return { content: [{ type: "text", text: `Replied on ${replies.length} thread${replies.length === 1 ? "" : "s"}.` }] };
+      return result(`Replied on ${plural2(replies.length, "thread")}.`);
     }
   );
   mcp.server.onclose = () => void shutdown();

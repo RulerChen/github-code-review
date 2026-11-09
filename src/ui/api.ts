@@ -10,47 +10,20 @@ export class ApiError extends Error {
   }
 }
 
-/** Loads the view's diff, or another comparison in the same repository when one is given. */
-export async function fetchView(viewId: string, compare: Comparison | null): Promise<ViewData> {
-  const query = compare ? `?${comparisonQuery(compare)}` : "";
-  const res = await fetch(`/api/views/${encodeURIComponent(viewId)}/diff${query}`, { cache: "no-store" });
-  const body = (await res.json().catch(() => null)) as (Partial<ViewData> & { error?: string }) | null;
-  if (!res.ok || !body?.diff || !body.opened) throw new ApiError(body?.error ?? `HTTP ${res.status}`, res.status);
-  return {
-    diff: body.diff,
-    version: body.version ?? "",
-    opened: body.opened,
-    reviews: body.reviews ?? [],
-    groupings: body.groupings ?? [],
-    threads: body.threads ?? [],
-    listening: body.listening ?? false,
-  };
+interface SubmitResult {
+  review: number;
+  delivered: boolean;
+  threads: Thread[];
 }
 
-/** A cheap fingerprint of the diff fetchView would load, which changes when the files or refs change. */
-export async function fetchVersion(viewId: string, compare: Comparison | null): Promise<string> {
-  const query = compare ? `?${comparisonQuery(compare)}` : "";
-  const res = await fetch(`/api/views/${encodeURIComponent(viewId)}/version${query}`, { cache: "no-store" });
-  const body = (await res.json().catch(() => null)) as { version?: string; error?: string } | null;
-  if (!res.ok || typeof body?.version !== "string") throw new ApiError(body?.error ?? `HTTP ${res.status}`, res.status);
-  return body.version;
-}
+export const viewUrl = (viewId: string, ...parts: string[]) => `/api/views/${[viewId, ...parts].map(encodeURIComponent).join("/")}`;
 
-/** The refs of the view's repository, or with `repo`, of that repository in the view's directory of repositories. */
-export async function fetchRefs(viewId: string, repo: string | null = null): Promise<RefList> {
-  const query = repo === null ? "" : `?${new URLSearchParams({ repo })}`;
-  const res = await fetch(`/api/views/${encodeURIComponent(viewId)}/refs${query}`, { cache: "no-store" });
-  const body = (await res.json().catch(() => null)) as (Partial<RefList> & { error?: string }) | null;
-  if (!res.ok || !body?.branches) throw new ApiError(body?.error ?? `HTTP ${res.status}`, res.status);
-  return { branches: body.branches, tags: body.tags ?? [], commits: body.commits ?? [] };
-}
+const withComparison = (url: string, compare: Comparison | null) => (compare ? `${url}?${comparisonQuery(compare)}` : url);
 
-async function postJson<T>(url: string, payload: unknown, ok: (body: Partial<T>) => boolean, method = "POST"): Promise<T> {
-  const res = await fetch(url, {
-    method,
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
+async function request<T>(url: string, ok: (body: Partial<T>) => boolean, method = "GET", payload?: unknown): Promise<T> {
+  const init: RequestInit =
+    payload === undefined ? { method, cache: "no-store" } : { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) };
+  const res = await fetch(url, init);
   const body = (await res.json().catch(() => null)) as (Partial<T> & { error?: string }) | null;
   if (!res.ok || !body || !ok(body)) throw new ApiError(body?.error ?? `HTTP ${res.status}`, res.status);
   return body as T;
@@ -58,42 +31,44 @@ async function postJson<T>(url: string, payload: unknown, ok: (body: Partial<T>)
 
 const hasThread = (b: Partial<{ thread: Thread }>) => b.thread !== undefined;
 
-/** A single comment is submitted on its own at once instead of going into the pending review. */
-export async function createThread(viewId: string, anchor: ThreadAnchor, snippet: string, body: string, single: boolean): Promise<Thread> {
-  return (await postJson(`/api/views/${encodeURIComponent(viewId)}/threads`, { anchor, snippet, body, single }, hasThread)).thread;
+const threadRequest = async (url: string, method: string, payload: unknown) =>
+  (await request<{ thread: Thread }>(url, hasThread, method, payload)).thread;
+
+export function fetchView(viewId: string, compare: Comparison | null): Promise<ViewData> {
+  return request<ViewData>(withComparison(viewUrl(viewId, "diff"), compare), (b) => !!b.diff && !!b.opened);
 }
 
-export async function replyToThread(viewId: string, threadId: string, body: string, single: boolean): Promise<Thread> {
-  const url = `/api/views/${encodeURIComponent(viewId)}/threads/${encodeURIComponent(threadId)}/comments`;
-  return (await postJson(url, { body, single }, hasThread)).thread;
+export async function fetchVersion(viewId: string, compare: Comparison | null): Promise<string> {
+  const url = withComparison(viewUrl(viewId, "version"), compare);
+  return (await request<{ version: string }>(url, (b) => typeof b.version === "string")).version;
 }
 
-const commentUrl = (viewId: string, threadId: string, commentId: string) =>
-  `/api/views/${encodeURIComponent(viewId)}/threads/${encodeURIComponent(threadId)}/comments/${encodeURIComponent(commentId)}`;
-
-export async function editComment(viewId: string, threadId: string, commentId: string, body: string): Promise<Thread> {
-  return (await postJson(commentUrl(viewId, threadId, commentId), { body }, hasThread, "PATCH")).thread;
+export function fetchRefs(viewId: string, repo: string | null = null): Promise<RefList> {
+  const url = viewUrl(viewId, "refs") + (repo === null ? "" : `?${new URLSearchParams({ repo })}`);
+  return request<RefList>(url, (b) => Array.isArray(b.branches));
 }
 
-/** Deletes a comment. The thread comes back without it, or with no comments when the thread went with it. */
-export async function deleteComment(viewId: string, threadId: string, commentId: string): Promise<Thread> {
-  return (await postJson(commentUrl(viewId, threadId, commentId), {}, hasThread, "DELETE")).thread;
+export function createThread(viewId: string, anchor: ThreadAnchor, snippet: string, body: string, single: boolean): Promise<Thread> {
+  return threadRequest(viewUrl(viewId, "threads"), "POST", { anchor, snippet, body, single });
 }
 
-/** Asks Claude to group the comparison's changes into topics. It runs in the background and reports through the events. */
+export function replyToThread(viewId: string, threadId: string, body: string, single: boolean): Promise<Thread> {
+  return threadRequest(viewUrl(viewId, "threads", threadId, "comments"), "POST", { body, single });
+}
+
+export function editComment(viewId: string, threadId: string, commentId: string, body: string): Promise<Thread> {
+  return threadRequest(viewUrl(viewId, "threads", threadId, "comments", commentId), "PATCH", { body });
+}
+
+export function deleteComment(viewId: string, threadId: string, commentId: string): Promise<Thread> {
+  return threadRequest(viewUrl(viewId, "threads", threadId, "comments", commentId), "DELETE", {});
+}
+
 export async function groupTopics(viewId: string, compare: Comparison, focus: string): Promise<Grouping[]> {
-  const url = `/api/views/${encodeURIComponent(viewId)}/topics?${comparisonQuery(compare)}`;
-  return (await postJson<{ groupings: Grouping[] }>(url, { focus }, (b) => Array.isArray(b.groupings))).groupings;
+  const url = withComparison(viewUrl(viewId, "topics"), compare);
+  return (await request<{ groupings: Grouping[] }>(url, (b) => Array.isArray(b.groupings), "POST", { focus })).groupings;
 }
 
-export interface SubmitResult {
-  review: number;
-  /** Whether Claude was waiting for the review and has been woken to address it. */
-  delivered: boolean;
-  threads: Thread[];
-}
-
-/** Submits every draft comment, with an optional comment on the whole review. */
 export function submitReview(viewId: string, body: string): Promise<SubmitResult> {
-  return postJson<SubmitResult>(`/api/views/${encodeURIComponent(viewId)}/review`, { body }, (b) => Array.isArray(b.threads));
+  return request<SubmitResult>(viewUrl(viewId, "review"), (b) => Array.isArray(b.threads), "POST", { body });
 }

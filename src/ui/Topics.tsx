@@ -1,13 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import { changeIds } from "../shared/hunks";
 import type { Block, FileDiff, Review, Thread } from "../shared/types";
-import { CommentForm, type CommentsApi, onShownVersion, ThreadView, useComments } from "./comments";
-import { hasLine } from "./DiffTable";
-import { baseHunksOf, ChevronIcon, CommentIcon, FileCard } from "./FileCard";
+import { plural } from "../shared/util";
 import { keepHeaderInPlace } from "./anchor";
+import { type CommentsApi, onShownVersion, ThreadList, useComments } from "./comments";
+import { CollapseButton, CommentButton, ViewedToggle } from "./controls";
+import { hasLine } from "./DiffTable";
+import { baseHunksOf, FileCard } from "./FileCard";
 import { Markdown } from "./Markdown";
 
-export interface TopicPart {
+interface TopicPart {
   file: FileDiff;
   blocks: Block[];
   anchor: string;
@@ -23,7 +25,6 @@ export interface TopicView {
   changeCount: number;
   stale: number;
   signature: string;
-  /** The files this topic is the first to show. A comment on a whole file belongs to the first topic with the file. */
   firstFor: Set<string>;
 }
 
@@ -73,10 +74,6 @@ export function buildTopics(review: Review, files: FileDiff[]): TopicView[] {
   return ordered;
 }
 
-/**
- * Whether a thread belongs to the topic: it is on the topic itself, its line is in the topic's diff before any
- * expanding, or it is a comment on a whole file and the topic is the first with the file.
- */
 export function topicShows(topic: TopicView, thread: Thread, versions: CommentsApi["versions"]): boolean {
   const { anchor } = thread;
   if (anchor.path === null) return anchor.topic === topic.title;
@@ -93,90 +90,69 @@ interface SectionProps {
 
 export function TopicSection({ topic, viewed, onToggleViewed }: SectionProps) {
   const [collapsed, setCollapsed] = useState(viewed || !topic.related);
-  // A viewed topic whose changes are edited stops being viewed and opens again.
   useEffect(() => setCollapsed(viewed || !topic.related), [viewed]);
   const { revealSeq, peekReveal, versions, threadsForTopic, create } = useComments();
   useEffect(() => {
-    const thread = peekReveal()?.thread;
+    const thread = peekReveal();
     if (thread && topicShows(topic, thread, versions)) setCollapsed(false);
   }, [revealSeq]);
   const [commenting, setCommenting] = useState(false);
   const threads = threadsForTopic(topic.title);
 
   const header = useRef<HTMLElement>(null);
-  const files = topic.parts.length;
+  const files = topic.parts.map((p) => p.file.path);
   return (
     <section className={`topic${viewed ? " is-viewed" : ""}`} id={topic.anchor}>
       <header className="topic-header" ref={header}>
-        <button
-          className="icon-button chevron"
-          aria-expanded={!collapsed}
-          aria-label={collapsed ? "Expand topic" : "Collapse topic"}
+        <CollapseButton
+          collapsed={collapsed}
+          noun="topic"
           onClick={() => keepHeaderInPlace(header.current, () => setCollapsed(!collapsed))}
-        >
-          <ChevronIcon />
-        </button>
+        />
         <h2 className="topic-title">{topic.title}</h2>
         <span className="topic-meta">
-          {topic.changeCount} change{topic.changeCount === 1 ? "" : "s"} in {files} file{files === 1 ? "" : "s"}
-          {threads.length > 0 && ` · ${threads.length} comment${threads.length === 1 ? "" : "s"}`}
+          {plural(topic.changeCount, "change")} in {plural(files.length, "file")}
+          {threads.length > 0 && ` · ${plural(threads.length, "comment")}`}
         </span>
         <span className="spacer" />
-        <button
-          className="icon-button"
-          aria-label="Comment on this topic"
-          title="Comment on this topic"
+        <CommentButton
+          label="Comment on this topic"
           onClick={() =>
             keepHeaderInPlace(header.current, () => {
               setCollapsed(false);
               setCommenting(true);
             })
           }
-        >
-          <CommentIcon />
-        </button>
-        <label className="viewed-toggle">
-          <input
-            type="checkbox"
-            checked={viewed}
-            onChange={() =>
-              keepHeaderInPlace(header.current, () => {
-                setCollapsed(!viewed || !topic.related);
-                onToggleViewed();
-              })
-            }
-          />
-          Viewed
-        </label>
+        />
+        <ViewedToggle
+          viewed={viewed}
+          onChange={() =>
+            keepHeaderInPlace(header.current, () => {
+              setCollapsed(!viewed || !topic.related);
+              onToggleViewed();
+            })
+          }
+        />
       </header>
 
       {!collapsed && (
         <div className="topic-body">
           {topic.summary && <Markdown className="topic-summary" text={topic.summary} />}
-          {(threads.length > 0 || commenting) && (
-            <div className="topic-threads">
-              {threads.map((t) => (
-                <ThreadView key={t.id} thread={t} />
-              ))}
-              {commenting && (
-                <div className="thread thread-new">
-                  <CommentForm
-                    placeholder="Comment on this topic"
-                    onSubmit={async (body, single) => {
-                      const anchor = { topic: topic.title, path: null, side: null, start: null, end: null, commit: null };
-                      const files = `Files: ${topic.parts.map((p) => p.file.path).join(", ")}`;
-                      await create(anchor, topic.summary ? `${files}\n\n${topic.summary}` : files, body, single);
-                      setCommenting(false);
-                    }}
-                    onCancel={() => setCommenting(false)}
-                  />
-                </div>
-              )}
-            </div>
-          )}
+          <ThreadList
+            className="topic-threads"
+            threads={threads}
+            commenting={commenting}
+            placeholder="Comment on this topic"
+            onCreate={(body, single) => {
+              const anchor = { topic: topic.title, path: null, side: null, start: null, end: null, commit: null };
+              const snippet = [`Files: ${files.join(", ")}`, topic.summary].filter(Boolean).join("\n\n");
+              return create(anchor, snippet, body, single);
+            }}
+            onClose={() => setCommenting(false)}
+          />
           {topic.stale > 0 && (
             <p className="topic-note">
-              {topic.stale} change{topic.stale === 1 ? " was" : "s were"} edited after Claude grouped them and now
+              {plural(topic.stale, "change")} {topic.stale === 1 ? "was" : "were"} edited after Claude grouped them and now
               appear under Other changes.
             </p>
           )}

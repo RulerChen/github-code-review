@@ -1,6 +1,8 @@
 import { Fragment, type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { comparisonFromQuery, comparisonQuery, repoFailures, sameComparison } from "../shared/comparison";
+import { comparisonFromQuery, comparisonQuery, isFor, repoFailures, sameComparison } from "../shared/comparison";
 import type { CommitInfo, Comparison, DiffResult, FileDiff, Grouping, Review, Thread, ThreadAnchor, ViewData } from "../shared/types";
+import { errorMessage, sum } from "../shared/util";
+import { scrollToTop, startAnchoring } from "./anchor";
 import {
   ApiError,
   createThread,
@@ -12,36 +14,31 @@ import {
   groupTopics,
   replyToThread,
   submitReview,
+  viewUrl,
 } from "./api";
 import { type CommentsApi, CommentsContext } from "./comments";
 import { CommitList, CompareControls, refLabel, RepoComparisons } from "./Compare";
 import { ConversationsButton, ConversationsPanel, type Place, useConversations } from "./Conversations";
 import { FileCard } from "./FileCard";
-import { comparePaths, FileTree } from "./FileTree";
-import { scrollToTop, startAnchoring } from "./anchor";
+import { FileTree } from "./FileTree";
 import { go, KeyboardButton, ShortcutHelp, stepSection, useShortcuts } from "./keyboard";
+import { comparePaths } from "./paths";
 import { ReviewBar } from "./ReviewBar";
-import { readStorage, writeStorage } from "./storage";
+import { useStoredState, useViewed } from "./storage";
 import { SubmitReview } from "./SubmitReview";
+import { ChangeStats, RefreshButton, SidebarToggle, type Tab, ThemeToggle, ViewedProgress, ViewTabs } from "./TopBar";
 import { buildTopics, TopicList, TopicSection, topicShows, type TopicView } from "./Topics";
 
 interface Props {
   viewId: string | null;
 }
 
-type Tab = "topics" | "files" | "commits";
-
-// How often the page asks whether the diff changed on disk.
 const POLL_MS = 2000;
 
 const signature = (f: FileDiff) => (f.blocks.length ? f.blocks.map((b) => b.id).join(",") : `${f.status}:${f.binary}`);
 
 const sameTarget = (a: Comparison | null, b: Comparison | null) => a === b || (a !== null && b !== null && sameComparison(a, b));
 
-// The review or grouping of a repository's comparison.
-const matches = (repo: string, c: Comparison) => (r: { repo: string; compare: Comparison }) => r.repo === repo && sameComparison(r.compare, c);
-
-/** What Claude sends when it opens a view, so the open page shows it. */
 interface Opened {
   view: string;
   repo: string;
@@ -52,39 +49,22 @@ export function App({ viewId }: Props) {
   const [data, setData] = useState<ViewData | null>(null);
   const [error, setError] = useState<{ message: string; status: number } | null>(null);
   const [loading, setLoading] = useState(false);
-  // Whether a different comparison is loading. The page dims what it shows until the new one arrives.
   const [switching, setSwitching] = useState(false);
-  // Whether Claude is waiting for a review right now.
   const [listening, setListening] = useState(false);
-  // Whether the files or refs changed since the diff on screen was loaded.
   const [stale, setStale] = useState(false);
-  const [theme, setTheme] = useState(document.documentElement.dataset.theme === "dark" ? "dark" : "light");
   const [tab, setTab] = useState<Tab>("topics");
-  const [sidebarOpen, setSidebarOpen] = useState(() => readStorage("diff-review:sidebar", true));
-  const showSidebar = (open: boolean) => {
-    setSidebarOpen(open);
-    writeStorage("diff-review:sidebar", open);
-  };
+  const [sidebarOpen, setSidebarOpen] = useStoredState("diff-review:sidebar", true);
   const [filter, setFilter] = useState("");
   const [active, setActive] = useState<string | null>(null);
-  const [viewed, setViewed] = useState<Record<string, string>>({});
-  const [viewedTopics, setViewedTopics] = useState<Record<string, string>>({});
   const [threads, setThreads] = useState<Thread[]>([]);
   const [reviews, setReviews] = useState<Review[]>([]);
   const [groupings, setGroupings] = useState<Grouping[]>([]);
-  // The comparison in the page URL, or null for the one Claude opened the viewer with.
   const requested = useRef<Comparison | null>(comparisonFromQuery(new URLSearchParams(location.search)));
   const seq = useRef(0);
-  // The version of the diff on screen.
   const version = useRef<string | null>(null);
-  // Where each tab was scrolled to, so coming back to one returns to the same place.
   const scrolls = useRef<Partial<Record<Tab, number>>>({});
-  // Set when a different comparison arrives, so the page starts it from the top.
   const resetScroll = useRef(false);
 
-  // A different comparison keeps the old one on screen, dimmed, until it arrives, then shows `nextTab` from the
-  // top. Switching tabs first would show the old comparison's files in the new tab for a moment. A comparison
-  // that arrives without topics shows Files instead of an empty Topics tab, unless the user goes there.
   const load = useCallback(async (target: Comparison | null, push = false, nextTab?: Tab) => {
     if (!viewId) return;
     const n = ++seq.current;
@@ -104,7 +84,7 @@ export function App({ viewId }: Props) {
         resetScroll.current = true;
       }
       if (nextTab || fresh) {
-        const mine = matches(root, result.diff);
+        const mine = isFor(root, result.diff);
         const topical = result.reviews.some(mine) || result.groupings.some((g) => mine(g) && g.error === null);
         setTab((t) => {
           const want = nextTab ?? t;
@@ -118,11 +98,9 @@ export function App({ viewId }: Props) {
       setListening(result.listening);
       setError(null);
       setStale(false);
-      setViewed((prev) => (Object.keys(prev).length ? prev : readStorage(`diff-review:viewed:${root}`, {})));
-      setViewedTopics((prev) => (Object.keys(prev).length ? prev : readStorage(`diff-review:viewed-topics:${root}`, {})));
     } catch (e) {
       if (n !== seq.current) return;
-      setError({ message: e instanceof Error ? e.message : String(e), status: e instanceof ApiError ? e.status : 0 });
+      setError({ message: errorMessage(e), status: e instanceof ApiError ? e.status : 0 });
     } finally {
       if (n === seq.current) {
         setLoading(false);
@@ -138,8 +116,6 @@ export function App({ viewId }: Props) {
     return () => window.removeEventListener("popstate", onPop);
   }, [load]);
 
-  // Ask whether the files or refs changed since the diff on screen was loaded, so the refresh button can show.
-  // The check is cheap, and waits while the page is hidden. A load that lands meanwhile makes the answer moot.
   useEffect(() => {
     if (!viewId) return;
     let timer = 0;
@@ -153,11 +129,7 @@ export function App({ viewId }: Props) {
           const v = await fetchVersion(viewId, target);
           if (!stopped && version.current === loaded && requested.current === target) setStale(v !== loaded);
         }
-      } catch {
-        // The next check tries again.
-      }
-      // A check runs git status and reads changed files. In a large working tree that takes a while, so wait ten
-      // times as long as it took and polling stays a small part of the load.
+      } catch {}
       if (!stopped) timer = window.setTimeout(check, Math.max(POLL_MS, 10 * (performance.now() - started)));
     };
     timer = window.setTimeout(check, POLL_MS);
@@ -176,8 +148,7 @@ export function App({ viewId }: Props) {
 
   const viewCommit = (c: CommitInfo) => compareWith({ base: c.parents[0]!, head: c.sha, threeDot: false, overrides: [] }, "files");
 
-  // A review in another repository is another view's page, opened in place of this one.
-  const showReview = (r: { view: string; repo: string; compare: Comparison }) => {
+  const showReview = (r: Opened) => {
     if (!data) return;
     if (r.repo === data.diff.repoRoot) compareWith(r.compare, "topics");
     else location.assign(`/v/${encodeURIComponent(r.view)}?${comparisonQuery(r.compare)}`);
@@ -187,14 +158,13 @@ export function App({ viewId }: Props) {
 
   useEffect(() => {
     if (!viewId) return;
-    const events = new EventSource(`/api/views/${encodeURIComponent(viewId)}/events`);
+    const events = new EventSource(viewUrl(viewId, "events"));
     const on = <T,>(name: string, fn: (data: T) => void) =>
       events.addEventListener(name, (e) => fn(JSON.parse((e as MessageEvent<string>).data) as T));
     on<Thread>("thread", (thread) => setThreads((prev) => mergeThreads(prev, [thread])));
     on<boolean>("listening", setListening);
     on<Review[]>("reviews", setReviews);
     on<Grouping[]>("groupings", setGroupings);
-    // Not "open", which EventSource fires itself on connecting.
     on<Opened>("view", (o) => onOpened.current(o));
     return () => events.close();
   }, [viewId]);
@@ -204,10 +174,7 @@ export function App({ viewId }: Props) {
     () => diff && { base: diff.base, head: diff.head, threeDot: diff.threeDot, overrides: diff.overrides },
     [diff],
   );
-  // Each repository's directory and the commits of its two sides, as a string so that a refresh that leaves them
-  // as they were keeps `comments` as it was.
   const repoCommits = JSON.stringify(diff?.repos.map((r) => [r.dir, r.oldCommit, r.headCommit]) ?? []);
-  // A deleted thread stays in `threads` with no comments, so an older copy arriving late cannot bring it back.
   const live = useMemo(() => threads.filter((t) => t.comments.length > 0), [threads]);
   const comments = useMemo<
     Pick<CommentsApi, "versions" | "threadsFor" | "threadsForTopic" | "create" | "reply" | "edit" | "remove" | "pending" | "listening">
@@ -248,7 +215,7 @@ export function App({ viewId }: Props) {
     };
   }, [live, viewId, repoCommits, current, listening]);
 
-  const drafts = live.reduce((n, t) => n + t.comments.filter((c) => c.draft).length, 0);
+  const drafts = sum(live, (t) => t.comments.filter((c) => c.draft).length);
   const submit = async (body: string) => {
     if (!viewId) return false;
     const result = await submitReview(viewId, body);
@@ -256,8 +223,8 @@ export function App({ viewId }: Props) {
     return result.delivered;
   };
 
-  const review = useMemo(() => (diff ? (reviews.find(matches(diff.repoRoot, diff)) ?? null) : null), [reviews, diff]);
-  const grouping = diff ? (groupings.find(matches(diff.repoRoot, diff)) ?? null) : null;
+  const review = useMemo(() => (diff ? (reviews.find(isFor(diff.repoRoot, diff)) ?? null) : null), [reviews, diff]);
+  const grouping = diff ? (groupings.find(isFor(diff.repoRoot, diff)) ?? null) : null;
   const group = async (focus: string) => {
     if (viewId && current) setGroupings(await groupTopics(viewId, current, focus));
   };
@@ -280,8 +247,6 @@ export function App({ viewId }: Props) {
 
   useEffect(() => (diff !== null ? startAnchoring() : undefined), [diff !== null]);
 
-  // A tab's content stays mounted once shown and is hidden while another tab shows, so it keeps its layout, and
-  // the page scrolls back to where that tab was.
   const visited = useRef(new Set<Tab>());
   visited.current.add(view);
   const shownView = useRef(view);
@@ -292,7 +257,6 @@ export function App({ viewId }: Props) {
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
-  // A file picked in the sidebar of the Commits tab, to show once the Files tab is on screen.
   const pendingSelect = useRef<string | null>(null);
   useLayoutEffect(() => {
     if (shownView.current === view) return;
@@ -311,7 +275,6 @@ export function App({ viewId }: Props) {
     (t: Thread): Place | null => {
       const { anchor } = t;
       if (anchor.path === null) {
-        // A topic's own thread shows only in the Topics tab. In the list it comes before the files.
         if (!current || !sameComparison(anchor.compare, current)) return null;
         const i = topics.findIndex((topic) => topic.title === anchor.topic);
         return i < 0 ? null : { tab: "topics", rank: topicTab ? i : i - topics.length };
@@ -343,32 +306,12 @@ export function App({ viewId }: Props) {
     Escape: () => (help ? setHelp(false) : conv.setOpen(false)),
   });
 
-  const isViewed = useCallback((f: FileDiff) => viewed[f.path] === signature(f), [viewed]);
-  const toggleViewed = (f: FileDiff) => {
-    if (!diff) return;
-    const next = { ...viewed };
-    if (isViewed(f)) delete next[f.path];
-    else next[f.path] = signature(f);
-    setViewed(next);
-    writeStorage(`diff-review:viewed:${diff.repoRoot}`, next);
-  };
-
-  const isTopicViewed = useCallback((t: TopicView) => viewedTopics[t.key] === t.signature, [viewedTopics]);
-  const toggleTopicViewed = (t: TopicView) => {
-    if (!diff) return;
-    const next = { ...viewedTopics };
-    if (isTopicViewed(t)) delete next[t.key];
-    else next[t.key] = t.signature;
-    setViewedTopics(next);
-    writeStorage(`diff-review:viewed-topics:${diff.repoRoot}`, next);
-  };
-
-  const toggleTheme = () => {
-    const next = theme === "dark" ? "light" : "dark";
-    document.documentElement.dataset.theme = next;
-    writeStorage("diff-review:theme", next);
-    setTheme(next);
-  };
+  const [isViewed, toggleViewed] = useViewed(diff && `diff-review:viewed:${diff.repoRoot}`, (f: FileDiff) => f.path, signature);
+  const [isTopicViewed, toggleTopicViewed] = useViewed(
+    diff && `diff-review:viewed-topics:${diff.repoRoot}`,
+    (t: TopicView) => t.key,
+    (t) => t.signature,
+  );
 
   const select = (anchor: string) => {
     if (view === "commits") {
@@ -402,11 +345,6 @@ export function App({ viewId }: Props) {
   if (!diff) return <Notice title="Loading diff…" />;
 
   const byTopic = view === "topics";
-  const additions = diff.files.reduce((s, f) => s + f.additions, 0);
-  const deletions = diff.files.reduce((s, f) => s + f.deletions, 0);
-  const total = byTopic ? topics.length : diff.files.length;
-  const viewedCount = byTopic ? topics.filter(isTopicViewed).length : diff.files.filter(isViewed).length;
-  const unit = byTopic ? "topics" : "files";
   const firstUnrelated = topics.findIndex((t) => !t.related);
 
   return (
@@ -414,51 +352,29 @@ export function App({ viewId }: Props) {
       <div className="app">
         <header className="topbar">
           <div className={`loading-bar${switching ? " is-active" : ""}`} aria-hidden="true" />
-          <SidebarToggle open={sidebarOpen} onToggle={() => showSidebar(!sidebarOpen)} />
+          <SidebarToggle open={sidebarOpen} onToggle={() => setSidebarOpen((o) => !o)} />
           <div className="topbar-title">
             <CompareControls diff={diff} loadRefs={loadRefs} onCompare={compareWith} />
           </div>
-          <div className="topbar-stats">
-            <span>
-              {diff.files.length} file{diff.files.length === 1 ? "" : "s"} changed
-            </span>
-            <span className="count-add">+{additions.toLocaleString()}</span>
-            <span className="count-del">−{deletions.toLocaleString()}</span>
-          </div>
+          <ChangeStats files={diff.files} />
           <RefreshButton stale={stale} loading={loading} onClick={() => void load(requested.current)} />
           <span className="spacer" />
-          <div className="viewed-progress" title={`${viewedCount} of ${total} ${unit} viewed`}>
-            <span className="viewed-count" style={{ minWidth: `${2 * String(Math.max(topics.length, diff.files.length)).length + 10}ch` }}>
-              {viewedCount} / {total} viewed
-            </span>
-            <span className="progress" aria-hidden="true">
-              <span style={{ width: `${total ? (viewedCount / total) * 100 : 0}%` }} />
-            </span>
-          </div>
-          <div className="segmented" role="tablist" aria-label="Show">
-            <SlidingIndicator selected={view} />
-            <button role="tab" aria-selected={view === "topics"} onClick={() => setTab("topics")}>
-              <TabLabel text="Topics" />
-            </button>
-            <button role="tab" aria-selected={view === "files"} onClick={() => setTab("files")}>
-              <TabLabel text="Files" />
-            </button>
-            {diff.commits.length > 0 && (
-              <button role="tab" aria-selected={view === "commits"} onClick={() => setTab("commits")}>
-                <TabLabel text="Commits" /> <span className="counter">{diff.commitCount.toLocaleString()}</span>
-              </button>
-            )}
-          </div>
+          <ViewedProgress
+            viewed={byTopic ? topics.filter(isTopicViewed).length : diff.files.filter(isViewed).length}
+            total={byTopic ? topics.length : diff.files.length}
+            unit={byTopic ? "topics" : "files"}
+            most={Math.max(topics.length, diff.files.length)}
+          />
+          <ViewTabs view={view} commitCount={diff.commitCount} onSelect={setTab} />
           <ConversationsButton conv={conv} />
           <KeyboardButton onClick={() => setHelp(true)} />
-          <ThemeToggle theme={theme} onToggle={toggleTheme} />
+          <ThemeToggle />
           <SubmitReview drafts={drafts} listening={listening} onSubmit={submit} />
         </header>
 
         {error && <div className="banner">{error.message}</div>}
 
         <div className={`layout${conv.open ? " with-conversations" : ""}${sidebarOpen ? "" : " no-sidebar"}`}>
-          {/* The Commits tab keeps the file tree, so switching tabs does not move the page sideways. */}
           <aside className="sidebar" hidden={!sidebarOpen}>
             {byTopic ? (
               <div className="view" key="topics">
@@ -533,8 +449,6 @@ export function App({ viewId }: Props) {
   );
 }
 
-// Fetches, POST responses and events can arrive out of order, so keep whichever copy of a thread
-// is newest. On a tie the update wins: a snapshot can hold streamed text not yet sent as an event.
 function mergeThreads(base: Thread[], updates: Thread[]): Thread[] {
   const next = [...base];
   for (const t of updates) {
@@ -556,111 +470,6 @@ function noChanges(d: DiffResult): ReactNode {
       <code>{refLabel(d.base)}</code>
     );
   return d.head === null ? <>The working tree matches {from}.</> : <><code>{refLabel(d.head)}</code> has the same files as {from}.</>;
-}
-
-// Octicons sidebar-collapse-16 and sidebar-expand-16 draw the panel on the right; mirror them for a left sidebar.
-const SIDEBAR_ICON = {
-  collapse: [
-    "M6.823 7.823a.25.25 0 0 1 0 .354l-2.396 2.396A.25.25 0 0 1 4 10.396V5.604a.25.25 0 0 1 .427-.177Z",
-    "M1.75 0h12.5C15.216 0 16 .784 16 1.75v12.5A1.75 1.75 0 0 1 14.25 16H1.75A1.75 1.75 0 0 1 0 14.25V1.75C0 .784.784 0 1.75 0ZM1.5 1.75v12.5c0 .138.112.25.25.25H9.5v-13H1.75a.25.25 0 0 0-.25.25ZM11 14.5h3.25a.25.25 0 0 0 .25-.25V1.75a.25.25 0 0 0-.25-.25H11Z",
-  ],
-  expand: [
-    "m4.177 7.823 2.396-2.396A.25.25 0 0 1 7 5.604v4.792a.25.25 0 0 1-.427.177L4.177 8.177a.25.25 0 0 1 0-.354Z",
-    "M0 1.75C0 .784.784 0 1.75 0h12.5C15.216 0 16 .784 16 1.75v12.5A1.75 1.75 0 0 1 14.25 16H1.75A1.75 1.75 0 0 1 0 14.25Zm1.75-.25a.25.25 0 0 0-.25.25v12.5c0 .138.112.25.25.25H9.5v-13Zm12.5 13a.25.25 0 0 0 .25-.25V1.75a.25.25 0 0 0-.25-.25H11v13Z",
-  ],
-};
-
-function SidebarToggle({ open, onToggle }: { open: boolean; onToggle: () => void }) {
-  const label = open ? "Collapse sidebar" : "Expand sidebar";
-  return (
-    <button className="icon-button sidebar-toggle" onClick={onToggle} aria-label={label} aria-expanded={open} title={label}>
-      <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
-        <g transform="matrix(-1 0 0 1 16 0)">
-          {SIDEBAR_ICON[open ? "collapse" : "expand"].map((d) => (
-            <path key={d} d={d} />
-          ))}
-        </g>
-      </svg>
-    </button>
-  );
-}
-
-// The selected tab's background, which slides to the tab picked. It shows by clipping a box as wide as the whole
-// control, since clip-path animates without layout. It moves only once it has been placed, so it does not slide in
-// from the side when the page loads.
-function SlidingIndicator({ selected }: { selected: string }) {
-  const ref = useRef<HTMLSpanElement>(null);
-  useLayoutEffect(() => {
-    const el = ref.current;
-    const box = el?.parentElement;
-    if (!el || !box) return;
-    const place = () => {
-      const tab = box.querySelector<HTMLElement>('[aria-selected="true"]');
-      if (!tab) return;
-      el.style.clipPath = `inset(0 ${box.clientWidth - tab.offsetLeft - tab.offsetWidth}px 0 ${tab.offsetLeft}px)`;
-    };
-    place();
-    const frame = requestAnimationFrame(() => (el.dataset.ready = ""));
-    const observer = new ResizeObserver(place);
-    observer.observe(box);
-    return () => {
-      cancelAnimationFrame(frame);
-      observer.disconnect();
-    };
-  }, [selected]);
-  return <span ref={ref} className="segmented-indicator" aria-hidden="true" />;
-}
-
-// The selected tab's label is bold. Each label is as wide as its bold text, so selecting a tab moves nothing.
-function TabLabel({ text }: { text: string }) {
-  return (
-    <span className="tab-label" data-text={text}>
-      {text}
-    </span>
-  );
-}
-
-// Shows only when the diff on disk changed. Hidden, it keeps its slot next to the stats, so showing it moves
-// nothing in the top bar.
-function RefreshButton({ stale, loading, onClick }: { stale: boolean; loading: boolean; onClick: () => void }) {
-  const label = "Load new changes";
-  return (
-    <button
-      className={`icon-button refresh-button${stale ? " is-shown" : ""}${loading ? " is-loading" : ""}`}
-      onClick={onClick}
-      disabled={!stale || loading}
-      aria-label={label}
-      title={label}
-    >
-      {/* Octicon sync-16, @primer/octicons 19.42.0 */}
-      <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
-        <path d="M1.705 8.005a.75.75 0 0 1 .834.656 5.5 5.5 0 0 0 9.592 2.97l-1.204-1.204a.25.25 0 0 1 .177-.427h3.646a.25.25 0 0 1 .25.25v3.646a.25.25 0 0 1-.427.177l-1.38-1.38A7.002 7.002 0 0 1 1.05 8.84a.75.75 0 0 1 .656-.834ZM8 2.5a5.487 5.487 0 0 0-4.131 1.869l1.204 1.204A.25.25 0 0 1 4.896 6H1.25A.25.25 0 0 1 1 5.75V2.104a.25.25 0 0 1 .427-.177l1.38 1.38A7.002 7.002 0 0 1 14.95 7.16a.75.75 0 0 1-1.49.178A5.5 5.5 0 0 0 8 2.5Z" />
-      </svg>
-    </button>
-  );
-}
-
-function ThemeToggle({ theme, onToggle }: { theme: string; onToggle: () => void }) {
-  const label = theme === "dark" ? "Switch to light theme" : "Switch to dark theme";
-  return (
-    <button className="icon-button theme-toggle" onClick={onToggle} aria-label={label} title={label}>
-      {theme === "dark" ? (
-        <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
-          <circle cx="8" cy="8" r="3" />
-          <path
-            d="M8 0.75v1.5M8 13.75v1.5M0.75 8h1.5M13.75 8h1.5M2.87 2.87l1.06 1.06M12.07 12.07l1.06 1.06M2.87 13.13l1.06-1.06M12.07 3.93l1.06-1.06"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-          />
-        </svg>
-      ) : (
-        <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
-          <path d="M6.2 1.1a6.75 6.75 0 1 0 8.7 8.7A5.5 5.5 0 0 1 6.2 1.1Z" />
-        </svg>
-      )}
-    </button>
-  );
 }
 
 function Notice({ title, children }: { title: string; children?: ReactNode }) {

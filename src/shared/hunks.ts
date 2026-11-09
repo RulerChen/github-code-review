@@ -1,6 +1,6 @@
 import type { Block, DiffLine, DisplayHunk, Expansion, FileDiff } from "./types.js";
 
-export const CONTEXT_LINES = 3;
+const CONTEXT_LINES = 3;
 
 export function splitLines(text: string): string[] {
   if (text === "") return [];
@@ -9,14 +9,20 @@ export function splitLines(text: string): string[] {
   return lines;
 }
 
+export const stripCr = (s: string) => (s.endsWith("\r") ? s.slice(0, -1) : s);
+
 export function changeIds(file: FileDiff): string[] {
   return file.blocks.length ? file.blocks.map((b) => b.id) : [`file:${file.path}`];
 }
 
-export function rangeHeader(start0: number, count: number): string {
+function rangeHeader(start0: number, count: number): string {
   if (count === 0) return `${start0},0`;
   if (count === 1) return `${start0 + 1}`;
   return `${start0 + 1},${count}`;
+}
+
+export function hunkHeader(oldStart: number, oldCount: number, newStart: number, newCount: number, section: string): string {
+  return `@@ -${rangeHeader(oldStart, oldCount)} +${rangeHeader(newStart, newCount)} @@${section ? ` ${section}` : ""}`;
 }
 
 export function buildHunks(
@@ -28,18 +34,15 @@ export function buildHunks(
 ): DisplayHunk[] {
   if (blocks.length === 0) return [];
   const hasCtx = newLines !== null || oldLines !== null;
-  const C = hasCtx ? CONTEXT_LINES : 0;
-
   const total = newLines ? newLines.length : oldLines ? oldLines.length : 0;
   const endOf = (b: Block) => (newLines ? b.newStart + b.newCount : b.oldStart + b.oldCount);
   const startOf = (b: Block) => (newLines ? b.newStart : b.oldStart);
   const ctxText = (o: number, n: number) => (newLines ? newLines[n] : oldLines?.[o]) ?? "";
-  const wantAbove = (b: Block) => (hasCtx ? C + (expansion?.above[b.id] ?? 0) : 0);
-  const wantBelow = (b: Block) => (hasCtx ? C + (expansion?.below[b.id] ?? 0) : 0);
+  const wantAbove = (b: Block) => (hasCtx ? CONTEXT_LINES + (expansion?.above[b.id] ?? 0) : 0);
+  const wantBelow = (b: Block) => (hasCtx ? CONTEXT_LINES + (expansion?.below[b.id] ?? 0) : 0);
 
   const index = new Map(all.map((b, i) => [b, i]));
   const shown = new Set(blocks);
-  // Unchanged lines between all[i - 1] and all[i], counting from the file's start and to its end.
   const runBefore = (i: number) =>
     Math.max(0, (i < all.length ? startOf(all[i]!) : total) - (i > 0 ? endOf(all[i - 1]!) : 0));
 
@@ -92,7 +95,7 @@ export function buildHunks(
     }
     context(after);
 
-    const header = `@@ -${rangeHeader(startO, o - startO)} +${rangeHeader(startN, n - startN)} @@${first.section ? ` ${first.section}` : ""}`;
+    const header = hunkHeader(startO, o - startO, startN, n - startN, first.section);
     return { header, lines, firstId: first.id, lastId: last.id, hiddenAbove, hiddenBelow, joinsPrevious };
   });
 }

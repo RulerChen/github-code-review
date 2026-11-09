@@ -7,8 +7,9 @@ import { z } from "zod";
 import { computeDiff, describeFailures, summarize } from "../engine/diff.js";
 import { sameRange, sortOverrides } from "../shared/comparison.js";
 import type { Comparison, Topic } from "../shared/types.js";
+import { errorMessage, plural } from "../shared/util.js";
 import { stopAll } from "./claude.js";
-import { errorMessage, ReviewServer } from "./http.js";
+import { ReviewServer } from "./http.js";
 import { checkTopics, formatChanges, formatReviewComments } from "./review.js";
 
 const DIST_DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -27,6 +28,19 @@ function getServer(): Promise<ReviewServer> {
 }
 
 const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function result(text: string, isError = false) {
+  const content = [{ type: "text" as const, text }];
+  return isError ? { content, isError } : { content };
+}
+
+async function attempt(failure: string, run: () => Promise<string>) {
+  try {
+    return result(await run());
+  } catch (err) {
+    return result(`${failure}: ${errorMessage(err)}`, true);
+  }
+}
 
 async function openViewer(repo: string, compare: Comparison, focus?: string, topics?: Topic[], session?: string): Promise<string> {
   const diff = await computeDiff(repo, compare);
@@ -107,7 +121,6 @@ async function runMcp(): Promise<void> {
   type Overrides = { dir: string; base: string; head?: string; threeDot?: boolean }[];
   const comparison = (args: { base?: string; head?: string; threeDot?: boolean; overrides?: Overrides }): Comparison => {
     const c = { base: args.base ?? "HEAD", head: args.head ?? null, threeDot: args.threeDot ?? true };
-    // A later override of the same repository wins, and one that compares what the rest compare is no override.
     const own = new Map((args.overrides ?? []).map((o) => [o.dir, { dir: o.dir, base: o.base, head: o.head ?? null, threeDot: o.threeDot ?? true }]));
     return { ...c, overrides: sortOverrides([...own.values()].filter((o) => !sameRange(o, c))) };
   };
@@ -123,14 +136,7 @@ async function runMcp(): Promise<void> {
       inputSchema: { repo, base, head, threeDot, overrides },
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
-    async (args) => {
-      try {
-        const diff = await computeDiff(args.repo ?? process.cwd(), comparison(args));
-        return { content: [{ type: "text", text: formatChanges(diff) }] };
-      } catch (err) {
-        return { content: [{ type: "text", text: `Could not list changes: ${errorMessage(err)}` }], isError: true };
-      }
-    },
+    (args) => attempt("Could not list changes", async () => formatChanges(await computeDiff(args.repo ?? process.cwd(), comparison(args)))),
   );
 
   mcp.registerTool(
@@ -167,15 +173,11 @@ async function runMcp(): Promise<void> {
       },
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
-    async (args) => {
-      try {
+    (args) =>
+      attempt("Could not open the diff viewer", () => {
         const topics = args.topics?.map((t) => ({ ...t, related: t.related ?? true }));
-        const text = await openViewer(args.repo ?? process.cwd(), comparison(args), args.focus, topics, args.session);
-        return { content: [{ type: "text", text }] };
-      } catch (err) {
-        return { content: [{ type: "text", text: `Could not open the diff viewer: ${errorMessage(err)}` }], isError: true };
-      }
-    },
+        return openViewer(args.repo ?? process.cwd(), comparison(args), args.focus, topics, args.session);
+      }),
   );
 
   mcp.registerTool(
@@ -210,13 +212,9 @@ async function runMcp(): Promise<void> {
       const all = server?.repoThreads() ?? [];
       const wanted = args.repo ? path.resolve(args.repo) : null;
       const containing = wanted ? all.filter((r) => wanted === r.repo || wanted.startsWith(r.repo + path.sep)) : all;
-      // Repositories nest, such as a submodule or a repository cloned inside another, so a path in the inner one
-      // belongs to it alone.
       const repos = wanted ? containing.filter((r) => !containing.some((o) => o.repo.length > r.repo.length)) : all;
-      // Each repository numbers its reviews from 1, so one after number cannot serve several.
       if (args.after !== undefined && !wanted && repos.filter((r) => r.threads.submissions.length).length > 1) {
-        const text = "Several repositories have reviews, numbered separately. Set repo to the one the wait command named.";
-        return { content: [{ type: "text", text }], isError: true };
+        return result("Several repositories have reviews, numbered separately. Set repo to the one the wait command named.", true);
       }
       const parts = repos.flatMap(({ repo, threads, view }) => {
         const text = formatReviewComments(threads.threads, threads.submissions, args.after ?? null, threads.read);
@@ -227,7 +225,7 @@ async function runMcp(): Promise<void> {
             `review by running this in the background: ${server!.waitCommand(view)}`,
         ];
       });
-      return { content: [{ type: "text", text: parts.length ? parts.join("\n\n") : "No review comments yet." }] };
+      return result(parts.length ? parts.join("\n\n") : "No review comments yet.");
     },
   );
 
@@ -254,11 +252,9 @@ async function runMcp(): Promise<void> {
       const repos = serverPromise ? (await serverPromise).repoThreads() : [];
       const owner = (id: string) => repos.find((r) => r.threads.threads.some((t) => t.id === id))?.threads;
       const unknown = replies.filter((r) => !owner(r.thread)).map((r) => r.thread);
-      if (unknown.length) {
-        return { content: [{ type: "text", text: `Unknown thread ids: ${unknown.join(", ")}. Nothing was posted.` }], isError: true };
-      }
+      if (unknown.length) return result(`Unknown thread ids: ${unknown.join(", ")}. Nothing was posted.`, true);
       for (const r of replies) owner(r.thread)!.replyFromSession(r.thread, r.body.trim());
-      return { content: [{ type: "text", text: `Replied on ${replies.length} thread${replies.length === 1 ? "" : "s"}.` }] };
+      return result(`Replied on ${plural(replies.length, "thread")}.`);
     },
   );
 

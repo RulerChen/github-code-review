@@ -2,10 +2,6 @@
   --conversations-w: 380px;
 }
 
-.topic {
-  scroll-margin-top: 8px;
-}
-
 .conv-button {
   position: relative;
   display: inline-flex;
@@ -14,7 +10,6 @@
   gap: 6px;
 }
 
-/* Room for two digits, so a new thread does not widen the button. */
 .conv-button > span:not(.conv-badge) {
   min-width: 2ch;
   font-variant-numeric: tabular-nums;
@@ -29,7 +24,6 @@
   background: var(--accent-subtle);
 }
 
-/* Sits on the button's corner, so it can come and go without moving anything. */
 .conv-badge {
   position: absolute;
   top: -8px;
@@ -64,7 +58,6 @@
     transform 200ms var(--ease-out);
 }
 
-/* The panel slides in a little from the side it lives on. */
 @starting-style {
   .conversations {
     opacity: 0;

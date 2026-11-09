@@ -1,106 +1,71 @@
 import { createContext, type FormEvent, type KeyboardEvent, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { MENTION } from "../shared/comments";
+import { lineRange, MENTION } from "../shared/comments";
 import type { FileAnchor, LineAnchor, Thread, ThreadAnchor, ThreadComment, TopicAnchor } from "../shared/types";
 import { pin } from "./anchor";
 import { type Format, format, suggestion, type TextEdit } from "./format";
+import { useAction } from "./hooks";
+import { Octicon, PencilIcon, TrashIcon } from "./icons";
 import { Markdown } from "./Markdown";
 
-export interface RevealRequest {
-  thread: Thread;
-}
-
-/** An anchor before the page fills in the commit it is on. A topic has no commit. */
-export type NewAnchor = Omit<LineAnchor, "commit"> | Omit<FileAnchor, "commit"> | Omit<TopicAnchor, "compare">;
+type NewAnchor = Omit<LineAnchor, "commit"> | Omit<FileAnchor, "commit"> | Omit<TopicAnchor, "compare">;
 
 export interface CommentsApi {
-  /** The commit each side of a file comes from, or null for the working tree. It differs by repository when the diff covers several. */
   versions: (path: string) => Record<LineAnchor["side"], string | null>;
   threadsFor: (path: string) => Thread[];
   threadsForTopic: (title: string) => Thread[];
-  /** A single comment is sent to Claude on its own at once instead of going into the pending review. */
   create: (anchor: NewAnchor, snippet: string, body: string, single: boolean) => Promise<void>;
   reply: (threadId: string, body: string, single: boolean) => Promise<void>;
   edit: (threadId: string, commentId: string, body: string) => Promise<void>;
   remove: (threadId: string, commentId: string) => Promise<void>;
   unread: (thread: Thread) => number;
   markRead: (thread: Thread) => void;
-  current: string | null;
-  /** Whether comments wait in a review the user has not submitted yet. */
   pending: boolean;
-  /** Whether Claude is waiting for a review right now. */
   listening: boolean;
-  /** Bumped on every reveal, so collapsed files and topics can open and the thread can scroll into view. */
   revealSeq: number;
-  peekReveal: () => RevealRequest | null;
-  takeReveal: (threadId: string) => RevealRequest | null;
+  peekReveal: () => Thread | null;
+  takeReveal: (threadId: string) => boolean;
 }
 
-export const CommentsContext = createContext<CommentsApi>({
-  versions: () => ({ old: null, new: null }),
-  threadsFor: () => [],
-  threadsForTopic: () => [],
-  create: async () => {},
-  reply: async () => {},
-  edit: async () => {},
-  remove: async () => {},
-  unread: () => 0,
-  markRead: () => {},
-  current: null,
-  pending: false,
-  listening: false,
-  revealSeq: 0,
-  peekReveal: () => null,
-  takeReveal: () => null,
-});
+export const CommentsContext = createContext<CommentsApi | null>(null);
 
-export const useComments = () => useContext(CommentsContext);
+export const useComments = () => useContext(CommentsContext)!;
+
+export const authorName = (c: ThreadComment) => (c.author === "claude" ? "Claude" : "You");
 
 export function anchorLabel(anchor: ThreadAnchor, withVersion = false): string {
   if (anchor.path === null) return `Topic “${anchor.topic}”`;
   if (anchor.side === null) return "Whole file";
-  const side = anchor.side === "old" ? "Old" : "New";
-  const lines = anchor.start === anchor.end ? `${side} line ${anchor.start}` : `${side} lines ${anchor.start}–${anchor.end}`;
+  const lines = `${anchor.side === "old" ? "Old" : "New"} ${lineRange(anchor)}`;
   if (!withVersion) return lines;
   return anchor.commit ? `${lines} at ${anchor.commit.slice(0, 7)}` : `${lines} in the working tree`;
 }
 
-/**
- * What the first comment's header says about where the thread is. In the diff a thread sits under the last line on
- * its side, so only a range needs saying. A thread on lines the diff does not show says the side and version too.
- */
 function whereText(anchor: ThreadAnchor, withVersion: boolean): string | null {
   if (anchor.path === null || anchor.side === null) return null;
   if (withVersion) return `on ${anchorLabel(anchor, true).toLowerCase()}`;
-  return anchor.start === anchor.end ? null : `on lines ${anchor.start}–${anchor.end}`;
+  return anchor.start === anchor.end ? null : `on ${lineRange(anchor)}`;
 }
 
-/** The selected lines of a snippet without the diff marks in front of them. */
 export const unmark = (snippet: string) =>
   snippet
     .split("\n")
     .map((l) => l.slice(1))
     .join("\n");
 
-/** The lines a suggested change in a thread replaces. Only lines of the new version can take one. */
-export const suggestionLines = (thread: Thread) => (thread.anchor.side === "new" ? unmark(thread.snippet) : undefined);
+const suggestionLines = (thread: Thread) => (thread.anchor.side === "new" ? unmark(thread.snippet) : undefined);
 
-/** Comments before the first pending answer: the ones the reader can have seen. */
 export function readableCount(thread: Thread): number {
   const i = thread.comments.findIndex((c) => c.status === "pending");
   return i < 0 ? thread.comments.length : i;
 }
 
-/** Whether a thread's lines come from the version of the file shown on its side of the diff. A comment on the whole file or a topic always does. */
 export const onShownVersion = (thread: Thread, versions: CommentsApi["versions"]) =>
   thread.anchor.side === null || thread.anchor.commit === versions(thread.anchor.path)[thread.anchor.side];
 
 interface FormProps {
   placeholder: string;
-  /** The text to start from when editing a comment. */
   initial?: string;
-  /** Editing saves the text and nothing else. A new comment asks Claude, goes into the pending review, or is sent on its own. */
   editing?: boolean;
-  /** The lines a suggested change replaces: the selected lines of the new version. Without them there is no suggestion button. */
   lines?: string;
   onSubmit: (body: string, single: boolean) => Promise<void>;
   onCancel: () => void;
@@ -108,7 +73,6 @@ interface FormProps {
 
 type Tool = { name: string; keys?: string; icon: string } & ({ format: Format } | { suggest: true });
 
-// Octicons (16px) from @primer/octicons 19.15.0, as on GitHub's comment toolbar.
 const SUGGEST: Tool = {
   suggest: true,
   name: "Suggest a change",
@@ -135,16 +99,12 @@ const TOOLS: Tool[][] = [
   [SUGGEST],
 ];
 
-/** GitHub's comment shortcuts, held with Ctrl, or Cmd on a Mac. Shifted keys go by their place on the keyboard. */
 const FORMAT_KEYS: Record<string, Format> = { b: "bold", i: "italic", e: "code", k: "link" };
 const SHIFT_FORMAT_KEYS: Record<string, Format> = { Digit7: "ordered", Digit8: "unordered", Period: "quote" };
 
-export function CommentForm({ placeholder, initial = "", editing = false, lines, onSubmit, onCancel }: FormProps) {
+function CommentForm({ placeholder, initial = "", editing = false, lines, onSubmit, onCancel }: FormProps) {
   const { pending, listening } = useComments();
   const [text, setText] = useState(initial);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  // The height inside the box when the preview took the field's place, or null while writing.
   const [preview, setPreview] = useState<number | null>(null);
   const asking = !editing && MENTION.test(text);
   const form = useRef<HTMLFormElement>(null);
@@ -152,8 +112,11 @@ export function CommentForm({ placeholder, initial = "", editing = false, lines,
   const box = useRef<HTMLDivElement>(null);
   const tabs = useRef<HTMLDivElement>(null);
   const previewBox = useRef<HTMLDivElement>(null);
+  const { busy, error, run } = useAction(async (single: boolean) => {
+    await onSubmit(text.trim(), single);
+    setText("");
+  });
 
-  // Focusing would scroll the field to the middle of the screen. Scroll only as far as it takes to show the form.
   useLayoutEffect(() => {
     const el = input.current;
     el?.focus({ preventScroll: true });
@@ -161,34 +124,20 @@ export function CommentForm({ placeholder, initial = "", editing = false, lines,
     form.current?.scrollIntoView({ block: "nearest" });
   }, []);
 
-  // The focus follows the tab, so the keys keep working after the field hides.
   const writing = preview === null;
   useLayoutEffect(() => {
     (writing ? input.current : previewBox.current)?.focus({ preventScroll: true });
   }, [writing]);
 
-  // The box keeps its height: the preview takes the field's room and the toolbar's, which goes with the field and
-  // takes rows of its own in a narrow box.
   useLayoutEffect(() => {
     if (preview !== null && previewBox.current && tabs.current) previewBox.current.style.minHeight = `${preview - tabs.current.offsetHeight}px`;
   }, [preview]);
 
   const ready = !busy && text.trim() !== "" && !(editing && text.trim() === initial);
-  const submit = async (single: boolean) => {
-    if (!ready) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await onSubmit(text.trim(), single);
-      setText("");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(false);
-    }
+  const submit = (single: boolean) => {
+    if (ready) void run(single);
   };
 
-  // insertText goes through the field's own undo history, which setting the value would wipe.
   const apply = (edit: TextEdit) => {
     const el = input.current;
     if (!el) return;
@@ -215,7 +164,7 @@ export function CommentForm({ placeholder, initial = "", editing = false, lines,
     if (e.key === "Escape") return onCancel();
     if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
     let action: (() => void) | null = null;
-    if (e.key === "Enter" && !e.shiftKey) action = () => void submit(false);
+    if (e.key === "Enter" && !e.shiftKey) action = () => submit(false);
     else if (e.shiftKey && e.code === "KeyP") action = togglePreview;
     else if (e.target === input.current) {
       const kind = e.shiftKey ? SHIFT_FORMAT_KEYS[e.code] : FORMAT_KEYS[e.key.toLowerCase()];
@@ -240,7 +189,7 @@ export function CommentForm({ placeholder, initial = "", editing = false, lines,
       onKeyDown={onKeyDown}
       onSubmit={(e: FormEvent) => {
         e.preventDefault();
-        void submit(false);
+        submit(false);
       }}
     >
       <div className="comment-box" ref={box}>
@@ -249,37 +198,41 @@ export function CommentForm({ placeholder, initial = "", editing = false, lines,
             <button type="button" role="tab" className="comment-tab" aria-selected={writing} onClick={() => writing || togglePreview()}>
               Write
             </button>
-            <button type="button" role="tab" className="comment-tab" aria-selected={!writing} onClick={() => writing && togglePreview()} title="Preview (Ctrl+Shift+P)">
+            <button
+              type="button"
+              role="tab"
+              className="comment-tab"
+              aria-selected={!writing}
+              onClick={() => writing && togglePreview()}
+              title="Preview (Ctrl+Shift+P)"
+            >
               Preview
             </button>
           </div>
           {writing && (
-          <div className="comment-toolbar" role="toolbar" aria-label="Formatting">
-            {TOOLS.map((group, g) => {
-              const tools = group.filter((t) => "format" in t || lines !== undefined);
-              if (!tools.length) return null;
-              return (
-                <span className="tool-group" key={g}>
-                  {tools.map((t) => (
-                    <button
-                      type="button"
-                      key={t.name}
-                      className="icon-button"
-                      aria-label={t.name}
-                      title={t.keys ? `${t.name} (${t.keys})` : t.name}
-                      // The field keeps the focus and its selection.
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => use(t)}
-                    >
-                      <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
-                        <path d={t.icon} />
-                      </svg>
-                    </button>
-                  ))}
-                </span>
-              );
-            })}
-          </div>
+            <div className="comment-toolbar" role="toolbar" aria-label="Formatting">
+              {TOOLS.map((group, g) => {
+                const tools = group.filter((t) => "format" in t || lines !== undefined);
+                if (!tools.length) return null;
+                return (
+                  <span className="tool-group" key={g}>
+                    {tools.map((t) => (
+                      <button
+                        type="button"
+                        key={t.name}
+                        className="icon-button"
+                        aria-label={t.name}
+                        title={t.keys ? `${t.name} (${t.keys})` : t.name}
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => use(t)}
+                      >
+                        <Octicon d={t.icon} />
+                      </button>
+                    ))}
+                  </span>
+                );
+              })}
+            </div>
           )}
         </div>
         <textarea ref={input} value={text} onChange={(e) => setText(e.target.value)} placeholder={placeholder} rows={3} hidden={!writing} />
@@ -304,7 +257,7 @@ export function CommentForm({ placeholder, initial = "", editing = false, lines,
             Cancel
           </button>
           {!editing && (
-            <button type="button" className="button" onClick={() => void submit(true)} disabled={!ready || asking} title={singleTitle}>
+            <button type="button" className="button" onClick={() => submit(true)} disabled={!ready || asking} title={singleTitle}>
               Add single comment
             </button>
           )}
@@ -318,7 +271,6 @@ export function CommentForm({ placeholder, initial = "", editing = false, lines,
   );
 }
 
-/** Shows one of its texts in a box sized for the longest, so switching between them moves nothing around it. */
 function Either({ show, texts, className }: { show: number; texts: string[]; className?: string }) {
   return (
     <span className={`either${className ? ` ${className}` : ""}`}>
@@ -331,7 +283,44 @@ function Either({ show, texts, className }: { show: number; texts: string[]; cla
   );
 }
 
-/** Rings the thread for a moment after a jump, so the eye finds where it landed. */
+export function NewThread(props: FormProps) {
+  return (
+    <div className="thread thread-new">
+      <CommentForm {...props} />
+    </div>
+  );
+}
+
+interface ThreadListProps {
+  className: string;
+  threads: Thread[];
+  commenting: boolean;
+  placeholder: string;
+  onCreate: (body: string, single: boolean) => Promise<void>;
+  onClose: () => void;
+}
+
+export function ThreadList({ className, threads, commenting, placeholder, onCreate, onClose }: ThreadListProps) {
+  if (!threads.length && !commenting) return null;
+  return (
+    <div className={className}>
+      {threads.map((t) => (
+        <ThreadView key={t.id} thread={t} />
+      ))}
+      {commenting && (
+        <NewThread
+          placeholder={placeholder}
+          onSubmit={async (body, single) => {
+            await onCreate(body, single);
+            onClose();
+          }}
+          onCancel={onClose}
+        />
+      )}
+    </div>
+  );
+}
+
 function flash(el: HTMLElement): void {
   el.classList.remove("is-flash");
   void el.offsetWidth;
@@ -350,8 +339,6 @@ export function ThreadView({ thread, withVersion = false }: { thread: Thread; wi
   const ref = useRef<HTMLDivElement>(null);
   const unreadCount = unread(thread);
 
-  // The thread goes to the middle of the screen and stays there while the files around it mount. A copy in a
-  // hidden tab leaves the request to the one on screen.
   useEffect(() => {
     const el = ref.current;
     if (!el || el.getClientRects().length === 0 || !takeReveal(thread.id)) return;
@@ -360,7 +347,6 @@ export function ThreadView({ thread, withVersion = false }: { thread: Thread; wi
     return pin(el);
   }, [revealSeq]);
 
-  // An answer counts as read once its thread is on screen while the page is in front.
   useEffect(() => {
     const el = ref.current;
     if (!el || unreadCount === 0) return;
@@ -410,17 +396,15 @@ export function ThreadView({ thread, withVersion = false }: { thread: Thread; wi
 function CommentView({ thread, comment: c, where }: { thread: Thread; comment: ThreadComment; where: string | null }) {
   const { edit, remove } = useComments();
   const [mode, setMode] = useState<"view" | "edit" | "delete">("view");
-  const mine = c.author === "user";
-  // Deleting the first comment deletes the thread, answers and all.
   const takesThread = thread.comments[0]?.id === c.id && thread.comments.length > 1;
   return (
     <div className={`comment comment-${c.author}`}>
       <div className="comment-head">
-        <span className="comment-author">{c.author === "claude" ? "Claude" : "You"}</span>
+        <span className="comment-author">{authorName(c)}</span>
         {where && <span className="comment-where">{where}</span>}
         {c.draft && <span className="pending-label">Pending</span>}
         {c.editedAt && <span className="comment-edited">edited</span>}
-        {mine && mode === "view" && (
+        {c.author === "user" && mode === "view" && (
           <span className="comment-actions">
             <button className="icon-button small" onClick={() => setMode("edit")} aria-label="Edit comment" title="Edit">
               <PencilIcon />
@@ -461,59 +445,19 @@ function CommentView({ thread, comment: c, where }: { thread: Thread; comment: T
 }
 
 function ConfirmDelete({ message, onCancel, onConfirm }: { message: string; onCancel: () => void; onConfirm: () => Promise<void> }) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { busy, error, run } = useAction(onConfirm);
   const cancel = useRef<HTMLButtonElement>(null);
   useLayoutEffect(() => cancel.current?.focus({ preventScroll: true }), []);
-  const confirm = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      await onConfirm();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-      setBusy(false);
-    }
-  };
   return (
     <div className="comment-confirm" role="alertdialog" aria-label={message} onKeyDown={(e) => e.key === "Escape" && onCancel()}>
       <span className="comment-confirm-text">{message}</span>
       <button ref={cancel} className="button" onClick={onCancel}>
         Cancel
       </button>
-      <button className="button danger" onClick={() => void confirm()} disabled={busy}>
+      <button className="button danger" onClick={() => void run()} disabled={busy}>
         Delete
       </button>
       {error && <p className="comment-error">{error}</p>}
     </div>
-  );
-}
-
-function PencilIcon() {
-  return (
-    <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-      <path
-        d="M10.75 2.75l2.5 2.5L5.5 13H3v-2.5l7.75-7.75ZM9.25 4.25l2.5 2.5"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-function TrashIcon() {
-  return (
-    <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-      <path
-        d="M2.75 4.25h10.5M6.25 4.25v-1.5h3.5v1.5M4.25 4.25l.6 8.6a1 1 0 0 0 1 .9h4.3a1 1 0 0 0 1-.9l.6-8.6M6.75 7v4M9.25 7v4"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
   );
 }

@@ -1,11 +1,12 @@
 import { type SetStateAction, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lineNumbers } from "../shared/comments";
 import type { Thread, ThreadAnchor } from "../shared/types";
-import { anchorLabel, type CommentsApi, readableCount, type RevealRequest, ThreadView } from "./comments";
-import { comparePaths } from "./FileTree";
-import { readStorage, writeStorage } from "./storage";
+import { anchorLabel, authorName, type CommentsApi, readableCount, ThreadView } from "./comments";
+import { CloseIcon, ConversationIcon } from "./icons";
+import { basename, comparePaths } from "./paths";
+import { readStorage, useStoredState, writeStorage } from "./storage";
 import "./conversations.css";
 
-/** Where a thread shows in the diff: the tab, and its position for sorting. */
 export interface Place {
   tab: "topics" | "files";
   rank: number;
@@ -19,7 +20,8 @@ interface Options {
 }
 
 export interface Conversations {
-  api: Pick<CommentsApi, "unread" | "markRead" | "current" | "revealSeq" | "peekReveal" | "takeReveal">;
+  api: Pick<CommentsApi, "unread" | "markRead" | "revealSeq" | "peekReveal" | "takeReveal">;
+  current: string | null;
   ordered: Thread[];
   placeOf: Map<string, Place | null>;
   unreadThreads: number;
@@ -30,32 +32,38 @@ export interface Conversations {
   markAllRead: () => void;
 }
 
-const OPEN_KEY = "diff-review:conversations";
+const REVEAL_MS = 1500;
 
 function countUnread(thread: Thread, seen: number): number {
   return thread.comments.slice(seen, readableCount(thread)).filter((c) => c.author === "claude").length;
+}
+
+function byPlace(placeOf: Map<string, Place | null>) {
+  return (a: Thread, b: Thread) => {
+    const ra = placeOf.get(a.id)?.rank ?? Infinity;
+    const rb = placeOf.get(b.id)?.rank ?? Infinity;
+    return (
+      (ra === rb ? 0 : ra - rb) ||
+      Number(a.anchor.path !== null) - Number(b.anchor.path !== null) ||
+      comparePaths(a.anchor.path ?? "", b.anchor.path ?? "") ||
+      (a.anchor.end ?? 0) - (b.anchor.end ?? 0) ||
+      (a.anchor.start ?? 0) - (b.anchor.start ?? 0)
+    );
+  };
 }
 
 export function useConversations({ repoRoot, threads, place, show }: Options): Conversations {
   const key = repoRoot ? `diff-review:read:${repoRoot}` : null;
   const [seen, setSeen] = useState<Record<string, number>>({});
   const [current, setCurrent] = useState<string | null>(null);
-  const [open, setOpenState] = useState(() => readStorage(OPEN_KEY, false));
+  const [open, setOpen] = useStoredState("diff-review:conversations", false);
   const [revealSeq, setRevealSeq] = useState(0);
-  const pending = useRef<{ request: RevealRequest; timer: number } | null>(null);
+  const pending = useRef<{ thread: Thread; timer: number } | null>(null);
   const baseTitle = useRef(document.title);
 
   useEffect(() => {
     if (key) setSeen(readStorage(key, {}));
   }, [key]);
-
-  const setOpen = useCallback((next: SetStateAction<boolean>) => {
-    setOpenState((prev) => {
-      const value = typeof next === "function" ? next(prev) : next;
-      writeStorage(OPEN_KEY, value);
-      return value;
-    });
-  }, []);
 
   const markRead = useCallback(
     (thread: Thread) => {
@@ -73,35 +81,20 @@ export function useConversations({ repoRoot, threads, place, show }: Options): C
   const unread = useCallback((thread: Thread) => countUnread(thread, seen[thread.id] ?? 0), [seen]);
 
   const placeOf = useMemo(() => new Map(threads.map((t) => [t.id, place(t)])), [threads, place]);
-  const ordered = useMemo(
-    () =>
-      [...threads].sort((a, b) => {
-        const ra = placeOf.get(a.id)?.rank ?? Infinity;
-        const rb = placeOf.get(b.id)?.rank ?? Infinity;
-        return (
-          (ra === rb ? 0 : ra - rb) ||
-          // A topic's own threads come before the threads on its files.
-          Number(a.anchor.path !== null) - Number(b.anchor.path !== null) ||
-          comparePaths(a.anchor.path ?? "", b.anchor.path ?? "") ||
-          (a.anchor.end ?? 0) - (b.anchor.end ?? 0) ||
-          (a.anchor.start ?? 0) - (b.anchor.start ?? 0)
-        );
-      }),
-    [threads, placeOf],
-  );
+  const ordered = useMemo(() => [...threads].sort(byPlace(placeOf)), [threads, placeOf]);
   const unreadThreads = ordered.filter((t) => unread(t) > 0).length;
 
   useEffect(() => {
     document.title = unreadThreads ? `(${unreadThreads}) ${baseTitle.current}` : baseTitle.current;
   }, [unreadThreads]);
 
-  const peekReveal = useCallback(() => pending.current?.request ?? null, []);
+  const peekReveal = useCallback(() => pending.current?.thread ?? null, []);
   const takeReveal = useCallback((threadId: string) => {
     const p = pending.current;
-    if (!p || p.request.thread.id !== threadId) return null;
+    if (!p || p.thread.id !== threadId) return false;
     clearTimeout(p.timer);
     pending.current = null;
-    return p.request;
+    return true;
   }, []);
 
   const reveal = (thread: Thread) => {
@@ -112,9 +105,8 @@ export function useConversations({ repoRoot, threads, place, show }: Options): C
       else setOpen(true);
     }
     if (pending.current) clearTimeout(pending.current.timer);
-    // Files and topics open over a few renders. A request nothing took must not scroll a thread later.
-    const timer = window.setTimeout(() => (pending.current = null), 1500);
-    pending.current = { request: { thread }, timer };
+    const timer = window.setTimeout(() => (pending.current = null), REVEAL_MS);
+    pending.current = { thread, timer };
     setRevealSeq((s) => s + 1);
   };
 
@@ -132,30 +124,18 @@ export function useConversations({ repoRoot, threads, place, show }: Options): C
     setSeen(next);
   };
 
-  const api = useMemo(
-    () => ({ unread, markRead, current, revealSeq, peekReveal, takeReveal }),
-    [unread, markRead, current, revealSeq, peekReveal, takeReveal],
-  );
+  const api = useMemo(() => ({ unread, markRead, revealSeq, peekReveal, takeReveal }), [unread, markRead, revealSeq, peekReveal, takeReveal]);
 
-  return { api, ordered, placeOf, unreadThreads, open, setOpen, reveal, nextUnread, markAllRead };
-}
-
-export function CloseIcon() {
-  return (
-    <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
-      <path d="M3.75 3.75l8.5 8.5M12.25 3.75l-8.5 8.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-    </svg>
-  );
+  return { api, current, ordered, placeOf, unreadThreads, open, setOpen, reveal, nextUnread, markAllRead };
 }
 
 function lineLabel(anchor: ThreadAnchor): string {
   if (anchor.path === null) return "topic";
   if (anchor.side === null) return "file";
-  const lines = anchor.start === anchor.end ? `L${anchor.start}` : `L${anchor.start}–${anchor.end}`;
+  const lines = `L${lineNumbers(anchor)}`;
   return anchor.side === "old" ? `old ${lines}` : lines;
 }
 
-// Plain text for a one-line preview: Markdown's fences, backticks and bold markers would show as typed.
 const preview = (text: string) =>
   text
     .replace(/```[^\n]*\n?/g, " ")
@@ -174,15 +154,7 @@ export function ConversationsButton({ conv }: { conv: Conversations }) {
       aria-label={label}
       title={label}
     >
-      <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
-        <path
-          d="M2.5 2.75h11a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H8.25L5 14.25v-2.5H2.5a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1Z"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.5"
-          strokeLinejoin="round"
-        />
-      </svg>
+      <ConversationIcon />
       <span>{conv.ordered.length}</span>
       {n > 0 && <span className="conv-badge">{n}</span>}
     </button>
@@ -219,7 +191,7 @@ export function ConversationsPanel({ conv }: { conv: Conversations }) {
               key={t.id}
               thread={t}
               inDiff={placeOf.get(t.id) != null}
-              current={api.current === t.id}
+              current={conv.current === t.id}
               unread={api.unread(t)}
               onOpen={() => conv.reveal(t)}
             />
@@ -262,8 +234,8 @@ function ConversationItem({ thread, inDiff, current, unread, onOpen }: ItemProps
       ) : (
         <span className="conv-where" title={`${anchor.path}, ${anchorLabel(anchor).toLowerCase()}`}>
           <span className="conv-file">
-            <span className="conv-dir">{anchor.path.slice(0, anchor.path.lastIndexOf("/") + 1)}</span>
-            {anchor.path.slice(anchor.path.lastIndexOf("/") + 1)}
+            <span className="conv-dir">{anchor.path.slice(0, anchor.path.length - basename(anchor.path).length)}</span>
+            {basename(anchor.path)}
           </span>
           <span className="conv-lines">{lineLabel(anchor)}</span>
         </span>
@@ -292,7 +264,7 @@ function ConversationItem({ thread, inDiff, current, unread, onOpen }: ItemProps
         {first && <span className="conv-text">{preview(first.body)}</span>}
         {last && last !== first && last.body && (
           <span className="conv-text conv-last">
-            <strong>{last.author === "claude" ? "Claude" : "You"}:</strong> {preview(last.body)}
+            <strong>{authorName(last)}:</strong> {preview(last.body)}
           </span>
         )}
         {last?.status === "pending" && <span className="conv-status">{last.activity ? `${last.activity}…` : "Claude is writing…"}</span>}

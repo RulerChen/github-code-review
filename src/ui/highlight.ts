@@ -1,5 +1,6 @@
 import { createHighlighterCore, type HighlighterCore } from "shiki/core";
 import { createJavaScriptRegexEngine } from "shiki/engine/javascript";
+import { basename } from "./paths";
 
 export interface Token {
   content: string;
@@ -57,7 +58,7 @@ const LANGS = {
   zig: () => import("@shikijs/langs/zig"),
 } as const;
 
-export type Lang = keyof typeof LANGS;
+type Lang = keyof typeof LANGS;
 
 const BY_EXTENSION: Record<string, Lang> = {
   astro: "astro",
@@ -143,7 +144,7 @@ const BY_NAME: Record<string, Lang> = {
 };
 
 export function languageFor(filePath: string): Lang | null {
-  const name = filePath.slice(filePath.lastIndexOf("/") + 1);
+  const name = basename(filePath);
   if (BY_NAME[name]) return BY_NAME[name];
   if (name.startsWith("Dockerfile.")) return "dockerfile";
   const dot = name.lastIndexOf(".");
@@ -171,6 +172,7 @@ function getHighlighter(): Promise<HighlighterCore> {
   return highlighter;
 }
 
+const MAX_CACHED = 64;
 const cache = new Map<string, Promise<TokenLines | null>>();
 
 export function highlight(code: string, lang: Lang): Promise<TokenLines | null> {
@@ -179,7 +181,7 @@ export function highlight(code: string, lang: Lang): Promise<TokenLines | null> 
   if (!result) {
     result = highlightUncached(code, lang);
     cache.set(key, result);
-    if (cache.size > 64) cache.delete(cache.keys().next().value!);
+    if (cache.size > MAX_CACHED) cache.delete(cache.keys().next().value!);
   }
   return result;
 }

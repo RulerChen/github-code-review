@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useRef } from "react";
 import { pin, topBar } from "./anchor";
-import { CloseIcon } from "./Conversations";
+import { CloseIcon, KeyboardIcon } from "./icons";
 import "./keyboard.css";
 
 const TEXT_INPUT = /^(text|search|email|url|password|number|tel)$/;
@@ -11,7 +11,6 @@ function typing(target: EventTarget | null): boolean {
   return target instanceof HTMLInputElement && TEXT_INPUT.test(target.type);
 }
 
-/** Runs the action named by the key pressed, unless a modifier is held or the focus is in a text field. */
 export function useShortcuts(shortcuts: Record<string, () => void>): void {
   const latest = useRef(shortcuts);
   useEffect(() => {
@@ -34,14 +33,12 @@ export function useShortcuts(shortcuts: Record<string, () => void>): void {
   }, []);
 }
 
-// File and topic sections are found in the page itself, so the keys follow the reader's scrolling.
 const sections = () => [...document.querySelectorAll<HTMLElement>(".files > :not([hidden]) > section[id]")];
 
 function topOffset(): number {
   return topBar() + 8;
 }
 
-/** The active section while it is on screen, otherwise the last one whose top has reached the top bar, or the first. */
 function currentIndex(list: HTMLElement[], active: string | null): number {
   const top = topOffset();
   const i = active ? list.findIndex((s) => s.id === active) : -1;
@@ -56,7 +53,6 @@ function currentIndex(list: HTMLElement[], active: string | null): number {
   return index;
 }
 
-/** Scrolls a section to the top and holds it there while the sections around it mount. */
 export function go(el: HTMLElement, setActive: (id: string) => void): void {
   el.scrollIntoView({ block: "start" });
   pin(el);
@@ -76,15 +72,11 @@ export function stepSection(dir: 1 | -1, active: string | null, setActive: (id: 
 export function KeyboardButton({ onClick }: { onClick: () => void }) {
   return (
     <button className="icon-button" onClick={onClick} aria-label="Keyboard shortcuts" title="Keyboard shortcuts">
-      <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
-        <rect x="1" y="3.5" width="14" height="9" rx="1.5" fill="none" stroke="currentColor" strokeWidth="1.5" />
-        <path d="M4 6.5h.5M7.75 6.5h.5M11.5 6.5h.5M4.75 9.5h6.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-      </svg>
+      <KeyboardIcon />
     </button>
   );
 }
 
-// Comment fields take Ctrl+Enter on every platform, and Cmd+Enter as well on a Mac.
 const KEYS: [string[], string][] = [
   [["j", "k"], "Next or previous file or topic"],
   [["u"], "Next conversation with a new answer"],

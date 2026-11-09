@@ -1,22 +1,17 @@
 import { changeIds } from "../shared/hunks.js";
 import type { DiffResult, Topic } from "../shared/types.js";
+import { isRecord } from "../shared/util.js";
 import { ask } from "./claude.js";
 import { checkTopics, formatChanges } from "./review.js";
 
-export interface GroupOptions {
+interface GroupOptions {
   diff: DiffResult;
   focus: string | null;
   cwd: string;
-  /** The Claude Code session that opened the viewer. A fork of it knows why the changes were made. */
   session: string | null;
   onActivity: (activity: string) => void;
 }
 
-/**
- * Asks Claude to group every change in the diff into topics, as the review skill does from the terminal. An answer
- * that is not the JSON asked for, or that names ids not in the diff, gets one chance to be corrected. Ids still
- * unknown after that are dropped, and changes in no topic show under Other changes.
- */
 export async function groupChanges(o: GroupOptions): Promise<Topic[]> {
   const run = (resume: string | null, fork: boolean, prompt: string) =>
     ask({ cwd: o.cwd, resume, fork, prompt, onText: () => {}, onActivity: o.onActivity });
@@ -27,7 +22,6 @@ export async function groupChanges(o: GroupOptions): Promise<Topic[]> {
     res = await run(o.session, true, prompt);
   } catch (err) {
     if (o.session === null) throw err;
-    // The session could not be resumed. Claude can still group the changes from the diff and the files.
     res = await run(null, false, prompt);
   }
 
@@ -62,7 +56,6 @@ function buildPrompt(diff: DiffResult, focus: string | null): string {
   ].join("\n");
 }
 
-/** The topics in Claude's answer, or what is wrong with it. */
 function parseTopics(text: string): Topic[] | string {
   const value = parseJson(text);
   if (value === undefined) return "The answer was not a JSON object.";
@@ -84,7 +77,6 @@ function toTopic(t: unknown): Topic | null {
   return { title: title.trim(), summary: summary.trim(), ids, related: related ?? true };
 }
 
-// The answer should be the bare object, but can come in a code fence or with words around it.
 function parseJson(text: string): unknown {
   const fenced = /```(?:json)?[ \t]*\n([\s\S]*?)\n[ \t]*```/.exec(text)?.[1];
   const braced = text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1);
@@ -92,9 +84,7 @@ function parseJson(text: string): unknown {
     if (!candidate) continue;
     try {
       return JSON.parse(candidate);
-    } catch {
-      // Try the next way the answer may wrap the object.
-    }
+    } catch {}
   }
   return undefined;
 }
@@ -102,8 +92,4 @@ function parseJson(text: string): unknown {
 function unknownIds(diff: DiffResult, topics: Topic[]): string | null {
   const { unknown } = checkTopics(diff, topics);
   return unknown.length ? `These ids are not in the list of changes: ${unknown.join(", ")}.` : null;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
 }

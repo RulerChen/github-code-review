@@ -7,7 +7,6 @@ const HEADING = /^#{1,6}\s+/;
 const QUOTE = /^\s*>\s?/;
 const SAFE_URL = /^(https?:\/\/|mailto:)/i;
 
-/** `base` is the code a ```suggestion block replaces: the lines its thread is on. */
 export function Markdown({ text, className, base }: { text: string; className?: string; base?: string }) {
   return <div className={className ? `markdown ${className}` : "markdown"}>{blocks(text, base)}</div>;
 }
@@ -94,7 +93,6 @@ function blocks(text: string, base: string | undefined): ReactNode[] {
   return out;
 }
 
-/** The lines of the thread as removed and the suggested ones as added, as GitHub shows a suggested change. */
 function Suggestion({ base, lines }: { base: string | undefined; lines: string[] }) {
   const removed = base === undefined ? [] : base.split("\n");
   return (
@@ -116,14 +114,11 @@ function Suggestion({ base, lines }: { base: string | undefined; lines: string[]
   );
 }
 
-// Code first, so marks inside it stay as they are. Italics need a non-word character outside each mark, so
-// snake_case names are not italic.
 const INLINE =
   /(`[^`]+`|\[[^\]\n]+\]\([^)\s]+\)|\*\*[^*]+\*\*|(?<![\w*])\*[^*\s](?:[^*]*[^*\s])?\*(?![\w*])|(?<!\w)_[^_\s](?:[^_]*[^_\s])?_(?!\w))/g;
 const LINK = /^\[([^\]]+)\]\(([^)\s]+)\)$/;
 
 function inline(text: string): ReactNode[] {
-  // Split with one group puts the matches at the odd indices.
   return text.split(INLINE).map((part, k) => {
     if (k % 2 === 0) return <Fragment key={k}>{part}</Fragment>;
     if (part.startsWith("`")) return <code key={k}>{part.slice(1, -1)}</code>;

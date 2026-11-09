@@ -1,12 +1,13 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { buildHunks, splitLines } from "../shared/hunks";
 import type { Block, DiffLine, DisplayHunk, Expansion, FileDiff } from "../shared/types";
-import { CommentForm, onShownVersion, ThreadView, useComments } from "./comments";
+import { sum } from "../shared/util";
+import { keepHeaderInPlace, keepInPlace, topBar } from "./anchor";
+import { onShownVersion, ThreadList, ThreadView, useComments } from "./comments";
+import { CollapseButton, CommentButton, CopyButton, ViewedToggle } from "./controls";
 import { DiffTable, hasLine, type OnExpand, toSplitRows, twoExpanders } from "./DiffTable";
 import { highlight, languageFor, type TokenLines } from "./highlight";
-import { keepHeaderInPlace, keepInPlace, topBar } from "./anchor";
 
-// GitHub loads 400 lines or 20 KB of a file's diff before asking. Characters stand in for bytes.
 const AUTO_LOAD_LINES = 400;
 const AUTO_LOAD_CHARS = 20 * 1024;
 const NO_EXPANSION: Expansion = { above: {}, below: {} };
@@ -18,7 +19,6 @@ const THREAD_PX = 110;
 const NUM_PX = 52;
 const CODE_PAD_PX = 32;
 
-// One observer for every card: a card's body mounts once it comes within a viewport of the screen.
 const nearCallbacks = new Map<Element, () => void>();
 let nearObserver: IntersectionObserver | null = null;
 
@@ -50,22 +50,6 @@ interface Props {
   onToggleViewed?: () => void;
 }
 
-export function ChevronIcon() {
-  return (
-    <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
-      <path d="M12.78 5.22a.75.75 0 0 1 0 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L3.22 6.28a.75.75 0 0 1 1.06-1.06L8 8.94l3.72-3.72a.75.75 0 0 1 1.06 0Z" />
-    </svg>
-  );
-}
-
-export function CommentIcon() {
-  return (
-    <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
-      <path d="M1 2.75C1 1.784 1.784 1 2.75 1h10.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 13.25 12H9.06l-2.573 2.573A1.458 1.458 0 0 1 4 13.543V12H2.75A1.75 1.75 0 0 1 1 10.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h2a.75.75 0 0 1 .75.75v2.19l2.72-2.72a.749.749 0 0 1 .53-.22h4.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z" />
-    </svg>
-  );
-}
-
 export function FileCard({ file: next, blocks: nextBlocks = next.blocks, anchor, viewed = false, onToggleViewed }: Props) {
   const [collapsed, setCollapsed] = useState(viewed);
   const [forceLoad, setForceLoad] = useState(false);
@@ -89,7 +73,6 @@ export function FileCard({ file: next, blocks: nextBlocks = next.blocks, anchor,
   const ref = useRef<HTMLElement>(null);
   const header = useRef<HTMLElement>(null);
   useEffect(() => (near || !ref.current ? undefined : whenNear(ref.current, () => setNear(true))), [near]);
-  // A card already near the screen when it mounts shows its body before the first paint, not one frame later.
   useLayoutEffect(() => {
     const el = ref.current;
     if (near || !el || el.getClientRects().length === 0) return;
@@ -98,7 +81,7 @@ export function FileCard({ file: next, blocks: nextBlocks = next.blocks, anchor,
   }, []);
   const { threadsFor, create, versions, revealSeq, peekReveal } = useComments();
   useEffect(() => {
-    const thread = peekReveal()?.thread;
+    const thread = peekReveal();
     if (!thread || thread.anchor.path !== file.path) return;
     const { anchor } = thread;
     const placed = anchor.side === null || (onShownVersion(thread, versions) && hasLine(hunks, anchor.side, anchor.end));
@@ -108,32 +91,27 @@ export function FileCard({ file: next, blocks: nextBlocks = next.blocks, anchor,
     if (placed && anchor.side !== null) setForceLoad(true);
   }, [revealSeq]);
   const threads = threadsFor(file.path);
-  // Comments on the whole file show on every card of the file, since a topic can show part of it.
   const fileThreads = threads.filter((t) => t.anchor.side === null);
   const unplaced = partial
     ? []
     : threads.filter((t) => t.anchor.side !== null && (!onShownVersion(t, versions) || !hasLine(hunks, t.anchor.side, t.anchor.end)));
-  // A body that is only a note costs nothing to show, and a placeholder could not match its height.
   const cheap = deferred || hunks.length === 0;
-  const additions = partial ? blocks.reduce((n, b) => n + b.newCount, 0) : file.additions;
-  const deletions = partial ? blocks.reduce((n, b) => n + b.oldCount, 0) : file.deletions;
+  const additions = partial ? sum(blocks, (b) => b.newCount) : file.additions;
+  const deletions = partial ? sum(blocks, (b) => b.oldCount) : file.deletions;
 
   return (
     <section className={`file${viewed ? " is-viewed" : ""}`} id={anchor} ref={ref}>
       <header className="file-header" ref={header}>
-        <button
-          className="icon-button chevron"
-          aria-expanded={!collapsed}
-          aria-label={collapsed ? "Expand file" : "Collapse file"}
+        <CollapseButton
+          collapsed={collapsed}
+          noun="file"
           onClick={() =>
             keepHeaderInPlace(header.current, () => {
               setCollapsed(!collapsed);
               setNear(true);
             })
           }
-        >
-          <ChevronIcon />
-        </button>
+        />
         <DiffStat additions={additions} deletions={deletions} />
         <span className="file-path" title={file.path}>
           {file.oldPath ? (
@@ -146,12 +124,9 @@ export function FileCard({ file: next, blocks: nextBlocks = next.blocks, anchor,
         </span>
         <CopyButton text={file.path} />
         <span className="spacer" />
-        <button
-          className="icon-button"
-          aria-label="Comment on this file"
-          title="Comment on this file"
+        <CommentButton
+          label="Comment on this file"
           onClick={() =>
-            // The form opens at the top of the body, so a stuck header first goes back to the top of its card.
             keepInPlace(
               ref.current,
               () => {
@@ -162,48 +137,31 @@ export function FileCard({ file: next, blocks: nextBlocks = next.blocks, anchor,
               topBar(),
             )
           }
-        >
-          <CommentIcon />
-        </button>
+        />
         {onToggleViewed && (
-          <label className="viewed-toggle">
-            <input
-              type="checkbox"
-              checked={viewed}
-              onChange={() =>
-                keepHeaderInPlace(header.current, () => {
-                  setCollapsed(!viewed);
-                  setNear(true);
-                  onToggleViewed();
-                })
-              }
-            />
-            Viewed
-          </label>
+          <ViewedToggle
+            viewed={viewed}
+            onChange={() =>
+              keepHeaderInPlace(header.current, () => {
+                setCollapsed(!viewed);
+                setNear(true);
+                onToggleViewed();
+              })
+            }
+          />
         )}
       </header>
       {!collapsed && !near && !cheap && <Placeholder hunks={hunks} threads={threads.length} />}
       {!collapsed && (near || cheap) && (
         <div className="file-body">
-          {(fileThreads.length > 0 || commenting) && (
-            <div className="file-threads">
-              {fileThreads.map((t) => (
-                <ThreadView key={t.id} thread={t} />
-              ))}
-              {commenting && (
-                <div className="thread thread-new">
-                  <CommentForm
-                    placeholder="Comment on this file"
-                    onSubmit={async (body, single) => {
-                      await create({ path: file.path, side: null, start: null, end: null }, "", body, single);
-                      setCommenting(false);
-                    }}
-                    onCancel={() => setCommenting(false)}
-                  />
-                </div>
-              )}
-            </div>
-          )}
+          <ThreadList
+            className="file-threads"
+            threads={fileThreads}
+            commenting={commenting}
+            placeholder="Comment on this file"
+            onCreate={(body, single) => create({ path: file.path, side: null, start: null, end: null }, "", body, single)}
+            onClose={() => setCommenting(false)}
+          />
           {unplaced.length > 0 && (
             <div className="unplaced">
               <p className="file-note inline">Comments on lines not shown in this diff</p>
@@ -283,13 +241,12 @@ function FileBody({
   );
 }
 
-export function hunksOf(file: FileDiff, blocks: Block[], expansion: Expansion | null): DisplayHunk[] {
+function hunksOf(file: FileDiff, blocks: Block[], expansion: Expansion | null): DisplayHunk[] {
   if (blocks.length === 0 || file.diffTooLarge) return [];
   const lines = (text: string | null) => (text === null ? null : splitLines(text));
   return buildHunks(blocks, lines(file.oldContent), lines(file.newContent), file.blocks, expansion);
 }
 
-// Hunks of a topic's part of a file, by the part's blocks, so each card works them out once.
 const partHunks = new WeakMap<Block[], DisplayHunk[]>();
 
 export function baseHunksOf(file: FileDiff, blocks: Block[]): DisplayHunk[] {
@@ -314,8 +271,6 @@ function sizeOf(hunks: DisplayHunk[]): { lineCount: number; charCount: number } 
   return { lineCount, charCount };
 }
 
-// A body that has not mounted yet, about as tall as it will be, so the page keeps its length and what follows it
-// hardly moves when it mounts. Its width decides how long lines wrap, so the height is set once it is laid out.
 function Placeholder({ hunks, threads }: { hunks: DisplayHunk[]; threads: number }) {
   const ref = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
@@ -338,8 +293,6 @@ function charWidth(): number {
   return charPx || 7.2;
 }
 
-// Rows as DiffTable lays them out: a hunk row as tall as its expand buttons, a code row as tall as the longer of
-// its two sides once wrapped at the code column's width.
 function estimateHeight(hunks: DisplayHunk[], width: number): number {
   const cols = Math.max(20, Math.floor(((width - 2 * NUM_PX) / 2 - CODE_PAD_PX) / charWidth()));
   const wrapped = (line: DiffLine | null | undefined) =>
@@ -361,16 +314,12 @@ interface Tokens {
 interface Shown {
   file: FileDiff;
   blocks: Block[];
-  /** null until the text is highlighted, and for text that is not. */
   tokens: Tokens | null;
 }
 
 const sameText = (a: FileDiff, b: FileDiff) =>
   a.path === b.path && a.oldPath === b.oldPath && a.oldContent === b.oldContent && a.newContent === b.newContent;
 
-// The version of the file the card shows. When a refresh changes the text of a highlighted card, the card
-// keeps showing the old version until the new one is highlighted, then swaps it in one render, so the code
-// does not flash plain.
 function useShown(file: FileDiff, blocks: Block[], enabled: boolean): Shown {
   const lang = languageFor(file.path);
   const want = enabled && lang !== null;
@@ -421,36 +370,5 @@ function DiffStat({ additions, deletions }: { additions: number; deletions: numb
         ))}
       </span>
     </span>
-  );
-}
-
-export function CopyButton({ text, label = "Copy file path" }: { text: string; label?: string }) {
-  const [copied, setCopied] = useState(false);
-  return (
-    <button
-      className="icon-button copy"
-      aria-label={label}
-      title={copied ? "Copied" : label}
-      onClick={() => {
-        navigator.clipboard
-          ?.writeText(text)
-          .then(() => {
-            setCopied(true);
-            setTimeout(() => setCopied(false), 1200);
-          })
-          .catch(() => undefined);
-      }}
-    >
-      {copied ? (
-        <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
-          <path d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.75.75 0 0 1 1.06-1.06L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z" />
-        </svg>
-      ) : (
-        <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
-          <path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Z" />
-          <path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z" />
-        </svg>
-      )}
-    </button>
   );
 }

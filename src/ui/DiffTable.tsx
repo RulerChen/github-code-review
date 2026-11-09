@@ -1,8 +1,10 @@
 import { memo, type MouseEvent, type ReactNode, useEffect, useMemo, useState } from "react";
+import { stripCr } from "../shared/hunks";
 import type { DiffLine, DisplayHunk, Expansion, Thread } from "../shared/types";
-import { CommentForm, onShownVersion, ThreadView, unmark, useComments } from "./comments";
 import { keepInPlace } from "./anchor";
+import { NewThread, onShownVersion, ThreadView, unmark, useComments } from "./comments";
 import type { Token, TokenLines } from "./highlight";
+import { type ExpandDir, ExpandIcon } from "./icons";
 
 type Side = "old" | "new";
 
@@ -39,8 +41,6 @@ interface Props {
 
 const MARK = { add: "+", del: "-", context: " " } as const;
 const EXPAND_STEP = 20;
-
-const stripCr = (s: string) => (s.endsWith("\r") ? s.slice(0, -1) : s);
 
 function tokensFor(line: DiffLine, oldTokens: TokenLines | null, newTokens: TokenLines | null): Token[] | undefined {
   if (line.kind === "del") return line.oldNo ? oldTokens?.[line.oldNo - 1] : undefined;
@@ -88,7 +88,6 @@ export function DiffTable({ path, hunks, oldTokens, newTokens, onExpand }: Props
   const isSelected = (side: Side, no: number | null) =>
     shown !== null && no !== null && shown.side === side && no >= shown.start && no <= shown.end;
 
-  // One pair of handlers on the table finds the line under the pointer, so cells carry no handlers.
   const press = (e: MouseEvent) => {
     const hit = e.button === 0 ? lineAt(e.target, true) : null;
     if (!hit) return;
@@ -123,32 +122,24 @@ export function DiffTable({ path, hunks, oldTokens, newTokens, onExpand }: Props
     setSelection(null);
   };
 
-  // Opening lines keeps the row the reader is looking at in place: the clicked row when lines open under it,
-  // otherwise the row under the clicked one, since the clicked row can shrink or merge away.
   const expand: Expand = (e, dir, blockId, lines) => {
-    // The clicked row stays under the pointer when it stays. When it goes, the line above it stays, the way text
-    // opens downwards.
     const tr = e.currentTarget.closest("tr");
     const keep = dir === "up" ? tr : dir === "down" ? (tr?.nextElementSibling ?? tr) : (tr?.previousElementSibling ?? tr);
     keepInPlace(keep, () => onExpand(dir === "up" || dir === "all" ? "above" : "below", blockId, lines));
   };
 
-  // One flat list of rows keyed by what they show, so a row stays the same element when lines open or a refresh
-  // adds lines above it, and the page can keep it in place.
   const body: ReactNode[] = [];
-  // The threads under a line and the form for a new one, on the side they belong to.
   const sideContent = (side: Side, no: number | null): ReactNode[] => {
     const out: ReactNode[] = ((no !== null && threadsAt.get(`${side}:${no}`)) || []).map((t) => <ThreadView key={t.id} thread={t} />);
     if (no !== null && selection?.side === side && selection.end === no) {
       out.push(
-        <div className="thread thread-new" key="form">
-          <CommentForm
-            placeholder="Leave a comment"
-            lines={side === "new" ? unmark(snippetOf(hunks, side, selection.start, selection.end)) : undefined}
-            onSubmit={submit}
-            onCancel={() => setSelection(null)}
-          />
-        </div>,
+        <NewThread
+          key="form"
+          placeholder="Leave a comment"
+          lines={side === "new" ? unmark(snippetOf(hunks, side, selection.start, selection.end)) : undefined}
+          onSubmit={submit}
+          onCancel={() => setSelection(null)}
+        />,
       );
     }
     return out;
@@ -207,13 +198,10 @@ export function DiffTable({ path, hunks, oldTokens, newTokens, onExpand }: Props
   );
 }
 
-type Expand = (e: MouseEvent<HTMLButtonElement>, dir: keyof typeof EXPAND_ICON, blockId: string, lines: number) => void;
+type Expand = (e: MouseEvent<HTMLButtonElement>, dir: ExpandDir, blockId: string, lines: number) => void;
 
-// Lines hidden between two hunks with no change between them open together once few are left,
-// as on GitHub. Otherwise each side opens EXPAND_STEP lines at a time.
 const opensAll = (hunk: DisplayHunk) => hunk.joinsPrevious && hunk.hiddenAbove > 0 && hunk.hiddenAbove <= EXPAND_STEP;
 
-/** Whether a hunk's row holds two expand buttons, which make it taller. */
 export function twoExpanders(prev: DisplayHunk | undefined, hunk: DisplayHunk): boolean {
   return !opensAll(hunk) && (prev?.hiddenBelow ?? 0) > 0 && hunk.hiddenAbove > 0;
 }
@@ -229,24 +217,17 @@ function HunkExpanders({ prev, hunk, expand }: { prev: DisplayHunk | undefined; 
   );
 }
 
-const EXPAND_ICON = {
-  up: { label: "Expand up", d: "M8 13V3M4.5 6.5 8 3l3.5 3.5" },
-  down: { label: "Expand down", d: "M8 3v10M4.5 9.5 8 13l3.5-3.5" },
-  all: { label: "Expand all", d: "M8 2v12M5 5l3-3 3 3M5 11l3 3 3-3" },
-} as const;
+const EXPAND_LABEL: Record<ExpandDir, string> = { up: "Expand up", down: "Expand down", all: "Expand all" };
 
-function ExpandButton({ dir, onClick }: { dir: keyof typeof EXPAND_ICON; onClick: (e: MouseEvent<HTMLButtonElement>) => void }) {
-  const { label, d } = EXPAND_ICON[dir];
+function ExpandButton({ dir, onClick }: { dir: ExpandDir; onClick: (e: MouseEvent<HTMLButtonElement>) => void }) {
+  const label = EXPAND_LABEL[dir];
   return (
     <button className="expand-button" aria-label={label} title={label} onClick={onClick}>
-      <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
-        <path d={d} />
-      </svg>
+      <ExpandIcon dir={dir} />
     </button>
   );
 }
 
-// Like GitHub's split view, a thread sits under its side of the diff, so it needs no label saying which side.
 function ThreadRow({ left, right }: { left: ReactNode[]; right: ReactNode[] }) {
   return (
     <tr className="thread-row">
@@ -260,7 +241,6 @@ function ThreadRow({ left, right }: { left: ReactNode[]; right: ReactNode[] }) {
   );
 }
 
-// The side and number of the line in the cell under `target`, read from the number cell's data attributes.
 function lineAt(target: EventTarget, numberOnly: boolean): [Side, number] | null {
   const td = target instanceof Element ? target.closest("td") : null;
   const num = td?.classList.contains("num") ? td : numberOnly ? null : td?.previousElementSibling;
@@ -278,7 +258,6 @@ interface RowProps {
   newSelected: boolean;
 }
 
-// Memoized so a selection change renders only the rows whose selected state changed.
 const Row = memo(function Row({ row, oldTokens, newTokens, oldSelected, newSelected }: RowProps) {
   return (
     <tr>

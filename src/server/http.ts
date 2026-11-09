@@ -4,12 +4,13 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { type AddressInfo, isIP } from "node:net";
 import path from "node:path";
 import { computeDiff, diffVersion, listRefs } from "../engine/diff.js";
-import { comparisonFromQuery, sameComparison } from "../shared/comparison.js";
+import { comparisonFromQuery, isFor } from "../shared/comparison.js";
 import type { Comparison, Grouping, Review, Thread, ThreadAnchor, Topic, ViewData } from "../shared/types.js";
+import { errorMessage, isRecord } from "../shared/util.js";
 import { groupChanges } from "./group.js";
 import { RepoThreads } from "./threads.js";
 
-export interface View {
+interface View {
   id: string;
   repo: string;
   compare: Comparison;
@@ -24,12 +25,20 @@ const MIME: Record<string, string> = {
   ".woff2": "font/woff2",
 };
 
-// Ports tried in order before a random one, so a firewall rule or an SSH LocalForward can name them in advance.
 const FIRST_PORT = 7800;
 const PORT_COUNT = 10;
+const MAX_REQUEST_BYTES = 256 * 1024;
+const MAX_COMMENT = 20 * 1024;
+const MAX_SNIPPET = 64 * 1024;
+const MAX_FOCUS = 2000;
+const MAX_REF = 1024;
+const MAX_OVERRIDES = 1000;
+const MAX_PATH = 4096;
+const PING_MS = 25_000;
+const PAGE = /^\/v\/[\w-]+$/;
+const API = /^\/api\/views\/([\w-]+)\/(diff|events|refs|threads|review|wait|version|topics)(?:\/([\w-]+)\/comments(?:\/([\w-]+))?)?$/;
+const SHA = /^[0-9a-f]{40,64}$/;
 
-// Over SSH, the address the user connected to. The server then listens on every interface, so the page opens from
-// any machine on the network that can reach that address.
 const sshAddress = process.env.SSH_CONNECTION?.split(" ")[2] ?? "";
 const SSH_HOST = isIP(sshAddress) ? sshAddress : null;
 
@@ -42,14 +51,11 @@ export class ReviewServer {
   private readonly repos = new Map<string, RepoThreads>();
   private readonly reviews: Review[] = [];
   private readonly groupings: Grouping[] = [];
-  // Each open page's event stream.
   private readonly pages = new Set<(event: string, data: unknown) => void>();
+  private readonly token = randomBytes(32).toString("base64url");
   private readonly uiDir: string;
   private server: Server | null = null;
   private port = 0;
-  // Anyone who can reach the port could otherwise read the repository and have @claude read any file, so every
-  // request but the static assets needs this token, from the URL or from the cookie the page gets for it.
-  private readonly token = randomBytes(32).toString("base64url");
 
   constructor(uiDir: string) {
     this.uiDir = path.resolve(uiDir);
@@ -62,8 +68,8 @@ export class ReviewServer {
         else res.destroy();
       });
     });
-    let bound = false;
     const host = SSH_HOST ? undefined : "127.0.0.1";
+    let bound = false;
     for (let port = FIRST_PORT; !bound && port < FIRST_PORT + PORT_COUNT; port++) bound = await listen(server, port, host);
     if (!bound) await listen(server, 0, host);
     this.port = (server.address() as AddressInfo).port;
@@ -76,46 +82,54 @@ export class ReviewServer {
     this.server = null;
   }
 
-  /** Whether a page is open, so it shows each view Claude opens instead of the user opening its URL. */
   get pageOpen(): boolean {
     return this.pages.size > 0;
   }
 
-  /** A view for Claude's comparison, with its topics when it grouped the changes. Open pages switch to it. */
   addView(repo: string, compare: Comparison, grouped: { focus: string | null; topics: Topic[] } | null, cwd: string, session: string | null): View {
     let id: string;
     do id = Array.from({ length: 8 }, () => String.fromCharCode(97 + randomInt(26))).join("");
     while (this.views.has(id));
     const view = { id, repo, compare };
-    this.views.set(view.id, view);
-    let threads = this.repos.get(repo);
-    if (!threads) {
-      threads = new RepoThreads(cwd);
-      this.repos.set(repo, threads);
-    }
+    this.views.set(id, view);
+    const threads = this.repos.get(repo) ?? new RepoThreads(cwd);
+    this.repos.set(repo, threads);
     threads.cwd = cwd;
     if (session) threads.parentSession = session;
     if (grouped) this.addReview(view, compare, grouped.focus, grouped.topics);
-    this.broadcast("view", { view: view.id, repo, compare });
+    this.broadcast("view", { view: id, repo, compare });
     return view;
   }
 
-  // A newer review of the same comparison replaces the older one.
+  repoThreads(): { repo: string; threads: RepoThreads; view: View }[] {
+    const newest = new Map<string, View>();
+    for (const v of this.views.values()) newest.set(v.repo, v);
+    return [...this.repos].map(([repo, threads]) => ({ repo, threads, view: newest.get(repo)! }));
+  }
+
+  url(view: View): string {
+    const host = !SSH_HOST ? "127.0.0.1" : isIP(SSH_HOST) === 6 ? `[${SSH_HOST}]` : SSH_HOST;
+    return `http://${host}:${this.port}/v/${view.id}?token=${this.token}`;
+  }
+
+  waitCommand(view: View): string {
+    const after = this.repos.get(view.repo)?.submissions.length ?? 0;
+    return `curl -sSf "http://127.0.0.1:${this.port}/api/views/${view.id}/wait?after=${after}&token=${this.token}"`;
+  }
+
   private addReview(view: View, compare: Comparison, focus: string | null, topics: Topic[]): void {
-    const same = (r: { repo: string; compare: Comparison }) => r.repo === view.repo && sameComparison(r.compare, compare);
+    const same = isFor(view.repo, compare);
     const old = this.reviews.findIndex(same);
     if (old >= 0) this.reviews.splice(old, 1);
     this.reviews.push({ repo: view.repo, compare, focus, topics, createdAt: new Date().toISOString(), view: view.id });
-    // A failed attempt at grouping the comparison is moot once it has a review.
     const failed = this.groupings.findIndex((g) => same(g) && g.error !== null);
     if (failed >= 0) this.groupings.splice(failed, 1);
     this.broadcast("reviews", this.reviews);
     this.broadcast("groupings", this.groupings);
   }
 
-  /** Asks Claude to group the comparison into topics, unless it is already at it. Progress and the review reach the pages as events. */
   private group(view: View, compare: Comparison, focus: string | null, threads: RepoThreads): void {
-    const i = this.groupings.findIndex((g) => g.repo === view.repo && sameComparison(g.compare, compare));
+    const i = this.groupings.findIndex(isFor(view.repo, compare));
     if (i >= 0 && this.groupings[i]!.error === null) return;
     if (i >= 0) this.groupings.splice(i, 1);
     const job: Grouping = { repo: view.repo, compare, focus, activity: "Starting", error: null };
@@ -144,154 +158,107 @@ export class ReviewServer {
     for (const send of this.pages) send(event, data);
   }
 
-  /** Each repository's threads, with the newest view opened for it. */
-  repoThreads(): { repo: string; threads: RepoThreads; view: View }[] {
-    const newest = new Map<string, View>();
-    for (const v of this.views.values()) newest.set(v.repo, v);
-    return [...this.repos].map(([repo, threads]) => ({ repo, threads, view: newest.get(repo)! }));
-  }
-
-  url(view: View): string {
-    const host = !SSH_HOST ? "127.0.0.1" : isIP(SSH_HOST) === 6 ? `[${SSH_HOST}]` : SSH_HOST;
-    return `http://${host}:${this.port}/v/${view.id}?token=${this.token}`;
-  }
-
-  /** A shell command that exits once the user submits a review newer than the ones submitted so far. */
-  waitCommand(view: View): string {
-    const after = this.repos.get(view.repo)?.submissions.length ?? 0;
-    return `curl -sSf "http://127.0.0.1:${this.port}/api/views/${view.id}/wait?after=${after}&token=${this.token}"`;
-  }
-
   private async handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const { pathname, searchParams } = new URL(req.url ?? "/", "http://127.0.0.1");
-    // The token stands in for the old check of the Host header against DNS rebinding: a page on another site has
-    // neither the token nor this host's cookie.
-    if (!pathname.startsWith("/assets/")) {
-      const given = searchParams.get("token");
-      const cookie = `diff-review-${this.port}`;
-      if (given !== null && this.validToken(given) && req.method === "GET" && /^\/v\/[\w-]+$/.test(pathname)) {
-        searchParams.delete("token");
-        const query = searchParams.toString();
-        res.writeHead(302, {
-          Location: query ? `${pathname}?${query}` : pathname,
-          // Cookies ignore the port, so each port's server has its own.
-          "Set-Cookie": `${cookie}=${this.token}; Path=/; HttpOnly; SameSite=Strict`,
-          "Cache-Control": "no-store",
-        });
-        return void res.end();
-      }
-      const fromCookie = req.headers.cookie?.split(/;\s*/).find((c) => c.startsWith(`${cookie}=`))?.slice(cookie.length + 1);
-      if (!this.validToken(given ?? fromCookie)) {
-        const error = "Open the URL Claude printed. It carries the access token.";
-        return pathname.startsWith("/api/") ? sendJson(res, 401, { error }) : sendText(res, 401, error);
-      }
+    const assets = pathname.startsWith("/assets/");
+    if (!assets && !this.authorize(req, res, pathname, searchParams)) return;
+    const api = API.exec(pathname);
+    if (api) return this.api(req, res, searchParams, api);
+    if (req.method !== "GET") return sendText(res, 405, "Method not allowed");
+    if (PAGE.test(pathname)) return this.sendFile(res, "index.html", "no-store");
+    if (assets) return this.sendFile(res, pathname.slice(1), "public, max-age=31536000, immutable");
+    return sendText(res, 404, "Not found");
+  }
+
+  private authorize(req: IncomingMessage, res: ServerResponse, pathname: string, query: URLSearchParams): boolean {
+    const given = query.get("token");
+    const cookie = `diff-review-${this.port}`;
+    if (given !== null && this.validToken(given) && req.method === "GET" && PAGE.test(pathname)) {
+      query.delete("token");
+      const rest = query.toString();
+      res.writeHead(302, {
+        Location: rest ? `${pathname}?${rest}` : pathname,
+        "Set-Cookie": `${cookie}=${this.token}; Path=/; HttpOnly; SameSite=Strict`,
+        "Cache-Control": "no-store",
+      });
+      res.end();
+      return false;
     }
+    const fromCookie = req.headers.cookie?.split(/;\s*/).find((c) => c.startsWith(`${cookie}=`))?.slice(cookie.length + 1);
+    if (this.validToken(given ?? fromCookie)) return true;
+    const error = "Open the URL Claude printed. It carries the access token.";
+    if (pathname.startsWith("/api/")) sendJson(res, 401, { error });
+    else sendText(res, 401, error);
+    return false;
+  }
 
-    const api = /^\/api\/views\/([\w-]+)\/(diff|events|refs|threads|review|wait|version|topics)(?:\/([\w-]+)\/comments(?:\/([\w-]+))?)?$/.exec(pathname);
-    if (api) {
-      const view = this.views.get(api[1]!);
-      if (!view) return sendJson(res, 404, { error: "Unknown view. Ask Claude to open the viewer again." });
-      const threads = this.repos.get(view.repo)!;
-      const route = api[2];
-      const threadId = api[3];
-      const commentId = api[4];
+  private async api(req: IncomingMessage, res: ServerResponse, query: URLSearchParams, match: RegExpExecArray): Promise<void> {
+    const [, viewId, route, threadId, commentId] = match;
+    const view = this.views.get(viewId!);
+    if (!view) return sendJson(res, 404, { error: "Unknown view. Ask Claude to open the viewer again." });
+    if (req.method !== "GET" && !this.sameOrigin(req)) return sendJson(res, 403, { error: "Cross-site request refused" });
+    const threads = this.repos.get(view.repo)!;
+    const compare = comparisonFromQuery(query) ?? view.compare;
+    const target = commentId ? `${route}/comment` : threadId ? `${route}/thread` : route;
 
-      if (req.method === "GET" && route === "diff" && !threadId) {
-        try {
-          const compare = comparisonFromQuery(searchParams) ?? view.compare;
-          const version = await diffVersion(view.repo, compare);
-          const diff = await computeDiff(view.repo, compare);
-          const data: ViewData = {
-            diff,
-            version,
-            opened: view.compare,
-            reviews: this.reviews,
-            groupings: this.groupings,
-            threads: threads.threads,
-            listening: threads.listening,
-          };
-          return sendJson(res, 200, data);
-        } catch (err) {
-          return sendJson(res, 500, { error: errorMessage(err) });
-        }
+    switch (`${req.method} ${target}`) {
+      case "GET diff": {
+        const version = await diffVersion(view.repo, compare);
+        const diff = await computeDiff(view.repo, compare);
+        const data: ViewData = {
+          diff,
+          version,
+          opened: view.compare,
+          reviews: this.reviews,
+          groupings: this.groupings,
+          threads: threads.threads,
+          listening: threads.listening,
+        };
+        return sendJson(res, 200, data);
       }
-      if (req.method === "GET" && route === "version" && !threadId) {
-        try {
-          return sendJson(res, 200, { version: await diffVersion(view.repo, comparisonFromQuery(searchParams) ?? view.compare) });
-        } catch (err) {
-          return sendJson(res, 500, { error: errorMessage(err) });
-        }
-      }
-      if (req.method === "GET" && route === "refs" && !threadId) {
-        try {
-          return sendJson(res, 200, await listRefs(view.repo, searchParams.get("repo")));
-        } catch (err) {
-          return sendJson(res, 500, { error: errorMessage(err) });
-        }
-      }
-      if (req.method === "GET" && route === "events" && !threadId) return this.events(req, res, threads);
-      if (req.method === "POST" && route === "topics" && !threadId) {
-        if (!this.sameOrigin(req)) return sendJson(res, 403, { error: "Cross-site request refused" });
-        const { focus } = (await readJson(req)) ?? {};
-        if (focus !== undefined && focus !== null && !isText(focus, 2000)) return sendJson(res, 400, { error: "Invalid focus" });
-        this.group(view, comparisonFromQuery(searchParams) ?? view.compare, focus?.trim() || null, threads);
+      case "GET version":
+        return sendJson(res, 200, { version: await diffVersion(view.repo, compare) });
+      case "GET refs":
+        return sendJson(res, 200, await listRefs(view.repo, query.get("repo")));
+      case "GET events":
+        return this.events(req, res, threads);
+      case "GET wait":
+        return wait(res, query, view, threads);
+      case "POST topics": {
+        const { focus } = await readJson(req);
+        if (focus !== undefined && focus !== null && !isText(focus, MAX_FOCUS)) return sendJson(res, 400, { error: "Invalid focus" });
+        this.group(view, compare, focus?.trim() || null, threads);
         return sendJson(res, 202, { groupings: this.groupings });
       }
-      if (route === "threads" && threadId && commentId && (req.method === "PATCH" || req.method === "DELETE")) {
-        if (!this.sameOrigin(req)) return sendJson(res, 403, { error: "Cross-site request refused" });
-        if (req.method === "DELETE") {
-          const thread = threads.remove(threadId, commentId);
-          return thread ? sendJson(res, 200, { thread }) : sendJson(res, 404, { error: "Unknown comment" });
-        }
-        const { body: text } = (await readJson(req)) ?? {};
-        if (!isText(text, 20 * 1024, true)) return sendJson(res, 400, { error: "Invalid comment" });
-        const thread = threads.edit(threadId, commentId, text.trim());
-        return thread ? sendJson(res, 200, { thread }) : sendJson(res, 404, { error: "Unknown comment" });
-      }
-      if (req.method === "POST" && route === "threads" && !commentId) {
-        if (!this.sameOrigin(req)) return sendJson(res, 403, { error: "Cross-site request refused" });
-        const { anchor, snippet, body: text, single } = (await readJson(req)) ?? {};
-        if (!isText(text, 20 * 1024, true) || (single !== undefined && typeof single !== "boolean")) {
+      case "POST threads": {
+        const { anchor, snippet, body, single } = await readJson(req);
+        if (!isComment(body, single) || !isAnchor(anchor) || !isText(snippet, MAX_SNIPPET)) {
           return sendJson(res, 400, { error: "Invalid comment" });
         }
-        if (!threadId) {
-          if (!isAnchor(anchor) || !isText(snippet, 64 * 1024)) return sendJson(res, 400, { error: "Invalid comment" });
-          return sendJson(res, 201, { thread: threads.create(anchor, snippet, text.trim(), single === true) });
-        }
-        const thread = threads.reply(threadId, text.trim(), single === true);
-        if (!thread) return sendJson(res, 404, { error: "Unknown thread" });
-        return sendJson(res, 200, { thread });
+        return sendJson(res, 201, { thread: threads.create(anchor, snippet, body.trim(), single === true) });
       }
-      if (req.method === "POST" && route === "review" && !threadId) {
-        if (!this.sameOrigin(req)) return sendJson(res, 403, { error: "Cross-site request refused" });
-        const { body: text } = (await readJson(req)) ?? {};
-        if (!isText(text, 20 * 1024)) return sendJson(res, 400, { error: "Invalid review" });
-        const result = threads.submit(text.trim());
+      case "POST threads/thread": {
+        const { body, single } = await readJson(req);
+        if (!isComment(body, single)) return sendJson(res, 400, { error: "Invalid comment" });
+        return sendThread(res, threads.reply(threadId!, body.trim(), single === true), "Unknown thread");
+      }
+      case "PATCH threads/comment": {
+        const { body } = await readJson(req);
+        if (!isComment(body, undefined)) return sendJson(res, 400, { error: "Invalid comment" });
+        return sendThread(res, threads.edit(threadId!, commentId!, body.trim()), "Unknown comment");
+      }
+      case "DELETE threads/comment":
+        return sendThread(res, threads.remove(threadId!, commentId!), "Unknown comment");
+      case "POST review": {
+        const { body } = await readJson(req);
+        if (!isText(body, MAX_COMMENT)) return sendJson(res, 400, { error: "Invalid review" });
+        const result = threads.submit(body.trim());
         if (!result) return sendJson(res, 400, { error: "Nothing to submit. Leave a comment first." });
         return sendJson(res, 200, { review: result.submission.n, delivered: result.delivered, threads: result.threads });
       }
-      // Claude runs this with curl in the background, and the response wakes it to address the review.
-      if (req.method === "GET" && route === "wait" && !threadId) {
-        const after = Number(searchParams.get("after") ?? 0);
-        if (!Number.isInteger(after) || after < 0) return sendText(res, 400, "Invalid after");
-        const stop = threads.waitForReview(after, (s) =>
-          sendText(
-            res,
-            200,
-            `The user submitted review ${s.n} in ${view.repo}. Call get_review_comments from the diff-review MCP server ` +
-              `with repo set to ${JSON.stringify(view.repo)} and after set to ${after}.\n`,
-          ),
-        );
-        res.on("close", stop);
-        return;
-      }
-      return sendText(res, 405, "Method not allowed");
+      default:
+        return sendText(res, 405, "Method not allowed");
     }
-
-    if (req.method !== "GET") return sendText(res, 405, "Method not allowed");
-    if (/^\/v\/[\w-]+$/.test(pathname)) return this.sendFile(res, "index.html", "no-store");
-    if (pathname.startsWith("/assets/")) return this.sendFile(res, pathname.slice(1), "public, max-age=31536000, immutable");
-    return sendText(res, 404, "Not found");
   }
 
   private validToken(value: string | undefined): boolean {
@@ -302,9 +269,9 @@ export class ReviewServer {
 
   private sameOrigin(req: IncomingMessage): boolean {
     const type = req.headers["content-type"] ?? "";
-    const origin = req.headers.origin;
+    const { origin, host } = req.headers;
     const site = req.headers["sec-fetch-site"];
-    return type.startsWith("application/json") && (origin === undefined || origin === `http://${req.headers.host}`) && (site === undefined || site === "same-origin");
+    return type.startsWith("application/json") && (origin === undefined || origin === `http://${host}`) && (site === undefined || site === "same-origin");
   }
 
   private events(req: IncomingMessage, res: ServerResponse, threads: RepoThreads): void {
@@ -316,13 +283,12 @@ export class ReviewServer {
     res.write("retry: 2000\n\n");
     const send = (event: string, data: unknown) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
     const unsubscribe = threads.subscribe((thread) => send("thread", thread));
-    // A reconnect can miss a change, so each connection starts with the current state.
     send("listening", threads.listening);
     send("reviews", this.reviews);
     send("groupings", this.groupings);
     const unlisten = threads.subscribeListening((on) => send("listening", on));
     this.pages.add(send);
-    const ping = setInterval(() => res.write(": ping\n\n"), 25_000);
+    const ping = setInterval(() => res.write(": ping\n\n"), PING_MS);
     req.on("close", () => {
       clearInterval(ping);
       unsubscribe();
@@ -351,12 +317,24 @@ export class ReviewServer {
   }
 }
 
-/** Listens on host, or on every interface without one. Resolves false when another process holds the port. */
+function wait(res: ServerResponse, query: URLSearchParams, view: View, threads: RepoThreads): void {
+  const after = Number(query.get("after") ?? 0);
+  if (!Number.isInteger(after) || after < 0) return sendText(res, 400, "Invalid after");
+  const stop = threads.waitForReview(after, (s) =>
+    sendText(
+      res,
+      200,
+      `The user submitted review ${s.n} in ${view.repo}. Call get_review_comments from the diff-review MCP server ` +
+        `with repo set to ${JSON.stringify(view.repo)} and after set to ${after}.\n`,
+    ),
+  );
+  res.on("close", stop);
+}
+
 function listen(server: Server, port: number, host: string | undefined): Promise<boolean> {
   return new Promise((resolve, reject) => {
     const onError = (err: NodeJS.ErrnoException) => {
       server.off("listening", onListening);
-      // Windows answers EACCES for ports it reserves.
       if (err.code === "EADDRINUSE" || err.code === "EACCES") resolve(false);
       else reject(err);
     };
@@ -370,19 +348,19 @@ function listen(server: Server, port: number, host: string | undefined): Promise
   });
 }
 
-async function readJson(req: IncomingMessage, limit = 256 * 1024): Promise<Record<string, unknown> | null> {
+async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of req as AsyncIterable<Buffer>) {
     size += chunk.length;
-    if (size > limit) return null;
+    if (size > MAX_REQUEST_BYTES) return {};
     chunks.push(chunk);
   }
   try {
     const value: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-    return value !== null && typeof value === "object" ? (value as Record<string, unknown>) : null;
+    return isRecord(value) ? value : {};
   } catch {
-    return null;
+    return {};
   }
 }
 
@@ -390,29 +368,38 @@ function isText(value: unknown, max: number, nonEmpty = false): value is string 
   return typeof value === "string" && value.length <= max && (!nonEmpty || value.trim() !== "");
 }
 
-function isAnchor(value: unknown): value is ThreadAnchor {
-  if (value === null || typeof value !== "object") return false;
-  const a = value as Record<string, unknown>;
+function isComment(body: unknown, single: unknown): body is string {
+  return isText(body, MAX_COMMENT, true) && (single === undefined || typeof single === "boolean");
+}
+
+function isAnchor(a: unknown): a is ThreadAnchor {
+  if (!isRecord(a)) return false;
   const line = (n: unknown) => Number.isInteger(n) && (n as number) > 0;
   if (a.path === null) {
-    return isText(a.topic, 1024, true) && isComparison(a.compare) && a.side === null && a.start === null && a.end === null && a.commit === null;
+    return isText(a.topic, MAX_REF, true) && isComparison(a.compare) && a.side === null && a.start === null && a.end === null && a.commit === null;
   }
-  if (!isText(a.path, 4096, true)) return false;
-  if (a.commit !== null && !(typeof a.commit === "string" && /^[0-9a-f]{40,64}$/.test(a.commit))) return false;
+  if (!isText(a.path, MAX_PATH, true)) return false;
+  if (a.commit !== null && !(typeof a.commit === "string" && SHA.test(a.commit))) return false;
   if (a.side === null) return a.start === null && a.end === null;
   return (a.side === "old" || a.side === "new") && line(a.start) && line(a.end) && (a.start as number) <= (a.end as number);
 }
 
-function isComparison(value: unknown): value is Comparison {
-  if (value === null || typeof value !== "object") return false;
-  const c = value as Record<string, unknown>;
-  return isRange(c) && Array.isArray(c.overrides) && c.overrides.length <= 1000 && c.overrides.every((o) => isRange(o) && isText(o.dir, 1024, true));
+function isComparison(c: unknown): c is Comparison {
+  return (
+    isRange(c) &&
+    Array.isArray(c.overrides) &&
+    c.overrides.length <= MAX_OVERRIDES &&
+    c.overrides.every((o) => isRange(o) && isText(o.dir, MAX_REF, true))
+  );
 }
 
-function isRange(value: unknown): value is Record<string, unknown> {
-  if (value === null || typeof value !== "object") return false;
-  const r = value as Record<string, unknown>;
-  return isText(r.base, 1024, true) && (r.head === null || isText(r.head, 1024, true)) && typeof r.threeDot === "boolean";
+function isRange(r: unknown): r is Record<string, unknown> {
+  return isRecord(r) && isText(r.base, MAX_REF, true) && (r.head === null || isText(r.head, MAX_REF, true)) && typeof r.threeDot === "boolean";
+}
+
+function sendThread(res: ServerResponse, thread: Thread | null, missing: string): void {
+  if (thread) sendJson(res, 200, { thread });
+  else sendJson(res, 404, { error: missing });
 }
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
@@ -427,8 +414,4 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
 function sendText(res: ServerResponse, status: number, body: string): void {
   res.writeHead(status, { "Content-Type": "text/plain; charset=utf-8", "X-Content-Type-Options": "nosniff" });
   res.end(body);
-}
-
-export function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
 }

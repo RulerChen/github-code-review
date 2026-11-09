@@ -1,17 +1,22 @@
 import { describeFailures, summarize } from "../engine/diff.js";
+import { lineRange } from "../shared/comments.js";
 import { describeComparison } from "../shared/comparison.js";
-import { changeIds, rangeHeader } from "../shared/hunks.js";
+import { changeIds, hunkHeader } from "../shared/hunks.js";
 import type { DiffResult, Thread, Topic } from "../shared/types.js";
+import { plural, sum } from "../shared/util.js";
 import type { Submission } from "./threads.js";
 
 const MAX_CHARS = 60_000;
 const MAX_LINES_PER_CHANGE = 40;
 const MAX_LINE_CHARS = 300;
 const MAX_COMMITS_LISTED = 100;
+const MAX_SNIPPET_LINES = 8;
+
+const indent = (text: string, prefix: string) => text.replace(/^/gm, prefix);
 
 export function formatChanges(diff: DiffResult): string {
-  const count = diff.files.reduce((n, f) => n + changeIds(f).length, 0);
-  const out = [`${summarize(diff)}, ${count} change${count === 1 ? "" : "s"}. Each change starts with its id.`, ...describeFailures(diff)];
+  const count = sum(diff.files, (f) => changeIds(f).length);
+  const out = [`${summarize(diff)}, ${plural(count, "change")}. Each change starts with its id.`, ...describeFailures(diff)];
   let size = 0;
   let omitted = 0;
 
@@ -28,9 +33,8 @@ export function formatChanges(diff: DiffResult): string {
       out.push(`  file:${f.path}`);
       continue;
     }
-
     for (const b of f.blocks) {
-      out.push(`  ${b.id}  @@ -${rangeHeader(b.oldStart, b.oldCount)} +${rangeHeader(b.newStart, b.newCount)} @@${b.section ? ` ${b.section}` : ""}`);
+      out.push(`  ${b.id}  ${hunkHeader(b.oldStart, b.oldCount, b.newStart, b.newCount, b.section)}`);
       if (size > MAX_CHARS) {
         omitted++;
         continue;
@@ -45,21 +49,14 @@ export function formatChanges(diff: DiffResult): string {
     }
   }
 
-  if (omitted) out.push("", `The lines of ${omitted} change${omitted === 1 ? " were" : "s were"} left out to keep this short. Read the files for them.`);
+  if (omitted) out.push("", `The lines of ${plural(omitted, "change")} were left out to keep this short. Read the files for them.`);
   return out.join("\n");
 }
 
-/**
- * The reviews numbered above `after`. Without it, the reviews numbered above `read`, the newest one returned
- * before, or the latest review when there are none: a single comment is a review of its own, and one sent while
- * Claude was not waiting must not hide behind the review submitted after it. Only without `after`, when the user
- * asks directly, does it add the draft comments not submitted yet and the @claude questions, which never go into a
- * review: the wait flow must not act on drafts before the user submits. Null when there is nothing to show.
- */
 export function formatReviewComments(threads: Thread[], submissions: Submission[], after: number | null, read: number): string | null {
   const withDrafts = after === null;
   const unread = submissions.filter((s) => s.n > (after ?? read));
-  const reviews = after === null && !unread.length ? submissions.slice(-1) : unread;
+  const reviews = withDrafts && !unread.length ? submissions.slice(-1) : unread;
   const numbers = new Set(reviews.map((s) => s.n));
   const submitted = threads.filter((t) => t.comments.some((c) => c.review !== null && numbers.has(c.review)));
   const drafts = withDrafts ? threads.filter((t) => !submitted.includes(t) && t.comments.some((c) => c.draft)) : [];
@@ -67,22 +64,15 @@ export function formatReviewComments(threads: Thread[], submissions: Submission[
   if (!reviews.length && !drafts.length && !asked.length) return null;
 
   const out: string[] = [];
+  const section = (title: string, list: Thread[], showDrafts: boolean) =>
+    out.push(title, ...list.flatMap((t) => ["", formatThread(t, showDrafts)]));
   for (const s of reviews) {
     out.push(`Review ${s.n}, submitted at ${new Date(s.submittedAt).toLocaleTimeString("en-GB")}.`);
     if (s.body) out.push("  Comment on the whole review:", indent(s.body, "    "));
   }
-  if (reviews.length) {
-    out.push(`Comments in ${submitted.length} thread${submitted.length === 1 ? "" : "s"}:`);
-    for (const t of submitted) out.push("", formatThread(t, withDrafts));
-  }
-  if (drafts.length) {
-    out.push("", `Draft comments the user has not submitted yet, in ${drafts.length} thread${drafts.length === 1 ? "" : "s"}:`);
-    for (const t of drafts) out.push("", formatThread(t, true));
-  }
-  if (asked.length) {
-    out.push("", `Questions the user asked @claude, answered in the page, in ${asked.length} thread${asked.length === 1 ? "" : "s"}:`);
-    for (const t of asked) out.push("", formatThread(t, true));
-  }
+  if (reviews.length) section(`Comments in ${plural(submitted.length, "thread")}:`, submitted, withDrafts);
+  if (drafts.length) section(`\nDraft comments the user has not submitted yet, in ${plural(drafts.length, "thread")}:`, drafts, true);
+  if (asked.length) section(`\nQuestions the user asked @claude, answered in the page, in ${plural(asked.length, "thread")}:`, asked, true);
   return out.join("\n");
 }
 
@@ -95,21 +85,15 @@ function formatThread(t: Thread, withDrafts: boolean): string {
       return `  ${who}: ${indent(c.body, "    ").trimStart()}`;
     });
   if (anchor.path === null) {
-    // The snippet of a topic thread starts with the topic's files.
     const files = t.snippet.split("\n", 1)[0] ?? "";
     const title = `Thread ${t.id}: the topic "${anchor.topic}" of ${describeComparison(anchor.compare)} as a whole`;
     return [title, ...(files ? [`  ${files}`] : []), ...comments].join("\n");
   }
   const version = anchor.commit ? ` at commit ${anchor.commit}` : anchor.side !== "old" ? " in the working tree" : "";
-  const where =
-    anchor.side === null
-      ? "the whole file"
-      : `${anchor.side} ${anchor.start === anchor.end ? `line ${anchor.start}` : `lines ${anchor.start}-${anchor.end}`}`;
-  const snippet = anchor.side === null ? [] : t.snippet.split("\n").slice(0, 8).map((l) => `  > ${l}`);
+  const where = anchor.side === null ? "the whole file" : `${anchor.side} ${lineRange(anchor)}`;
+  const snippet = anchor.side === null ? [] : t.snippet.split("\n").slice(0, MAX_SNIPPET_LINES).map((l) => `  > ${l}`);
   return [`Thread ${t.id}: ${anchor.path}, ${where}${version}`, ...snippet, ...comments].join("\n");
 }
-
-const indent = (text: string, prefix: string) => text.replace(/^/gm, prefix);
 
 export function checkTopics(diff: DiffResult, topics: Topic[]): { unknown: string[]; unassigned: string[] } {
   const known = new Set(diff.files.flatMap(changeIds));

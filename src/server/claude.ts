@@ -2,7 +2,7 @@ import { type ChildProcess, spawn } from "node:child_process";
 import path from "node:path";
 import { createInterface } from "node:readline";
 
-export interface AskOptions {
+interface AskOptions {
   cwd: string;
   resume: string | null;
   fork: boolean;

@@ -1,17 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { withOverride, withRange } from "../shared/comparison";
 import type { CommitInfo, Comparison, DiffResult, RefList, RefRange } from "../shared/types";
+import { errorMessage, plural } from "../shared/util";
 import { focusInPlace } from "./anchor";
+import { useDismiss } from "./hooks";
+import { CaretIcon, CheckMark, SwapIcon } from "./icons";
 
 const SHA = /^[0-9a-f]{40,64}$/;
 const MAX_ITEMS = 100;
 
 export const refLabel = (ref: string | null) => (ref === null ? "working tree" : SHA.test(ref) ? ref.slice(0, 7) : ref);
-
-const rangeLabel = (r: RefRange) => `${refLabel(r.base)}${r.threeDot ? "..." : ".."}${refLabel(r.head)}`;
-
-export const comparisonLabel = (c: Comparison) =>
-  c.overrides.length ? `${rangeLabel(c)} (${c.overrides.map((o) => `${o.dir}: ${rangeLabel(o)}`).join("; ")})` : rangeLabel(c);
 
 interface CompareProps {
   diff: DiffResult;
@@ -37,9 +35,7 @@ interface ReposProps {
   onCompare: (next: Comparison) => void;
 }
 
-/** When the diff covers several repositories, what each one compares: the refs in the top bar, or refs of its own. */
 export function RepoComparisons({ diff, loadRefs, onCompare }: ReposProps) {
-  // Each repository's loader keeps its identity, so its ref pickers do not load the refs again on every render.
   const loaders = useMemo(() => new Map<string, () => Promise<RefList>>(), [loadRefs]);
   const loaderFor = (dir: string) => {
     let load = loaders.get(dir);
@@ -51,7 +47,7 @@ export function RepoComparisons({ diff, loadRefs, onCompare }: ReposProps) {
   return (
     <details className="repos-panel">
       <summary>
-        <span className="repos-title">{diff.repos.length} repositories</span>
+        <span className="repos-title">{plural(diff.repos.length, "repository", "repositories")}</span>
         {own ? ` · ${own} with refs of ${own === 1 ? "its" : "their"} own` : " · all compare the refs above"}
       </summary>
       <ul className="repos-list">
@@ -71,11 +67,7 @@ export function RepoComparisons({ diff, loadRefs, onCompare }: ReposProps) {
                   loadRefs={loaderFor(r.dir)}
                   onChange={(next) => onCompare(withOverride(diff, r.dir, next))}
                 />
-                {r.error === null && (
-                  <span className="repos-files">
-                    {files} file{files === 1 ? "" : "s"}
-                  </span>
-                )}
+                {r.error === null && <span className="repos-files">{plural(files, "file")}</span>}
                 {overridden && (
                   <button className="link-button repos-reset" onClick={() => onCompare(withOverride(diff, r.dir, diff))}>
                     Compare the refs above
@@ -99,7 +91,6 @@ interface RangeProps {
   onChange: (next: RefRange) => void;
 }
 
-/** Pickers for the base and the compare side of a range, with buttons to swap them and to switch between ... and ... */
 function RangeControls({ range, baseCommit, headCommit, loadRefs, onChange }: RangeProps) {
   const current: RefRange = { base: range.base, head: range.head, threeDot: range.threeDot };
   const dotsTitle = range.threeDot
@@ -114,9 +105,7 @@ function RangeControls({ range, baseCommit, headCommit, loadRefs, onChange }: Ra
         aria-label="Swap base and compare"
         title={range.head === null ? "The working tree can only be compared, not used as the base" : "Swap base and compare"}
       >
-        <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
-          <path d="M5.22 14.78a.75.75 0 0 0 1.06-1.06L4.56 12h8.69a.75.75 0 0 0 0-1.5H4.56l1.72-1.72a.75.75 0 0 0-1.06-1.06l-3 3a.75.75 0 0 0 0 1.06l3 3Zm5.56-6.5a.75.75 0 1 1-1.06-1.06l1.72-1.72H2.75a.75.75 0 0 1 0-1.5h8.69L9.72 2.28a.75.75 0 0 1 1.06-1.06l3 3a.75.75 0 0 1 0 1.06l-3 3Z" />
-        </svg>
+        <SwapIcon />
       </button>
       <RefPicker
         role="base"
@@ -159,20 +148,16 @@ function RefPicker({ role, value, commit, loadRefs, onPick }: PickerProps) {
   const [cursor, setCursor] = useState(0);
   const root = useRef<HTMLDivElement>(null);
 
+  useDismiss(root, open, () => setOpen(false));
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
     setFailed(null);
     loadRefs()
       .then((r) => !cancelled && setRefs(r))
-      .catch((e: unknown) => !cancelled && setFailed(e instanceof Error ? e.message : String(e)));
-    const away = (e: MouseEvent) => {
-      if (!root.current?.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", away);
+      .catch((e: unknown) => !cancelled && setFailed(errorMessage(e)));
     return () => {
       cancelled = true;
-      document.removeEventListener("mousedown", away);
     };
   }, [open, loadRefs]);
 
@@ -223,9 +208,7 @@ function RefPicker({ role, value, commit, loadRefs, onPick }: PickerProps) {
       >
         <span className="picker-role">{role}:</span>
         <span className="picker-value">{refLabel(value)}</span>
-        <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
-          <path d="m4.427 7.427 3.396 3.396a.25.25 0 0 0 .354 0l3.396-3.396A.25.25 0 0 0 11.396 7H4.604a.25.25 0 0 0-.177.427Z" />
-        </svg>
+        <CaretIcon />
       </button>
       {open && (
         <div className="picker-menu" role="dialog" aria-label={title}>
@@ -260,11 +243,7 @@ function RefPicker({ role, value, commit, loadRefs, onPick }: PickerProps) {
             {items.map((item, i) => (
               <li key={item.key} role="option" aria-selected={selected(item)}>
                 <button className={i === cursor ? "is-cursor" : undefined} onMouseEnter={() => setCursor(i)} onClick={() => pick(item)}>
-                  <svg className="picker-check" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
-                    {selected(item) && (
-                      <path d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.75.75 0 0 1 1.06-1.06L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z" />
-                    )}
-                  </svg>
+                  <CheckMark checked={selected(item)} />
                   <span className="picker-item-label">{item.label}</span>
                   {item.detail && <span className="picker-item-detail">{item.detail}</span>}
                 </button>

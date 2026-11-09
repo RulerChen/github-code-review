@@ -1,62 +1,38 @@
-import { type FormEvent, useEffect, useRef, useState } from "react";
+import { type FormEvent, useRef, useState } from "react";
+import { plural } from "../shared/util";
 import { focusInPlace } from "./anchor";
-import { CopyButton } from "./FileCard";
+import { CopyButton } from "./controls";
+import { useAction, useDismiss } from "./hooks";
 
-/** What to tell Claude when it was not waiting. get_review_comments is the tool it reaches for. */
 const ASK = "address my review comments";
 
 interface Props {
   drafts: number;
-  /** Whether Claude is waiting for a review right now, so submitting starts it at once. */
   listening: boolean;
-  /** Resolves to whether Claude was waiting for the review. */
   onSubmit: (body: string) => Promise<boolean>;
 }
 
 export function SubmitReview({ drafts, listening, onSubmit }: Props) {
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [delivered, setDelivered] = useState<boolean | null>(null);
   const ref = useRef<HTMLDivElement>(null);
-
-  // Escape is heard on the whole page: once a review is sent, the button that had the focus is gone.
-  useEffect(() => {
-    if (!open) return;
-    const away = (e: MouseEvent) => {
-      if (!ref.current?.contains(e.target as Node)) setOpen(false);
-    };
-    const escape = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("mousedown", away);
-    document.addEventListener("keydown", escape);
-    return () => {
-      document.removeEventListener("mousedown", away);
-      document.removeEventListener("keydown", escape);
-    };
-  }, [open]);
+  useDismiss(ref, open, () => setOpen(false));
+  const { busy, error, run, clearError } = useAction(async (body: string) => {
+    setDelivered(await onSubmit(body));
+    setText("");
+  });
+  const ready = drafts > 0 || text.trim() !== "";
 
   const toggle = () => {
     setOpen((o) => !o);
     setDelivered(null);
-    setError(null);
+    clearError();
   };
 
-  const submit = async (e?: FormEvent) => {
+  const submit = (e?: FormEvent) => {
     e?.preventDefault();
-    if (busy || (!drafts && !text.trim())) return;
-    setBusy(true);
-    setError(null);
-    try {
-      setDelivered(await onSubmit(text.trim()));
-      setText("");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(false);
-    }
+    if (!busy && ready) void run(text.trim());
   };
 
   return (
@@ -83,14 +59,12 @@ export function SubmitReview({ drafts, listening, onSubmit }: Props) {
                 rows={4}
                 ref={focusInPlace}
                 onKeyDown={(e) => {
-                  if ((e.metaKey || e.ctrlKey) && e.key === "Enter") void submit();
+                  if ((e.metaKey || e.ctrlKey) && e.key === "Enter") submit();
                 }}
               />
               <div className="comment-form-actions">
-                <span className="comment-hint">
-                  {drafts ? `${drafts} pending comment${drafts === 1 ? "" : "s"}` : "No pending comments"}
-                </span>
-                <button type="submit" className="button primary" disabled={busy || (!drafts && !text.trim())}>
+                <span className="comment-hint">{drafts ? plural(drafts, "pending comment") : "No pending comments"}</span>
+                <button type="submit" className="button primary" disabled={busy || !ready}>
                   Submit review
                 </button>
               </div>
