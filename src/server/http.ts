@@ -24,6 +24,10 @@ const MIME: Record<string, string> = {
   ".woff2": "font/woff2",
 };
 
+// Ports tried in order before a random one. Over SSH, a LocalForward of each one makes the page open on the user's machine.
+const FIRST_PORT = 7800;
+const PORT_COUNT = 10;
+
 const CSP =
   "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; " +
   "connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'";
@@ -50,10 +54,9 @@ export class ReviewServer {
         else res.destroy();
       });
     });
-    await new Promise<void>((resolve, reject) => {
-      server.once("error", reject);
-      server.listen(0, "127.0.0.1", () => resolve());
-    });
+    let bound = false;
+    for (let port = FIRST_PORT; !bound && port < FIRST_PORT + PORT_COUNT; port++) bound = await listen(server, port);
+    if (!bound) await listen(server, 0);
     this.port = (server.address() as AddressInfo).port;
     this.server = server;
   }
@@ -313,6 +316,25 @@ export class ReviewServer {
     });
     res.end(body);
   }
+}
+
+/** Listens on 127.0.0.1, or resolves false when another process holds the port. */
+function listen(server: Server, port: number): Promise<boolean> {
+  return new Promise((resolve, reject) => {
+    const onError = (err: NodeJS.ErrnoException) => {
+      server.off("listening", onListening);
+      // Windows answers EACCES for ports it reserves.
+      if (err.code === "EADDRINUSE" || err.code === "EACCES") resolve(false);
+      else reject(err);
+    };
+    const onListening = () => {
+      server.off("error", onError);
+      resolve(true);
+    };
+    server.once("error", onError);
+    server.once("listening", onListening);
+    server.listen(port, "127.0.0.1");
+  });
 }
 
 async function readJson(req: IncomingMessage, limit = 256 * 1024): Promise<Record<string, unknown> | null> {

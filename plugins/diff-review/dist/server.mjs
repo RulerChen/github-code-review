@@ -37739,6 +37739,8 @@ var MIME = {
   ".png": "image/png",
   ".woff2": "font/woff2"
 };
+var FIRST_PORT = 7800;
+var PORT_COUNT = 10;
 var CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'";
 var ReviewServer = class {
   views = /* @__PURE__ */ new Map();
@@ -37760,10 +37762,9 @@ var ReviewServer = class {
         else res.destroy();
       });
     });
-    await new Promise((resolve, reject) => {
-      server.once("error", reject);
-      server.listen(0, "127.0.0.1", () => resolve());
-    });
+    let bound = false;
+    for (let port = FIRST_PORT; !bound && port < FIRST_PORT + PORT_COUNT; port++) bound = await listen(server, port);
+    if (!bound) await listen(server, 0);
     this.port = server.address().port;
     this.server = server;
   }
@@ -38010,6 +38011,22 @@ data: ${JSON.stringify(data)}
     res.end(body);
   }
 };
+function listen(server, port) {
+  return new Promise((resolve, reject) => {
+    const onError = (err) => {
+      server.off("listening", onListening);
+      if (err.code === "EADDRINUSE" || err.code === "EACCES") resolve(false);
+      else reject(err);
+    };
+    const onListening = () => {
+      server.off("error", onError);
+      resolve(true);
+    };
+    server.once("error", onError);
+    server.once("listening", onListening);
+    server.listen(port, "127.0.0.1");
+  });
+}
 async function readJson(req, limit = 256 * 1024) {
   const chunks = [];
   let size = 0;
