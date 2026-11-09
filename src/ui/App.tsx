@@ -26,7 +26,7 @@ import { comparePaths } from "./paths";
 import { ReviewBar } from "./ReviewBar";
 import { useStoredState, useViewed } from "./storage";
 import { SubmitReview } from "./SubmitReview";
-import { ChangeStats, RefreshButton, SidebarToggle, type Tab, ThemeToggle, ViewedProgress, ViewTabs } from "./TopBar";
+import { ChangeStats, RefreshButton, SidebarToggle, type Tab, ThemeToggle, ViewTabs } from "./TopBar";
 import { buildTopics, TopicList, TopicSection, topicShows, type TopicView } from "./Topics";
 
 interface Props {
@@ -375,12 +375,6 @@ export function App({ viewId }: Props) {
           <ChangeStats files={diff.files} />
           <RefreshButton stale={stale} loading={loading} onClick={() => void load(requested.current)} />
           <span className="spacer" />
-          <ViewedProgress
-            viewed={byTopic ? topics.filter(isTopicViewed).length : diff.files.filter(isViewed).length}
-            total={byTopic ? topics.length : diff.files.length}
-            unit={byTopic ? "topics" : "files"}
-            most={Math.max(topics.length, diff.files.length)}
-          />
           <ViewTabs view={view} commitCount={diff.commitCount} onSelect={setTab} />
           <ConversationsButton conv={conv} />
           <KeyboardButton onClick={() => setHelp(true)} />

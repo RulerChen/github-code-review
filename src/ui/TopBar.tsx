@@ -65,26 +65,6 @@ export function RefreshButton({ stale, loading, onClick }: { stale: boolean; loa
   );
 }
 
-interface ProgressProps {
-  viewed: number;
-  total: number;
-  unit: string;
-  most: number;
-}
-
-export function ViewedProgress({ viewed, total, unit, most }: ProgressProps) {
-  return (
-    <div className="viewed-progress" title={`${viewed} of ${total} ${unit} viewed`}>
-      <span className="viewed-count" style={{ minWidth: `${2 * String(most).length + 10}ch` }}>
-        {viewed} / {total} viewed
-      </span>
-      <span className="progress" aria-hidden="true">
-        <span style={{ width: `${total ? (viewed / total) * 100 : 0}%` }} />
-      </span>
-    </div>
-  );
-}
-
 const TABS: [Tab, string][] = [
   ["topics", "Topics"],
   ["files", "Files"],

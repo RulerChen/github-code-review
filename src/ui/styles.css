@@ -137,36 +137,6 @@ button {
   flex: 1;
 }
 
-.viewed-progress {
-  display: flex;
-  flex: none;
-  align-items: center;
-  gap: 8px;
-  color: var(--fg-muted);
-  font-size: 12px;
-  white-space: nowrap;
-}
-
-.viewed-count {
-  font-variant-numeric: tabular-nums;
-  text-align: right;
-}
-
-.progress {
-  width: 72px;
-  height: 8px;
-  overflow: hidden;
-  border-radius: 4px;
-  background: var(--bar-neutral);
-}
-
-.progress > span {
-  display: block;
-  height: 100%;
-  background: var(--success);
-  transition: width 0.2s ease-out;
-}
-
 .button {
   padding: 4px 12px;
   border: 1px solid var(--border);
@@ -1608,12 +1578,6 @@ button {
   min-width: 600px;
 }
 
-@media (max-width: 1440px) {
-  .progress {
-    display: none;
-  }
-}
-
 @media (min-width: 1141px) and (max-width: 1360px) {
   .topbar-stats {
     display: none;
@@ -1634,12 +1598,6 @@ button {
   }
   .conv-button {
     margin-left: auto;
-  }
-}
-
-@media (max-width: 700px) {
-  .viewed-progress {
-    display: none;
   }
 }
 
@@ -1667,7 +1625,6 @@ button {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .progress > span,
   .chevron svg,
   .tree-toggle svg,
   .segmented-indicator[data-ready] {
