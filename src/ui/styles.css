@@ -1333,7 +1333,7 @@ button {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  min-width: 156px;
+  min-width: 104px;
 }
 
 .review-menu > .button.primary .counter {

@@ -38,7 +38,7 @@ export function SubmitReview({ drafts, listening, onSubmit }: Props) {
   return (
     <div className="review-menu" ref={ref}>
       <button className={`button${drafts ? " primary" : ""}`} onClick={toggle} aria-expanded={open}>
-        Submit review
+        Submit
         {drafts > 0 && <span className="counter">{drafts}</span>}
       </button>
       {open && (
