@@ -36665,13 +36665,31 @@ import { lstat, readdir, readFile, readlink, realpath, stat } from "node:fs/prom
 import path from "node:path";
 
 // src/shared/comparison.ts
+var rangeOf = (r) => ({ base: r.base, head: r.head, threeDot: r.threeDot });
+var sameRange = (a, b) => a.base === b.base && a.head === b.head && a.threeDot === b.threeDot;
+var rangeFor = (c, dir) => c.overrides.find((o) => o.dir === dir) ?? rangeOf(c);
+var sortOverrides = (overrides) => [...overrides].sort((a, b) => a.dir < b.dir ? -1 : a.dir > b.dir ? 1 : 0);
 function comparisonFromQuery(params) {
-  const base = params.get("base");
-  return base ? { base, head: params.get("head") || null, threeDot: params.get("dots") !== "2" } : null;
+  const read = (suffix) => {
+    const base = params.get(`base${suffix}`);
+    return base ? { base, head: params.get(`head${suffix}`) || null, threeDot: params.get(`dots${suffix}`) !== "2" } : null;
+  };
+  const top = read("");
+  if (!top) return null;
+  const overrides = [];
+  for (const key of new Set(params.keys())) {
+    const range = key.startsWith("base@") ? read(key.slice(4)) : null;
+    if (range) overrides.push({ dir: key.slice(5), ...range });
+  }
+  return { ...top, overrides: sortOverrides(overrides) };
 }
-var sameComparison = (a, b) => a.base === b.base && a.head === b.head && a.threeDot === b.threeDot;
+function sameComparison(a, b) {
+  return sameRange(a, b) && a.overrides.length === b.overrides.length && a.overrides.every((o, i) => o.dir === b.overrides[i].dir && sameRange(o, b.overrides[i]));
+}
 function describeComparison(c) {
-  return `${c.base}${c.threeDot ? "..." : ".."}${c.head ?? "the working tree"}`;
+  const range = (r) => `${r.base}${r.threeDot ? "..." : ".."}${r.head ?? "the working tree"}`;
+  const own2 = c.overrides.map((o) => `${o.dir}: ${range(o)}`);
+  return own2.length ? `${range(c)} (${own2.join("; ")})` : range(c);
 }
 function repoFailures(repos) {
   const out = /* @__PURE__ */ new Map();
@@ -36816,26 +36834,31 @@ async function findRepos(dir) {
   }
 }
 async function computeDiff(dir, compare = {}) {
-  const c = { base: compare.base ?? "HEAD", head: compare.head ?? null, threeDot: compare.threeDot ?? true };
-  checkRefs(c.base, c.head);
+  const c = {
+    base: compare.base ?? "HEAD",
+    head: compare.head ?? null,
+    threeDot: compare.threeDot ?? true,
+    overrides: compare.overrides ?? []
+  };
+  for (const r of [c, ...c.overrides]) checkRefs(r.base, r.head);
   const { root, repos } = await findRepos(dir);
+  checkOverrides(root, repos, c.overrides);
   if (!repos) {
     const { repo, commits: commits2, commitCount, files } = await diffRepo(root, c, "");
     const { baseCommit, headCommit, oldCommit } = repo;
     return { repoRoot: root, ...c, baseCommit, headCommit, oldCommit, repos: [repo], commits: commits2, commitCount, files };
   }
-  const parts = await mapLimit(
-    repos,
-    REPO_LIMIT,
-    (name) => diffRepo(path.join(root, name), c, name).catch(
+  const parts = await mapLimit(repos, REPO_LIMIT, (name) => {
+    const range = rangeFor(c, name);
+    return diffRepo(path.join(root, name), range, name).catch(
       (err) => ({
-        repo: { dir: name, baseCommit: null, headCommit: null, oldCommit: null, error: err instanceof Error ? err.message : String(err) },
+        repo: { dir: name, ...range, baseCommit: null, headCommit: null, oldCommit: null, error: err instanceof Error ? err.message : String(err) },
         commits: [],
         commitCount: 0,
         files: []
       })
-    )
-  );
+    );
+  });
   const states = parts.map((p) => p.repo);
   if (states.every((r) => r.error !== null)) {
     throw new Error(repoFailures(states).map((f) => `${f.error} (${f.dirs.join(", ")})`).join("; "));
@@ -36853,8 +36876,14 @@ async function computeDiff(dir, compare = {}) {
     files: parts.flatMap((p) => p.files).sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0)
   };
 }
-async function diffRepo(repo, compare, dir) {
-  const { base, head, threeDot } = compare;
+function checkOverrides(root, repos, overrides) {
+  const unknown2 = overrides.filter((o) => !repos?.includes(o.dir)).map((o) => o.dir);
+  if (!unknown2.length) return;
+  if (!repos) throw new Error(`${root} is a single repository, so no repository in it can compare a range of its own.`);
+  throw new Error(`No repository named ${unknown2.join(", ")} directly under ${root}.`);
+}
+async function diffRepo(repo, refs, dir) {
+  const { base, head, threeDot } = refs;
   const prefix = dir ? `${dir}/` : "";
   const repoRoot = (await git(repo, ["rev-parse", "--show-toplevel"])).toString("utf8").trim();
   const [baseCommit, headCommit, headOfRepo] = await Promise.all([
@@ -36899,7 +36928,7 @@ async function diffRepo(repo, compare, dir) {
     f.path = prefix + f.path;
     if (f.oldPath !== null) f.oldPath = prefix + f.oldPath;
   }
-  return { repo: { dir, baseCommit, headCommit, oldCommit, error: null }, ...commits, files };
+  return { repo: { dir, base, head, threeDot, baseCommit, headCommit, oldCommit, error: null }, ...commits, files };
 }
 function checkRefs(base, head) {
   for (const ref of [base, head]) {
@@ -36907,16 +36936,14 @@ function checkRefs(base, head) {
   }
 }
 async function diffVersion(dir, compare = {}) {
-  const base = compare.base ?? "HEAD";
-  const head = compare.head ?? null;
-  checkRefs(base, head);
+  const c = { base: compare.base ?? "HEAD", head: compare.head ?? null, threeDot: true, overrides: compare.overrides ?? [] };
+  for (const r of [c, ...c.overrides]) checkRefs(r.base, r.head);
   const { root, repos } = await findRepos(dir);
-  if (!repos) return repoVersion(root, base, head);
-  const versions = await mapLimit(
-    repos,
-    REPO_LIMIT,
-    (name) => repoVersion(path.join(root, name), base, head).catch((err) => `! ${err instanceof Error ? err.message : String(err)}`)
-  );
+  if (!repos) return repoVersion(root, c.base, c.head);
+  const versions = await mapLimit(repos, REPO_LIMIT, (name) => {
+    const { base, head } = rangeFor(c, name);
+    return repoVersion(path.join(root, name), base, head).catch((err) => `! ${err instanceof Error ? err.message : String(err)}`);
+  });
   return createHash("sha256").update(repos.map((name, i) => `${name}\0${versions[i]}`).join("\n")).digest("hex").slice(0, 16);
 }
 async function repoVersion(repo, base, head) {
@@ -36965,11 +36992,12 @@ function summarize(result) {
   const n = result.files.length;
   const c = result.commitCount;
   const fromMergeBase = result.oldCommit !== result.baseCommit && result.oldCommit ? ` from their merge base ${result.oldCommit.slice(0, 7)}` : "";
-  const what = result.head === null ? `the working tree against ${result.base}` : `${result.base}${result.threeDot ? "..." : ".."}${result.head}`;
+  const what = (r2) => r2.head === null ? `the working tree against ${r2.base}` : `${r2.base}${r2.threeDot ? "..." : ".."}${r2.head}`;
   const commits = c ? `, ${c} commit${c === 1 ? "" : "s"}` : "";
   const r = result.repos.length;
-  const where = result.repos[0]?.dir === "" ? "" : ` in ${r} repositor${r === 1 ? "y" : "ies"} under ${result.repoRoot}, each file's path starting with its repository's directory`;
-  return `${n} file${n === 1 ? "" : "s"} changed, +${add} -${del}, comparing ${what}${fromMergeBase}${where}${commits}`;
+  const own2 = result.overrides.map((o) => `${o.dir} compares ${what(o)}`).join("; ");
+  const where = result.repos[0]?.dir === "" ? "" : ` in ${r} repositor${r === 1 ? "y" : "ies"} under ${result.repoRoot}${own2 ? ` (${own2})` : ""}, each file's path starting with its repository's directory`;
+  return `${n} file${n === 1 ? "" : "s"} changed, +${add} -${del}, comparing ${what(result)}${fromMergeBase}${where}${commits}`;
 }
 function describeFailures(result) {
   return repoFailures(result.repos).map((f) => `Not compared in ${f.dirs.join(", ")}: ${f.error}`);
@@ -37010,8 +37038,12 @@ async function recentCommits(repoRoot, limit = 100) {
     return [];
   }
 }
-async function listRefs(dir) {
+async function listRefs(dir, repo = null) {
   const { root, repos } = await findRepos(dir);
+  if (repo !== null) {
+    if (!repos?.includes(repo)) throw new Error(`No repository named ${repo} directly under ${root}.`);
+    return repoRefs(path.join(root, repo));
+  }
   if (!repos) return repoRefs(root);
   const lists = await mapLimit(repos, REPO_LIMIT, (name) => repoRefs(path.join(root, name)).catch(() => null));
   const merge2 = (pick2) => {
@@ -37980,7 +38012,7 @@ var ReviewServer = class {
       }
       if (req.method === "GET" && route === "refs" && !threadId) {
         try {
-          return sendJson(res, 200, await listRefs(view.repo));
+          return sendJson(res, 200, await listRefs(view.repo, searchParams.get("repo")));
         } catch (err) {
           return sendJson(res, 500, { error: errorMessage(err) });
         }
@@ -38148,7 +38180,12 @@ function isAnchor(value) {
 function isComparison(value) {
   if (value === null || typeof value !== "object") return false;
   const c = value;
-  return isText(c.base, 1024, true) && (c.head === null || isText(c.head, 1024, true)) && typeof c.threeDot === "boolean";
+  return isRange(c) && Array.isArray(c.overrides) && c.overrides.length <= 1e3 && c.overrides.every((o) => isRange(o) && isText(o.dir, 1024, true));
+}
+function isRange(value) {
+  if (value === null || typeof value !== "object") return false;
+  const r = value;
+  return isText(r.base, 1024, true) && (r.head === null || isText(r.head, 1024, true)) && typeof r.threeDot === "boolean";
 }
 function sendJson(res, status, body) {
   res.writeHead(status, {
@@ -38210,7 +38247,7 @@ async function shutdown() {
   process.exit(0);
 }
 async function runHttpOnly(base) {
-  console.error(await openViewer(process.cwd(), { base, head: null, threeDot: true }));
+  console.error(await openViewer(process.cwd(), { base, head: null, threeDot: true, overrides: [] }));
   process.on("SIGINT", () => void shutdown());
 }
 async function runMcp() {
@@ -38223,17 +38260,27 @@ async function runMcp() {
   const threeDot = external_exports.boolean().optional().describe(
     "true (the default) compares from the merge base of base and head, like GitHub's base...head, so only the changes made on head's side show. false compares base with head directly, like git diff base..head."
   );
-  const comparison = (args) => ({
-    base: args.base ?? "HEAD",
-    head: args.head ?? null,
-    threeDot: args.threeDot ?? true
-  });
+  const overrides = external_exports.array(
+    external_exports.object({
+      dir: external_exports.string().describe("The repository's directory under repo, which starts the paths of its files."),
+      base: external_exports.string().describe("Git ref for the old side in this repository."),
+      head: external_exports.string().optional().describe("Git ref for the new side in this repository. Omit it for its working tree."),
+      threeDot: external_exports.boolean().optional().describe("As threeDot, for this repository. Defaults to true.")
+    })
+  ).optional().describe(
+    "When repo is a directory of repositories: the repositories that compare refs of their own instead of base, head and threeDot."
+  );
+  const comparison = (args) => {
+    const c = { base: args.base ?? "HEAD", head: args.head ?? null, threeDot: args.threeDot ?? true };
+    const own2 = new Map((args.overrides ?? []).map((o) => [o.dir, { dir: o.dir, base: o.base, head: o.head ?? null, threeDot: o.threeDot ?? true }]));
+    return { ...c, overrides: sortOverrides([...own2.values()].filter((o) => !sameRange(o, c))) };
+  };
   mcp.registerTool(
     "list_changes",
     {
       title: "List changes",
       description: "List every change between a base ref and either the working tree (staged, unstaged and untracked) or a head ref, each with a stable id and its removed and added lines, and the commits in between. Use the ids to group changes into topics for open_diff_viewer.",
-      inputSchema: { repo, base, head, threeDot },
+      inputSchema: { repo, base, head, threeDot, overrides },
       annotations: { readOnlyHint: true, openWorldHint: false }
     },
     async (args) => {
@@ -38255,6 +38302,7 @@ async function runMcp() {
         base,
         head,
         threeDot,
+        overrides,
         focus: external_exports.string().optional().describe("What the user wants to review, in their words."),
         session: external_exports.string().optional().describe("The current Claude Code session id. @claude questions in the page continue a fork of this session."),
         topics: external_exports.array(

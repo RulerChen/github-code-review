@@ -165,12 +165,27 @@ export interface ViewData {
   listening: boolean;
 }
 
-export interface Comparison {
+/** What one repository's diff compares. */
+export interface RefRange {
   base: string;
   /** null for the working tree, including untracked files. */
   head: string | null;
   /** Compare from the merge base of base and head, like GitHub's base...head, instead of from base itself. */
   threeDot: boolean;
+}
+
+/** A range of one repository, by its directory. */
+export interface RepoRange extends RefRange {
+  /** Its directory relative to the diff's repoRoot, which starts the paths of its files: "" for repoRoot itself. */
+  dir: string;
+}
+
+export interface Comparison extends RefRange {
+  /**
+   * The repositories that compare a range of their own instead, sorted by directory. Only a diff that covers the
+   * repositories under a directory can have them.
+   */
+  overrides: RepoRange[];
 }
 
 export interface CommitInfo {
@@ -183,10 +198,8 @@ export interface CommitInfo {
   repo?: string;
 }
 
-/** One repository of a diff. */
-export interface DiffRepo {
-  /** Its directory relative to repoRoot, which starts the paths of its files: "" for repoRoot itself. */
-  dir: string;
+/** One repository of a diff, with the range it compares: the comparison's own, or its override. */
+export interface DiffRepo extends RepoRange {
   baseCommit: string | null;
   headCommit: string | null;
   oldCommit: string | null;

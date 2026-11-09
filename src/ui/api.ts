@@ -36,8 +36,10 @@ export async function fetchVersion(viewId: string, compare: Comparison | null): 
   return body.version;
 }
 
-export async function fetchRefs(viewId: string): Promise<RefList> {
-  const res = await fetch(`/api/views/${encodeURIComponent(viewId)}/refs`, { cache: "no-store" });
+/** The refs of the view's repository, or with `repo`, of that repository in the view's directory of repositories. */
+export async function fetchRefs(viewId: string, repo: string | null = null): Promise<RefList> {
+  const query = repo === null ? "" : `?${new URLSearchParams({ repo })}`;
+  const res = await fetch(`/api/views/${encodeURIComponent(viewId)}/refs${query}`, { cache: "no-store" });
   const body = (await res.json().catch(() => null)) as (Partial<RefList> & { error?: string }) | null;
   if (!res.ok || !body?.branches) throw new ApiError(body?.error ?? `HTTP ${res.status}`, res.status);
   return { branches: body.branches, tags: body.tags ?? [], commits: body.commits ?? [] };

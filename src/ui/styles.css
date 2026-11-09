@@ -1790,6 +1790,74 @@ button {
   color: var(--fg-muted);
 }
 
+/* What each repository compares, when the diff covers several. */
+.repos-panel {
+  margin-bottom: 16px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.repos-panel > summary {
+  padding: 8px 16px;
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+
+.repos-panel[open] > summary {
+  border-bottom: 1px solid var(--border-muted);
+}
+
+.repos-title {
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.repos-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.repos-list > li {
+  padding: 6px 16px;
+}
+
+.repos-list > li + li {
+  border-top: 1px solid var(--border-muted);
+}
+
+.repos-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.repos-dir {
+  flex: 0 0 160px;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.repos-files {
+  color: var(--fg-muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.repos-reset {
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.repos-error {
+  margin: 4px 0 0 172px;
+  color: var(--danger);
+  font-size: 12px;
+}
+
 .picker-menu {
   position: absolute;
   top: calc(100% + 4px);

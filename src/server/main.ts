@@ -5,6 +5,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { computeDiff, describeFailures, summarize } from "../engine/diff.js";
+import { sameRange, sortOverrides } from "../shared/comparison.js";
 import type { Comparison, Topic } from "../shared/types.js";
 import { stopAll } from "./claude.js";
 import { errorMessage, ReviewServer } from "./http.js";
@@ -59,7 +60,7 @@ async function shutdown(): Promise<never> {
 }
 
 async function runHttpOnly(base: string): Promise<void> {
-  console.error(await openViewer(process.cwd(), { base, head: null, threeDot: true }));
+  console.error(await openViewer(process.cwd(), { base, head: null, threeDot: true, overrides: [] }));
   process.on("SIGINT", () => void shutdown());
 }
 
@@ -89,11 +90,27 @@ async function runMcp(): Promise<void> {
       "true (the default) compares from the merge base of base and head, like GitHub's base...head, so only the changes " +
         "made on head's side show. false compares base with head directly, like git diff base..head.",
     );
-  const comparison = (args: { base?: string; head?: string; threeDot?: boolean }): Comparison => ({
-    base: args.base ?? "HEAD",
-    head: args.head ?? null,
-    threeDot: args.threeDot ?? true,
-  });
+  const overrides = z
+    .array(
+      z.object({
+        dir: z.string().describe("The repository's directory under repo, which starts the paths of its files."),
+        base: z.string().describe("Git ref for the old side in this repository."),
+        head: z.string().optional().describe("Git ref for the new side in this repository. Omit it for its working tree."),
+        threeDot: z.boolean().optional().describe("As threeDot, for this repository. Defaults to true."),
+      }),
+    )
+    .optional()
+    .describe(
+      "When repo is a directory of repositories: the repositories that compare refs of their own instead of base, head " +
+        "and threeDot.",
+    );
+  type Overrides = { dir: string; base: string; head?: string; threeDot?: boolean }[];
+  const comparison = (args: { base?: string; head?: string; threeDot?: boolean; overrides?: Overrides }): Comparison => {
+    const c = { base: args.base ?? "HEAD", head: args.head ?? null, threeDot: args.threeDot ?? true };
+    // A later override of the same repository wins, and one that compares what the rest compare is no override.
+    const own = new Map((args.overrides ?? []).map((o) => [o.dir, { dir: o.dir, base: o.base, head: o.head ?? null, threeDot: o.threeDot ?? true }]));
+    return { ...c, overrides: sortOverrides([...own.values()].filter((o) => !sameRange(o, c))) };
+  };
 
   mcp.registerTool(
     "list_changes",
@@ -103,7 +120,7 @@ async function runMcp(): Promise<void> {
         "List every change between a base ref and either the working tree (staged, unstaged and untracked) or a head " +
         "ref, each with a stable id and its removed and added lines, and the commits in between. Use the ids to group " +
         "changes into topics for open_diff_viewer.",
-      inputSchema: { repo, base, head, threeDot },
+      inputSchema: { repo, base, head, threeDot, overrides },
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
     async (args) => {
@@ -130,6 +147,7 @@ async function runMcp(): Promise<void> {
         base,
         head,
         threeDot,
+        overrides,
         focus: z.string().optional().describe("What the user wants to review, in their words."),
         session: z
           .string()

@@ -1,9 +1,22 @@
 import { createHash } from "node:crypto";
 import { lstat, readdir, readFile, readlink, realpath, stat } from "node:fs/promises";
 import path from "node:path";
-import { repoFailures } from "../shared/comparison.js";
+import { rangeFor, repoFailures } from "../shared/comparison.js";
 import { buildHunks, splitLines } from "../shared/hunks.js";
-import type { Block, CommitInfo, Comparison, DiffLine, DiffRepo, DiffResult, DisplayHunk, FileDiff, FileStatus, RefList } from "../shared/types.js";
+import type {
+  Block,
+  CommitInfo,
+  Comparison,
+  DiffLine,
+  DiffRepo,
+  DiffResult,
+  DisplayHunk,
+  FileDiff,
+  FileStatus,
+  RefList,
+  RefRange,
+  RepoRange,
+} from "../shared/types.js";
 import { git } from "./git.js";
 
 export type { Block, CommitInfo, Comparison, DiffLine, DiffRepo, DiffResult, DisplayHunk, FileDiff, FileStatus };
@@ -49,27 +62,35 @@ interface RepoPart {
 /**
  * The diff of a repository, or of every repository directly under a directory that is not one. Those share one
  * diff with paths that start with the repository's directory. A repository where the comparison fails, such as
- * one without the ref, is left out with the reason in `repos`, unless it fails in all of them.
+ * one without the ref, is left out with the reason in `repos`, unless it fails in all of them. Each repository
+ * compares its override, if it has one, instead of the comparison's own range.
  */
 export async function computeDiff(dir: string, compare: Partial<Comparison> = {}): Promise<DiffResult> {
-  const c: Comparison = { base: compare.base ?? "HEAD", head: compare.head ?? null, threeDot: compare.threeDot ?? true };
-  checkRefs(c.base, c.head);
+  const c: Comparison = {
+    base: compare.base ?? "HEAD",
+    head: compare.head ?? null,
+    threeDot: compare.threeDot ?? true,
+    overrides: compare.overrides ?? [],
+  };
+  for (const r of [c, ...c.overrides]) checkRefs(r.base, r.head);
   const { root, repos } = await findRepos(dir);
+  checkOverrides(root, repos, c.overrides);
   if (!repos) {
     const { repo, commits, commitCount, files } = await diffRepo(root, c, "");
     const { baseCommit, headCommit, oldCommit } = repo;
     return { repoRoot: root, ...c, baseCommit, headCommit, oldCommit, repos: [repo], commits, commitCount, files };
   }
-  const parts = await mapLimit(repos, REPO_LIMIT, (name) =>
-    diffRepo(path.join(root, name), c, name).catch(
+  const parts = await mapLimit(repos, REPO_LIMIT, (name) => {
+    const range = rangeFor(c, name);
+    return diffRepo(path.join(root, name), range, name).catch(
       (err: unknown): RepoPart => ({
-        repo: { dir: name, baseCommit: null, headCommit: null, oldCommit: null, error: err instanceof Error ? err.message : String(err) },
+        repo: { dir: name, ...range, baseCommit: null, headCommit: null, oldCommit: null, error: err instanceof Error ? err.message : String(err) },
         commits: [],
         commitCount: 0,
         files: [],
       }),
-    ),
-  );
+    );
+  });
   const states = parts.map((p) => p.repo);
   if (states.every((r) => r.error !== null)) {
     throw new Error(repoFailures(states).map((f) => `${f.error} (${f.dirs.join(", ")})`).join("; "));
@@ -91,9 +112,16 @@ export async function computeDiff(dir: string, compare: Partial<Comparison> = {}
   };
 }
 
+function checkOverrides(root: string, repos: string[] | null, overrides: RepoRange[]): void {
+  const unknown = overrides.filter((o) => !repos?.includes(o.dir)).map((o) => o.dir);
+  if (!unknown.length) return;
+  if (!repos) throw new Error(`${root} is a single repository, so no repository in it can compare a range of its own.`);
+  throw new Error(`No repository named ${unknown.join(", ")} directly under ${root}.`);
+}
+
 /** One repository's part of a diff, with its files' paths and change ids under `dir` when that is not "". */
-async function diffRepo(repo: string, compare: Comparison, dir: string): Promise<RepoPart> {
-  const { base, head, threeDot } = compare;
+async function diffRepo(repo: string, refs: RefRange, dir: string): Promise<RepoPart> {
+  const { base, head, threeDot } = refs;
   const prefix = dir ? `${dir}/` : "";
   const repoRoot = (await git(repo, ["rev-parse", "--show-toplevel"])).toString("utf8").trim();
   const [baseCommit, headCommit, headOfRepo] = await Promise.all([
@@ -142,7 +170,7 @@ async function diffRepo(repo: string, compare: Comparison, dir: string): Promise
     f.path = prefix + f.path;
     if (f.oldPath !== null) f.oldPath = prefix + f.oldPath;
   }
-  return { repo: { dir, baseCommit, headCommit, oldCommit, error: null }, ...commits, files };
+  return { repo: { dir, base, head, threeDot, baseCommit, headCommit, oldCommit, error: null }, ...commits, files };
 }
 
 function checkRefs(base: string, head: string | null): void {
@@ -157,14 +185,14 @@ function checkRefs(base: string, head: string | null): void {
  * HEAD's content. Take it before the diff, so a change made while the diff runs shows up as a new version.
  */
 export async function diffVersion(dir: string, compare: Partial<Comparison> = {}): Promise<string> {
-  const base = compare.base ?? "HEAD";
-  const head = compare.head ?? null;
-  checkRefs(base, head);
+  const c: Comparison = { base: compare.base ?? "HEAD", head: compare.head ?? null, threeDot: true, overrides: compare.overrides ?? [] };
+  for (const r of [c, ...c.overrides]) checkRefs(r.base, r.head);
   const { root, repos } = await findRepos(dir);
-  if (!repos) return repoVersion(root, base, head);
-  const versions = await mapLimit(repos, REPO_LIMIT, (name) =>
-    repoVersion(path.join(root, name), base, head).catch((err: unknown) => `! ${err instanceof Error ? err.message : String(err)}`),
-  );
+  if (!repos) return repoVersion(root, c.base, c.head);
+  const versions = await mapLimit(repos, REPO_LIMIT, (name) => {
+    const { base, head } = rangeFor(c, name);
+    return repoVersion(path.join(root, name), base, head).catch((err: unknown) => `! ${err instanceof Error ? err.message : String(err)}`);
+  });
   return createHash("sha256")
     .update(repos.map((name, i) => `${name}\0${versions[i]}`).join("\n"))
     .digest("hex")
@@ -231,14 +259,15 @@ export function summarize(result: DiffResult): string {
   const n = result.files.length;
   const c = result.commitCount;
   const fromMergeBase = result.oldCommit !== result.baseCommit && result.oldCommit ? ` from their merge base ${result.oldCommit.slice(0, 7)}` : "";
-  const what = result.head === null ? `the working tree against ${result.base}` : `${result.base}${result.threeDot ? "..." : ".."}${result.head}`;
+  const what = (r: RefRange) => (r.head === null ? `the working tree against ${r.base}` : `${r.base}${r.threeDot ? "..." : ".."}${r.head}`);
   const commits = c ? `, ${c} commit${c === 1 ? "" : "s"}` : "";
   const r = result.repos.length;
+  const own = result.overrides.map((o) => `${o.dir} compares ${what(o)}`).join("; ");
   const where =
     result.repos[0]?.dir === ""
       ? ""
-      : ` in ${r} repositor${r === 1 ? "y" : "ies"} under ${result.repoRoot}, each file's path starting with its repository's directory`;
-  return `${n} file${n === 1 ? "" : "s"} changed, +${add} -${del}, comparing ${what}${fromMergeBase}${where}${commits}`;
+      : ` in ${r} repositor${r === 1 ? "y" : "ies"} under ${result.repoRoot}${own ? ` (${own})` : ""}, each file's path starting with its repository's directory`;
+  return `${n} file${n === 1 ? "" : "s"} changed, +${add} -${del}, comparing ${what(result)}${fromMergeBase}${where}${commits}`;
 }
 
 /** A line for each reason the comparison failed in some of the repositories, with the ones it failed in. */
@@ -293,9 +322,16 @@ export async function recentCommits(repoRoot: string, limit = 100): Promise<Comm
   }
 }
 
-/** The refs of the repository, or of every repository under the directory: a ref only some have still compares the rest. */
-export async function listRefs(dir: string): Promise<RefList> {
+/**
+ * The refs of the repository, or of every repository under the directory: a ref only some have still compares the
+ * rest. With `repo`, the refs of that one repository under the directory.
+ */
+export async function listRefs(dir: string, repo: string | null = null): Promise<RefList> {
   const { root, repos } = await findRepos(dir);
+  if (repo !== null) {
+    if (!repos?.includes(repo)) throw new Error(`No repository named ${repo} directly under ${root}.`);
+    return repoRefs(path.join(root, repo));
+  }
   if (!repos) return repoRefs(root);
   const lists = await mapLimit(repos, REPO_LIMIT, (name) => repoRefs(path.join(root, name)).catch(() => null));
   // Each repository's newest refs come first, taken in turn from each, so one with many does not hide the rest.

@@ -14,7 +14,7 @@ import {
   submitReview,
 } from "./api";
 import { type CommentsApi, CommentsContext } from "./comments";
-import { CommitList, CompareControls, refLabel } from "./Compare";
+import { CommitList, CompareControls, refLabel, RepoComparisons } from "./Compare";
 import { ConversationsButton, ConversationsPanel, type Place, useConversations } from "./Conversations";
 import { FileCard } from "./FileCard";
 import { comparePaths, FileTree } from "./FileTree";
@@ -168,12 +168,13 @@ export function App({ viewId }: Props) {
   }, [viewId]);
 
   const loadRefs = useCallback(() => fetchRefs(viewId ?? ""), [viewId]);
+  const loadRepoRefs = useCallback((repo: string) => fetchRefs(viewId ?? "", repo), [viewId]);
 
   const compareWith = (next: Comparison, nextTab?: Tab) => {
     if (data) void load(sameComparison(next, data.opened) ? null : next, true, nextTab);
   };
 
-  const viewCommit = (c: CommitInfo) => compareWith({ base: c.parents[0]!, head: c.sha, threeDot: false }, "files");
+  const viewCommit = (c: CommitInfo) => compareWith({ base: c.parents[0]!, head: c.sha, threeDot: false, overrides: [] }, "files");
 
   // A review in another repository is another view's page, opened in place of this one.
   const showReview = (r: { view: string; repo: string; compare: Comparison }) => {
@@ -199,7 +200,10 @@ export function App({ viewId }: Props) {
   }, [viewId]);
 
   const diff = data?.diff ?? null;
-  const current = useMemo<Comparison | null>(() => diff && { base: diff.base, head: diff.head, threeDot: diff.threeDot }, [diff]);
+  const current = useMemo<Comparison | null>(
+    () => diff && { base: diff.base, head: diff.head, threeDot: diff.threeDot, overrides: diff.overrides },
+    [diff],
+  );
   // Each repository's directory and the commits of its two sides, as a string so that a refresh that leaves them
   // as they were keeps `comments` as it was.
   const repoCommits = JSON.stringify(diff?.repos.map((r) => [r.dir, r.oldCommit, r.headCommit]) ?? []);
@@ -476,6 +480,7 @@ export function App({ viewId }: Props) {
           </aside>
 
           <main className={`files${switching ? " is-switching" : ""}`}>
+            <RepoComparisons diff={diff} loadRefs={loadRepoRefs} onCompare={compareWith} />
             {repoFailures(diff.repos).map((f) => (
               <p key={f.error} className="file-note inline">
                 Not compared in {f.dirs.join(", ")}: {f.error}

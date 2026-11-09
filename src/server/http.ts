@@ -196,7 +196,7 @@ export class ReviewServer {
       }
       if (req.method === "GET" && route === "refs" && !threadId) {
         try {
-          return sendJson(res, 200, await listRefs(view.repo));
+          return sendJson(res, 200, await listRefs(view.repo, searchParams.get("repo")));
         } catch (err) {
           return sendJson(res, 500, { error: errorMessage(err) });
         }
@@ -373,7 +373,13 @@ function isAnchor(value: unknown): value is ThreadAnchor {
 function isComparison(value: unknown): value is Comparison {
   if (value === null || typeof value !== "object") return false;
   const c = value as Record<string, unknown>;
-  return isText(c.base, 1024, true) && (c.head === null || isText(c.head, 1024, true)) && typeof c.threeDot === "boolean";
+  return isRange(c) && Array.isArray(c.overrides) && c.overrides.length <= 1000 && c.overrides.every((o) => isRange(o) && isText(o.dir, 1024, true));
+}
+
+function isRange(value: unknown): value is Record<string, unknown> {
+  if (value === null || typeof value !== "object") return false;
+  const r = value as Record<string, unknown>;
+  return isText(r.base, 1024, true) && (r.head === null || isText(r.head, 1024, true)) && typeof r.threeDot === "boolean";
 }
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {

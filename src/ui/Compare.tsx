@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { CommitInfo, Comparison, DiffResult, RefList } from "../shared/types";
+import { withOverride, withRange } from "../shared/comparison";
+import type { CommitInfo, Comparison, DiffResult, RefList, RefRange } from "../shared/types";
 import { focusInPlace } from "./anchor";
 
 const SHA = /^[0-9a-f]{40,64}$/;
@@ -7,7 +8,10 @@ const MAX_ITEMS = 100;
 
 export const refLabel = (ref: string | null) => (ref === null ? "working tree" : SHA.test(ref) ? ref.slice(0, 7) : ref);
 
-export const comparisonLabel = (c: Comparison) => `${refLabel(c.base)}${c.threeDot ? "..." : ".."}${refLabel(c.head)}`;
+const rangeLabel = (r: RefRange) => `${refLabel(r.base)}${r.threeDot ? "..." : ".."}${refLabel(r.head)}`;
+
+export const comparisonLabel = (c: Comparison) =>
+  c.overrides.length ? `${rangeLabel(c)} (${c.overrides.map((o) => `${o.dir}: ${rangeLabel(o)}`).join("; ")})` : rangeLabel(c);
 
 interface CompareProps {
   diff: DiffResult;
@@ -16,18 +20,99 @@ interface CompareProps {
 }
 
 export function CompareControls({ diff, loadRefs, onCompare }: CompareProps) {
-  const current: Comparison = { base: diff.base, head: diff.head, threeDot: diff.threeDot };
-  const dotsTitle = diff.threeDot
+  return (
+    <RangeControls
+      range={diff}
+      baseCommit={diff.baseCommit}
+      headCommit={diff.headCommit}
+      loadRefs={loadRefs}
+      onChange={(next) => onCompare(withRange(diff, next))}
+    />
+  );
+}
+
+interface ReposProps {
+  diff: DiffResult;
+  loadRefs: (repo: string) => Promise<RefList>;
+  onCompare: (next: Comparison) => void;
+}
+
+/** When the diff covers several repositories, what each one compares: the refs in the top bar, or refs of its own. */
+export function RepoComparisons({ diff, loadRefs, onCompare }: ReposProps) {
+  // Each repository's loader keeps its identity, so its ref pickers do not load the refs again on every render.
+  const loaders = useMemo(() => new Map<string, () => Promise<RefList>>(), [loadRefs]);
+  const loaderFor = (dir: string) => {
+    let load = loaders.get(dir);
+    if (!load) loaders.set(dir, (load = () => loadRefs(dir)));
+    return load;
+  };
+  if (diff.repos[0]?.dir === "") return null;
+  const own = diff.overrides.length;
+  return (
+    <details className="repos-panel">
+      <summary>
+        <span className="repos-title">{diff.repos.length} repositories</span>
+        {own ? ` · ${own} with refs of ${own === 1 ? "its" : "their"} own` : " · all compare the refs above"}
+      </summary>
+      <ul className="repos-list">
+        {diff.repos.map((r) => {
+          const overridden = diff.overrides.some((o) => o.dir === r.dir);
+          const files = diff.files.filter((f) => f.path.startsWith(`${r.dir}/`)).length;
+          return (
+            <li key={r.dir}>
+              <div className="repos-row">
+                <span className="repos-dir" title={r.dir}>
+                  {r.dir}
+                </span>
+                <RangeControls
+                  range={r}
+                  baseCommit={r.baseCommit}
+                  headCommit={r.headCommit}
+                  loadRefs={loaderFor(r.dir)}
+                  onChange={(next) => onCompare(withOverride(diff, r.dir, next))}
+                />
+                {r.error === null && (
+                  <span className="repos-files">
+                    {files} file{files === 1 ? "" : "s"}
+                  </span>
+                )}
+                {overridden && (
+                  <button className="link-button repos-reset" onClick={() => onCompare(withOverride(diff, r.dir, diff))}>
+                    Compare the refs above
+                  </button>
+                )}
+              </div>
+              {r.error !== null && <p className="repos-error">{r.error}</p>}
+            </li>
+          );
+        })}
+      </ul>
+    </details>
+  );
+}
+
+interface RangeProps {
+  range: RefRange;
+  baseCommit: string | null;
+  headCommit: string | null;
+  loadRefs: () => Promise<RefList>;
+  onChange: (next: RefRange) => void;
+}
+
+/** Pickers for the base and the compare side of a range, with buttons to swap them and to switch between ... and ... */
+function RangeControls({ range, baseCommit, headCommit, loadRefs, onChange }: RangeProps) {
+  const current: RefRange = { base: range.base, head: range.head, threeDot: range.threeDot };
+  const dotsTitle = range.threeDot
     ? "Showing the changes on compare since it diverged from base (base...compare). Click to compare them directly (base..compare)."
     : "Comparing base and compare directly (base..compare). Click to show only the changes since compare diverged from base (base...compare).";
   return (
     <div className="compare">
       <button
         className="icon-button"
-        onClick={() => diff.head !== null && onCompare({ ...current, base: diff.head, head: diff.base })}
-        disabled={diff.head === null}
+        onClick={() => range.head !== null && onChange({ ...current, base: range.head, head: range.base })}
+        disabled={range.head === null}
         aria-label="Swap base and compare"
-        title={diff.head === null ? "The working tree can only be compared, not used as the base" : "Swap base and compare"}
+        title={range.head === null ? "The working tree can only be compared, not used as the base" : "Swap base and compare"}
       >
         <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
           <path d="M5.22 14.78a.75.75 0 0 0 1.06-1.06L4.56 12h8.69a.75.75 0 0 0 0-1.5H4.56l1.72-1.72a.75.75 0 0 0-1.06-1.06l-3 3a.75.75 0 0 0 0 1.06l3 3Zm5.56-6.5a.75.75 0 1 1-1.06-1.06l1.72-1.72H2.75a.75.75 0 0 1 0-1.5h8.69L9.72 2.28a.75.75 0 0 1 1.06-1.06l3 3a.75.75 0 0 1 0 1.06l-3 3Z" />
@@ -35,15 +120,15 @@ export function CompareControls({ diff, loadRefs, onCompare }: CompareProps) {
       </button>
       <RefPicker
         role="base"
-        value={diff.base}
-        commit={diff.baseCommit}
+        value={range.base}
+        commit={baseCommit}
         loadRefs={loadRefs}
-        onPick={(ref) => ref !== null && onCompare({ ...current, base: ref })}
+        onPick={(ref) => ref !== null && onChange({ ...current, base: ref })}
       />
-      <button className="dots" onClick={() => onCompare({ ...current, threeDot: !diff.threeDot })} title={dotsTitle} aria-label={dotsTitle}>
-        {diff.threeDot ? "..." : ".."}
+      <button className="dots" onClick={() => onChange({ ...current, threeDot: !range.threeDot })} title={dotsTitle} aria-label={dotsTitle}>
+        {range.threeDot ? "..." : ".."}
       </button>
-      <RefPicker role="compare" value={diff.head} commit={diff.headCommit} loadRefs={loadRefs} onPick={(ref) => onCompare({ ...current, head: ref })} />
+      <RefPicker role="compare" value={range.head} commit={headCommit} loadRefs={loadRefs} onPick={(ref) => onChange({ ...current, head: ref })} />
     </div>
   );
 }
