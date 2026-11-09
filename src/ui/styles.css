@@ -1132,7 +1132,7 @@ button {
   background: var(--empty-cell);
 }
 
-.thread-cell > .thread + .thread {
+.thread-cell > * + * {
   margin-top: 8px;
 }
 
@@ -1184,7 +1184,9 @@ button {
 
 .unplaced > .thread,
 .file-threads > .thread,
-.topic-threads > .thread {
+.file-threads > .thread-new,
+.topic-threads > .thread,
+.topic-threads > .thread-new {
   max-width: 880px;
 }
 
@@ -1321,8 +1323,8 @@ button {
   border-color: var(--fg-muted);
 }
 
-.thread-new {
-  padding: 8px 12px;
+.file .comment-form {
+  scroll-margin-top: calc(44px + 8px);
 }
 
 .review-menu {
@@ -1550,6 +1552,10 @@ button {
   justify-content: flex-end;
   gap: 8px;
   margin-left: auto;
+}
+
+.comment-form-buttons > .button {
+  flex: 1 0 auto;
 }
 
 .either {

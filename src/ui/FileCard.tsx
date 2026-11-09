@@ -2,8 +2,8 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { buildHunks, splitLines } from "../shared/hunks";
 import type { Block, DiffLine, DisplayHunk, Expansion, FileDiff } from "../shared/types";
 import { sum } from "../shared/util";
-import { keepHeaderInPlace, keepInPlace, topBar } from "./anchor";
-import { onShownVersion, ThreadList, ThreadView, useComments } from "./comments";
+import { keepHeaderInPlace, keepInPlace } from "./anchor";
+import { focusForm, onShownVersion, ThreadList, ThreadView, useComments } from "./comments";
 import { CollapseButton, CommentButton, CopyButton, ViewedToggle } from "./controls";
 import { DiffTable, hasLine, type OnExpand, toSplitRows, twoExpanders } from "./DiffTable";
 import { highlight, languageFor, type TokenLines } from "./highlight";
@@ -128,17 +128,15 @@ export function FileCard({ file: next, blocks: nextBlocks = next.blocks, anchor,
         <span className="spacer" />
         <CommentButton
           label="Comment on this file"
-          onClick={() =>
-            keepInPlace(
-              ref.current,
-              () => {
-                setCollapsed(false);
-                setNear(true);
-                setCommenting(true);
-              },
-              topBar(),
-            )
-          }
+          onClick={() => {
+            const open = ref.current?.querySelector(".file-threads > .thread-new .comment-form");
+            if (open) return focusForm(open);
+            keepInPlace(ref.current, () => {
+              setCollapsed(false);
+              setNear(true);
+              setCommenting(true);
+            });
+          }}
         />
         {onToggleViewed && (
           <ViewedToggle

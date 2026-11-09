@@ -120,10 +120,8 @@ function CommentForm({ placeholder, initial = "", editing = false, lines, onSubm
   });
 
   useLayoutEffect(() => {
-    const el = input.current;
-    el?.focus({ preventScroll: true });
-    el?.setSelectionRange(el.value.length, el.value.length);
-    form.current?.scrollIntoView({ block: "nearest" });
+    if (form.current) focusForm(form.current);
+    input.current?.setSelectionRange(input.current.value.length, input.current.value.length);
   }, []);
 
   const writing = preview === null;
@@ -289,9 +287,14 @@ function Either({ show, texts, className }: { show: number; texts: string[]; cla
   );
 }
 
+export function focusForm(form: Element): void {
+  form.querySelector<HTMLElement>("textarea:not([hidden]), .comment-preview")?.focus({ preventScroll: true });
+  form.scrollIntoView({ block: "nearest" });
+}
+
 export function NewThread(props: FormProps) {
   return (
-    <div className="thread thread-new">
+    <div className="thread-new">
       <CommentForm {...props} />
     </div>
   );
