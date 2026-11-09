@@ -71,6 +71,7 @@ export function DiffTable({ path, hunks, oldTokens, newTokens, onExpand }: Props
   const { threadsFor, create, versions } = useComments();
   const [selection, setSelection] = useState<Selection | null>(null);
   const [drag, setDrag] = useState<Drag | null>(null);
+
   const threads = threadsFor(path);
   const rows = useMemo(() => hunks.map((h) => toSplitRows(h.lines)), [hunks]);
   const threadsAt = useMemo(() => {
@@ -82,6 +83,7 @@ export function DiffTable({ path, hunks, oldTokens, newTokens, onExpand }: Props
     }
     return at;
   }, [threads, versions]);
+
   const last = hunks[hunks.length - 1];
   const shown = drag ? span(drag.side, drag.pivot, drag.end) : selection;
 
@@ -144,6 +146,7 @@ export function DiffTable({ path, hunks, oldTokens, newTokens, onExpand }: Props
     }
     return out;
   };
+
   hunks.forEach((h, hi) => {
     body.push(
       <tr className="hunk" key={`h${h.firstId}`}>
@@ -155,6 +158,7 @@ export function DiffTable({ path, hunks, oldTokens, newTokens, onExpand }: Props
         </td>
       </tr>,
     );
+
     for (const row of rows[hi]!) {
       const oldNo = row.left?.oldNo ?? null;
       const newNo = row.right?.newNo ?? null;
@@ -169,11 +173,13 @@ export function DiffTable({ path, hunks, oldTokens, newTokens, onExpand }: Props
           newSelected={isSelected("new", newNo)}
         />,
       );
+
       const left = sideContent("old", oldNo);
       const right = sideContent("new", newNo);
       if (left.length || right.length) body.push(<ThreadRow key={`t${key}`} left={left} right={right} />);
     }
   });
+
   if (last && last.hiddenBelow > 0) {
     body.push(
       <tr className="hunk" key="end">
@@ -283,6 +289,7 @@ function SplitCell({ line, tokens, side, selected }: CellProps) {
       </>
     );
   }
+
   const n = side === "old" ? line.oldNo : line.newNo;
   const sel = selected ? " is-selected" : "";
   return (
@@ -330,6 +337,7 @@ export function toSplitRows(lines: DiffLine[]): SplitRow[] {
       i++;
       continue;
     }
+
     const dels: DiffLine[] = [];
     const adds: DiffLine[] = [];
     while (i < lines.length && lines[i]!.kind === "del") dels.push(lines[i++]!);

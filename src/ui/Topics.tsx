@@ -101,6 +101,7 @@ export function TopicSection({ topic, viewed, onToggleViewed }: SectionProps) {
 
   const header = useRef<HTMLElement>(null);
   const files = topic.parts.map((p) => p.file.path);
+
   return (
     <section className={`topic${viewed ? " is-viewed" : ""}`} id={topic.anchor}>
       <header className="topic-header" ref={header}>

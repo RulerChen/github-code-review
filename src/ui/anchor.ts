@@ -41,16 +41,19 @@ function pick(): Element | null {
   const box = main.getBoundingClientRect();
   const x = box.left + box.width / 2;
   let y = topBar() + 1;
+
   for (let header = document.elementFromPoint(x, y)?.closest(STICKY); header && main.contains(header); ) {
     y = header.getBoundingClientRect().bottom + 1;
     const below = document.elementFromPoint(x, y)?.closest(STICKY);
     header = below === header ? null : below;
   }
+
   const hit = document.elementsFromPoint(x, y).find((e) => e !== main && main.contains(e) && !e.closest(STICKY));
   let el = hit?.closest(UNIT) ?? null;
   if (!el || !main.contains(el)) {
     el = [...(hit ?? main).children].find((c) => laidOut(c) && c.getBoundingClientRect().bottom > y) ?? null;
   }
+
   const r = el?.getBoundingClientRect();
   if (el && r && r.top < y - 1 && !(el.matches(LEAF) && y - r.top < r.bottom - y)) el = firstUnder(el, main, y) ?? el;
   return el;

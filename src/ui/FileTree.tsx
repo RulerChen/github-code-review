@@ -57,6 +57,7 @@ export function FileTree({ entries, active, isViewed, onSelect }: Props) {
     });
   const tree = buildTree(entries);
   if (entries.length === 0) return <p className="tree-empty">No matching files.</p>;
+
   return (
     <ul className="tree" role="tree">
       <TreeLevel node={tree} path="" depth={0} active={active} isViewed={isViewed} onSelect={onSelect} collapsed={collapsed} onToggle={toggle} />

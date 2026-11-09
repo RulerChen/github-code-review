@@ -44,6 +44,7 @@ export function RepoComparisons({ diff, loadRefs, onCompare }: ReposProps) {
   };
   if (diff.repos[0]?.dir === "") return null;
   const own = diff.overrides.length;
+
   return (
     <details className="repos-panel">
       <summary>
@@ -96,6 +97,7 @@ function RangeControls({ range, baseCommit, headCommit, loadRefs, onChange }: Ra
   const dotsTitle = range.threeDot
     ? "Showing the changes on compare since it diverged from base (base...compare). Click to compare them directly (base..compare)."
     : "Comparing base and compare directly (base..compare). Click to show only the changes since compare diverged from base (base...compare).";
+
   return (
     <div className="compare">
       <button
@@ -180,6 +182,7 @@ function RefPicker({ role, value, commit, loadRefs, onPick }: PickerProps) {
         for (const n of names) list.push({ key: n, value: n, label: n });
       }
     }
+
     const shown = list.slice(0, MAX_ITEMS);
     if (q && !list.some((i) => i.value === q)) shown.push({ key: "typed", value: q, label: `Use ${q}`, detail: "any ref" });
     return shown;

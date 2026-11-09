@@ -23,6 +23,7 @@ export function ThemeToggle() {
     setTheme(next);
   };
   const label = theme === "dark" ? "Switch to light theme" : "Switch to dark theme";
+
   return (
     <button className="icon-button theme-toggle" onClick={toggle} aria-label={label} title={label}>
       {theme === "dark" ? <SunIcon /> : <MoonIcon />}
@@ -122,6 +123,7 @@ function SlidingIndicator({ selected }: { selected: string }) {
       if (!tab) return;
       el.style.clipPath = `inset(0 ${box.clientWidth - tab.offsetLeft - tab.offsetWidth}px 0 ${tab.offsetLeft}px)`;
     };
+
     place();
     const frame = requestAnimationFrame(() => (el.dataset.ready = ""));
     const observer = new ResizeObserver(place);
@@ -131,5 +133,6 @@ function SlidingIndicator({ selected }: { selected: string }) {
       observer.disconnect();
     };
   }, [selected]);
+
   return <span ref={ref} className="segmented-indicator" aria-hidden="true" />;
 }

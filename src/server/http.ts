@@ -27,6 +27,7 @@ const MIME: Record<string, string> = {
 
 const FIRST_PORT = 7800;
 const PORT_COUNT = 10;
+
 const MAX_REQUEST_BYTES = 256 * 1024;
 const MAX_COMMENT = 20 * 1024;
 const MAX_SNIPPET = 64 * 1024;
@@ -34,6 +35,7 @@ const MAX_FOCUS = 2000;
 const MAX_REF = 1024;
 const MAX_OVERRIDES = 1000;
 const MAX_PATH = 4096;
+
 const PING_MS = 25_000;
 const PAGE = /^\/v\/[\w-]+$/;
 const API = /^\/api\/views\/([\w-]+)\/(diff|events|refs|threads|review|wait|version|topics)(?:\/([\w-]+)\/comments(?:\/([\w-]+))?)?$/;
@@ -68,6 +70,7 @@ export class ReviewServer {
         else res.destroy();
       });
     });
+
     const host = SSH_HOST ? undefined : "127.0.0.1";
     let bound = false;
     for (let port = FIRST_PORT; !bound && port < FIRST_PORT + PORT_COUNT; port++) bound = await listen(server, port, host);
@@ -92,6 +95,7 @@ export class ReviewServer {
     while (this.views.has(id));
     const view = { id, repo, compare };
     this.views.set(id, view);
+
     const threads = this.repos.get(repo) ?? new RepoThreads(cwd);
     this.repos.set(repo, threads);
     threads.cwd = cwd;
@@ -132,9 +136,11 @@ export class ReviewServer {
     const i = this.groupings.findIndex(isFor(view.repo, compare));
     if (i >= 0 && this.groupings[i]!.error === null) return;
     if (i >= 0) this.groupings.splice(i, 1);
+
     const job: Grouping = { repo: view.repo, compare, focus, activity: "Starting", error: null };
     this.groupings.push(job);
     this.broadcast("groupings", this.groupings);
+
     void (async () => {
       try {
         const diff = await computeDiff(view.repo, compare);
@@ -162,8 +168,10 @@ export class ReviewServer {
     const { pathname, searchParams } = new URL(req.url ?? "/", "http://127.0.0.1");
     const assets = pathname.startsWith("/assets/");
     if (!assets && !this.authorize(req, res, pathname, searchParams)) return;
+
     const api = API.exec(pathname);
     if (api) return this.api(req, res, searchParams, api);
+
     if (req.method !== "GET") return sendText(res, 405, "Method not allowed");
     if (PAGE.test(pathname)) return this.sendFile(res, "index.html", "no-store");
     if (assets) return this.sendFile(res, pathname.slice(1), "public, max-age=31536000, immutable");
@@ -184,8 +192,10 @@ export class ReviewServer {
       res.end();
       return false;
     }
+
     const fromCookie = req.headers.cookie?.split(/;\s*/).find((c) => c.startsWith(`${cookie}=`))?.slice(cookie.length + 1);
     if (this.validToken(given ?? fromCookie)) return true;
+
     const error = "Open the URL Claude printed. It carries the access token.";
     if (pathname.startsWith("/api/")) sendJson(res, 401, { error });
     else sendText(res, 401, error);
@@ -197,6 +207,7 @@ export class ReviewServer {
     const view = this.views.get(viewId!);
     if (!view) return sendJson(res, 404, { error: "Unknown view. Ask Claude to open the viewer again." });
     if (req.method !== "GET" && !this.sameOrigin(req)) return sendJson(res, 403, { error: "Cross-site request refused" });
+
     const threads = this.repos.get(view.repo)!;
     const compare = comparisonFromQuery(query) ?? view.compare;
     const target = commentId ? `${route}/comment` : threadId ? `${route}/thread` : route;
@@ -281,6 +292,7 @@ export class ReviewServer {
       "X-Content-Type-Options": "nosniff",
     });
     res.write("retry: 2000\n\n");
+
     const send = (event: string, data: unknown) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
     const unsubscribe = threads.subscribe((thread) => send("thread", thread));
     send("listening", threads.listening);
@@ -289,6 +301,7 @@ export class ReviewServer {
     const unlisten = threads.subscribeListening((on) => send("listening", on));
     this.pages.add(send);
     const ping = setInterval(() => res.write(": ping\n\n"), PING_MS);
+
     req.on("close", () => {
       clearInterval(ping);
       unsubscribe();
@@ -306,6 +319,7 @@ export class ReviewServer {
     } catch {
       return sendText(res, 404, "Not found");
     }
+
     res.writeHead(200, {
       "Content-Type": MIME[path.extname(abs)] ?? "application/octet-stream",
       "Cache-Control": cacheControl,
@@ -342,6 +356,7 @@ function listen(server: Server, port: number, host: string | undefined): Promise
       server.off("error", onError);
       resolve(true);
     };
+
     server.once("error", onError);
     server.once("listening", onListening);
     server.listen(port, host);
@@ -356,6 +371,7 @@ async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> 
     if (size > MAX_REQUEST_BYTES) return {};
     chunks.push(chunk);
   }
+
   try {
     const value: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"));
     return isRecord(value) ? value : {};
@@ -375,9 +391,11 @@ function isComment(body: unknown, single: unknown): body is string {
 function isAnchor(a: unknown): a is ThreadAnchor {
   if (!isRecord(a)) return false;
   const line = (n: unknown) => Number.isInteger(n) && (n as number) > 0;
+
   if (a.path === null) {
     return isText(a.topic, MAX_REF, true) && isComparison(a.compare) && a.side === null && a.start === null && a.end === null && a.commit === null;
   }
+
   if (!isText(a.path, MAX_PATH, true)) return false;
   if (a.commit !== null && !(typeof a.commit === "string" && SHA.test(a.commit))) return false;
   if (a.side === null) return a.start === null && a.end === null;

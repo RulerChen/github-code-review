@@ -104,6 +104,7 @@ export function useConversations({ repoRoot, threads, place, show }: Options): C
       if (p) show(thread, p);
       else setOpen(true);
     }
+
     if (pending.current) clearTimeout(pending.current.timer);
     const timer = window.setTimeout(() => (pending.current = null), REVEAL_MS);
     pending.current = { thread, timer };

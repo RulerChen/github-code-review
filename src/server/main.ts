@@ -89,14 +89,17 @@ async function runMcp(): Promise<void> {
         "with no .git of its own but git repositories directly under it covers all of them in one diff, each file's " +
         "path starting with its repository's directory.",
     );
+
   const base = z
     .string()
     .optional()
     .describe("Git ref for the old side, such as HEAD, main, HEAD~3, a tag or a commit. Defaults to HEAD.");
+
   const head = z
     .string()
     .optional()
     .describe("Git ref for the new side. Omit it to compare the working tree, with staged, unstaged and untracked changes.");
+
   const threeDot = z
     .boolean()
     .optional()
@@ -104,6 +107,7 @@ async function runMcp(): Promise<void> {
       "true (the default) compares from the merge base of base and head, like GitHub's base...head, so only the changes " +
         "made on head's side show. false compares base with head directly, like git diff base..head.",
     );
+
   const overrides = z
     .array(
       z.object({
@@ -118,6 +122,7 @@ async function runMcp(): Promise<void> {
       "When repo is a directory of repositories: the repositories that compare refs of their own instead of base, head " +
         "and threeDot.",
     );
+
   type Overrides = { dir: string; base: string; head?: string; threeDot?: boolean }[];
   const comparison = (args: { base?: string; head?: string; threeDot?: boolean; overrides?: Overrides }): Comparison => {
     const c = { base: args.base ?? "HEAD", head: args.head ?? null, threeDot: args.threeDot ?? true };
@@ -216,6 +221,7 @@ async function runMcp(): Promise<void> {
       if (args.after !== undefined && !wanted && repos.filter((r) => r.threads.submissions.length).length > 1) {
         return result("Several repositories have reviews, numbered separately. Set repo to the one the wait command named.", true);
       }
+
       const parts = repos.flatMap(({ repo, threads, view }) => {
         const text = formatReviewComments(threads.threads, threads.submissions, args.after ?? null, threads.read);
         threads.read = threads.submissions.length;

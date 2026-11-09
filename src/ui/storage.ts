@@ -33,6 +33,7 @@ export function useViewed<T>(key: string | null, idOf: (item: T) => string, sign
   const [stored, setStored] = useState<{ key: string | null; marks: Record<string, string> }>({ key: null, marks: {} });
   if (key !== null && stored.key !== key) setStored({ key, marks: readStorage(key, {}) });
   const { marks } = stored;
+
   const isViewed = useCallback((item: T) => marks[idOf(item)] === signatureOf(item), [marks]);
   const toggle = (item: T) => {
     if (key === null) return;
@@ -42,5 +43,6 @@ export function useViewed<T>(key: string | null, idOf: (item: T) => string, sign
     setStored({ key, marks: next });
     writeStorage(key, next);
   };
+
   return [isViewed, toggle] as const;
 }

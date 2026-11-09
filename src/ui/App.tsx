@@ -52,13 +52,16 @@ export function App({ viewId }: Props) {
   const [switching, setSwitching] = useState(false);
   const [listening, setListening] = useState(false);
   const [stale, setStale] = useState(false);
+
   const [tab, setTab] = useState<Tab>("topics");
   const [sidebarOpen, setSidebarOpen] = useStoredState("diff-review:sidebar", true);
   const [filter, setFilter] = useState("");
   const [active, setActive] = useState<string | null>(null);
+
   const [threads, setThreads] = useState<Thread[]>([]);
   const [reviews, setReviews] = useState<Review[]>([]);
   const [groupings, setGroupings] = useState<Grouping[]>([]);
+
   const requested = useRef<Comparison | null>(comparisonFromQuery(new URLSearchParams(location.search)));
   const seq = useRef(0);
   const version = useRef<string | null>(null);
@@ -71,9 +74,11 @@ export function App({ viewId }: Props) {
     const other = !sameTarget(target, requested.current);
     setLoading(true);
     if (other) setSwitching(true);
+
     try {
       const result = await fetchView(viewId, target);
       if (n !== seq.current) return;
+
       const root = result.diff.repoRoot;
       const fresh = other || version.current === null;
       requested.current = target;
@@ -91,6 +96,7 @@ export function App({ viewId }: Props) {
           return want === "topics" && !topical ? "files" : want;
         });
       }
+
       setData(result);
       setReviews(result.reviews);
       setGroupings(result.groupings);
@@ -153,6 +159,7 @@ export function App({ viewId }: Props) {
     if (r.repo === data.diff.repoRoot) compareWith(r.compare, "topics");
     else location.assign(`/v/${encodeURIComponent(r.view)}?${comparisonQuery(r.compare)}`);
   };
+
   const onOpened = useRef(showReview);
   onOpened.current = showReview;
 
@@ -176,6 +183,7 @@ export function App({ viewId }: Props) {
   );
   const repoCommits = JSON.stringify(diff?.repos.map((r) => [r.dir, r.oldCommit, r.headCommit]) ?? []);
   const live = useMemo(() => threads.filter((t) => t.comments.length > 0), [threads]);
+
   const comments = useMemo<
     Pick<CommentsApi, "versions" | "threadsFor" | "threadsForTopic" | "create" | "reply" | "edit" | "remove" | "pending" | "listening">
   >(() => {
@@ -186,12 +194,14 @@ export function App({ viewId }: Props) {
       if (anchor.path !== null) byPath.set(anchor.path, [...(byPath.get(anchor.path) ?? []), t]);
       else if (current && sameComparison(anchor.compare, current)) byTopic.set(anchor.topic, [...(byTopic.get(anchor.topic) ?? []), t]);
     }
+
     const repos = JSON.parse(repoCommits) as [string, string | null, string | null][];
     const versions = (path: string) => {
       const r = repos.find(([dir]) => dir === "" || path.startsWith(`${dir}/`));
       return { old: r?.[1] ?? null, new: r?.[2] ?? null };
     };
     const update = (thread: Thread) => setThreads((prev) => mergeThreads(prev, [thread]));
+
     return {
       versions,
       threadsFor: (path) => byPath.get(path) ?? [],
@@ -257,6 +267,7 @@ export function App({ viewId }: Props) {
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
+
   const pendingSelect = useRef<string | null>(null);
   useLayoutEffect(() => {
     if (shownView.current === view) return;
@@ -266,11 +277,13 @@ export function App({ viewId }: Props) {
     pendingSelect.current = null;
     if (target) go(target, setActive);
   }, [view]);
+
   useLayoutEffect(() => {
     if (!resetScroll.current) return;
     resetScroll.current = false;
     scrollToTop();
   });
+
   const place = useCallback(
     (t: Thread): Place | null => {
       const { anchor } = t;
@@ -287,6 +300,7 @@ export function App({ viewId }: Props) {
     },
     [entries, topics, topicTab, comments.versions, current],
   );
+
   const conv = useConversations({
     repoRoot: diff?.repoRoot ?? null,
     threads: live,
@@ -298,6 +312,7 @@ export function App({ viewId }: Props) {
     },
   });
   const commentsValue = useMemo(() => ({ ...comments, ...conv.api }), [comments, conv.api]);
+
   const [help, setHelp] = useState(false);
   useShortcuts({
     j: () => stepSection(1, active, setActive),

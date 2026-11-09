@@ -142,6 +142,7 @@ function ReviewPicker({ reviews, current, repoRoot, onPick }: PickerProps) {
 
   const otherRepos = reviews.some((r) => r.repo !== repoRoot);
   const newest = [...reviews].reverse();
+
   return (
     <div className="picker review-picker" ref={root}>
       <button className="picker-button" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(!open)}>

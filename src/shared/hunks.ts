@@ -33,6 +33,7 @@ export function buildHunks(
   expansion: Expansion | null = null,
 ): DisplayHunk[] {
   if (blocks.length === 0) return [];
+
   const hasCtx = newLines !== null || oldLines !== null;
   const total = newLines ? newLines.length : oldLines ? oldLines.length : 0;
   const endOf = (b: Block) => (newLines ? b.newStart + b.newCount : b.oldStart + b.oldCount);
@@ -65,6 +66,7 @@ export function buildHunks(
     const nextBlock = all[li + 1];
     const joinsPrevious = prevBlock !== undefined && shown.has(prevBlock);
     const joinsNext = nextBlock !== undefined && shown.has(nextBlock);
+
     const runAbove = runBefore(fi);
     const runBelow = runBefore(li + 1);
     const before = Math.min(wantAbove(first), runAbove);

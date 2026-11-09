@@ -107,11 +107,13 @@ function CommentForm({ placeholder, initial = "", editing = false, lines, onSubm
   const [text, setText] = useState(initial);
   const [preview, setPreview] = useState<number | null>(null);
   const asking = !editing && MENTION.test(text);
+
   const form = useRef<HTMLFormElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
   const box = useRef<HTMLDivElement>(null);
   const tabs = useRef<HTMLDivElement>(null);
   const previewBox = useRef<HTMLDivElement>(null);
+
   const { busy, error, run } = useAction(async (single: boolean) => {
     await onSubmit(text.trim(), single);
     setText("");
@@ -149,6 +151,7 @@ function CommentForm({ placeholder, initial = "", editing = false, lines, onSubm
     }
     el.setSelectionRange(edit.start, edit.end);
   };
+
   const use = (tool: Tool | Format) => {
     const el = input.current;
     if (!el || !writing) return;
@@ -157,12 +160,14 @@ function CommentForm({ placeholder, initial = "", editing = false, lines, onSubm
     else if ("format" in tool) apply(format(tool.format, value, start, end));
     else if (lines !== undefined) apply(suggestion(value, start, end, lines));
   };
+
   const togglePreview = () => setPreview(writing ? (box.current?.clientHeight ?? 0) : null);
 
   const onKeyDown = (e: KeyboardEvent<HTMLFormElement>) => {
     if (e.nativeEvent.isComposing) return;
     if (e.key === "Escape") return onCancel();
     if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+
     let action: (() => void) | null = null;
     if (e.key === "Enter" && !e.shiftKey) action = () => submit(false);
     else if (e.shiftKey && e.code === "KeyP") action = togglePreview;
@@ -171,6 +176,7 @@ function CommentForm({ placeholder, initial = "", editing = false, lines, onSubm
       if (kind) action = () => use(kind);
       else if (!e.shiftKey && e.key.toLowerCase() === "g" && lines !== undefined) action = () => use(SUGGEST);
     }
+
     if (!action) return;
     e.preventDefault();
     action();
@@ -397,6 +403,7 @@ function CommentView({ thread, comment: c, where }: { thread: Thread; comment: T
   const { edit, remove } = useComments();
   const [mode, setMode] = useState<"view" | "edit" | "delete">("view");
   const takesThread = thread.comments[0]?.id === c.id && thread.comments.length > 1;
+
   return (
     <div className={`comment comment-${c.author}`}>
       <div className="comment-head">
@@ -448,6 +455,7 @@ function ConfirmDelete({ message, onCancel, onConfirm }: { message: string; onCa
   const { busy, error, run } = useAction(onConfirm);
   const cancel = useRef<HTMLButtonElement>(null);
   useLayoutEffect(() => cancel.current?.focus({ preventScroll: true }), []);
+
   return (
     <div className="comment-confirm" role="alertdialog" aria-label={message} onKeyDown={(e) => e.key === "Escape" && onCancel()}>
       <span className="comment-confirm-text">{message}</span>

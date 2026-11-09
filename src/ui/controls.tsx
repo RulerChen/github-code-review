@@ -44,6 +44,7 @@ export function CopyButton({ text, label = "Copy file path" }: { text: string; l
       })
       .catch(() => undefined);
   };
+
   return (
     <button className="icon-button copy" aria-label={label} title={copied ? "Copied" : label} onClick={copy}>
       {copied ? <CheckIcon /> : <CopyIcon />}

@@ -66,10 +66,12 @@ export function formatReviewComments(threads: Thread[], submissions: Submission[
   const out: string[] = [];
   const section = (title: string, list: Thread[], showDrafts: boolean) =>
     out.push(title, ...list.flatMap((t) => ["", formatThread(t, showDrafts)]));
+
   for (const s of reviews) {
     out.push(`Review ${s.n}, submitted at ${new Date(s.submittedAt).toLocaleTimeString("en-GB")}.`);
     if (s.body) out.push("  Comment on the whole review:", indent(s.body, "    "));
   }
+
   if (reviews.length) section(`Comments in ${plural(submitted.length, "thread")}:`, submitted, withDrafts);
   if (drafts.length) section(`\nDraft comments the user has not submitted yet, in ${plural(drafts.length, "thread")}:`, drafts, true);
   if (asked.length) section(`\nQuestions the user asked @claude, answered in the page, in ${plural(asked.length, "thread")}:`, asked, true);
@@ -84,11 +86,13 @@ function formatThread(t: Thread, withDrafts: boolean): string {
       const who = c.author === "claude" ? "Claude" : c.draft ? "User (draft)" : c.review ? `User (review ${c.review})` : "User";
       return `  ${who}: ${indent(c.body, "    ").trimStart()}`;
     });
+
   if (anchor.path === null) {
     const files = t.snippet.split("\n", 1)[0] ?? "";
     const title = `Thread ${t.id}: the topic "${anchor.topic}" of ${describeComparison(anchor.compare)} as a whole`;
     return [title, ...(files ? [`  ${files}`] : []), ...comments].join("\n");
   }
+
   const version = anchor.commit ? ` at commit ${anchor.commit}` : anchor.side !== "old" ? " in the working tree" : "";
   const where = anchor.side === null ? "the whole file" : `${anchor.side} ${lineRange(anchor)}`;
   const snippet = anchor.side === null ? [] : t.snippet.split("\n").slice(0, MAX_SNIPPET_LINES).map((l) => `  > ${l}`);

@@ -16,6 +16,7 @@ export function useShortcuts(shortcuts: Record<string, () => void>): void {
   useEffect(() => {
     latest.current = shortcuts;
   });
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey || e.isComposing) return;
@@ -23,6 +24,7 @@ export function useShortcuts(shortcuts: Record<string, () => void>): void {
         if (e.key === "Escape" && e.target instanceof HTMLInputElement) e.target.blur();
         return;
       }
+
       const action = latest.current[e.key];
       if (!action) return;
       e.preventDefault();

@@ -25,6 +25,7 @@ export function comparisonQuery(c: Comparison): string {
     if (r.head !== null) params.set(`head${suffix}`, r.head);
     if (!r.threeDot) params.set(`dots${suffix}`, "2");
   };
+
   add(c, "");
   for (const o of c.overrides) add(o, `@${o.dir}`);
   return params.toString();
@@ -35,8 +36,10 @@ export function comparisonFromQuery(params: URLSearchParams): Comparison | null 
     const base = params.get(`base${suffix}`);
     return base ? { base, head: params.get(`head${suffix}`) || null, threeDot: params.get(`dots${suffix}`) !== "2" } : null;
   };
+
   const top = read("");
   if (!top) return null;
+
   const overrides: RepoRange[] = [];
   for (const key of new Set(params.keys())) {
     const range = key.startsWith("base@") ? read(key.slice(4)) : null;

@@ -24,6 +24,7 @@ export class RepoThreads {
   readonly submissions: Submission[] = [];
   read = 0;
   parentSession: string | null = null;
+
   private fork: { parent: string | null; session: string | null } | null = null;
   private queue: Promise<void> = Promise.resolve();
   private readonly listeners = new Set<(thread: Thread) => void>();
@@ -111,6 +112,7 @@ export class RepoThreads {
       onReview(latest);
       return () => {};
     }
+
     this.waiters.add(onReview);
     if (this.waiters.size === 1) this.emitListening();
     return () => {
@@ -190,6 +192,7 @@ export class RepoThreads {
       const forking = known === null && parent !== null;
       let note = "";
       let res;
+
       try {
         res = await ask({ cwd: this.cwd, resume: known ? known.session : parent, fork: forking, prompt, onText, onActivity });
       } catch (err) {
@@ -198,6 +201,7 @@ export class RepoThreads {
         res = await ask({ cwd: this.cwd, resume: null, fork: false, prompt, onText, onActivity });
         this.fork = { parent, session: res.sessionId };
       }
+
       if (res.sessionId) this.fork = { parent, session: res.sessionId };
       reply.body = note + res.text;
       reply.status = "done";
@@ -205,6 +209,7 @@ export class RepoThreads {
       reply.body = errorMessage(err);
       reply.status = "error";
     }
+
     reply.activity = null;
     this.emit(thread);
   }
@@ -233,6 +238,7 @@ function promptContext(anchor: ThreadAnchor, snippet: string): [string, ...strin
       snippet,
     ];
   }
+
   const version = anchor.commit
     ? ` as of commit ${anchor.commit}. The files on disk are the working tree and can differ from that commit`
     : anchor.side !== "old"

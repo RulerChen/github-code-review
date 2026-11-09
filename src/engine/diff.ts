@@ -74,6 +74,7 @@ function normalize(compare: Partial<Comparison>): Comparison {
     threeDot: compare.threeDot ?? true,
     overrides: compare.overrides ?? [],
   };
+
   for (const { base, head } of [c, ...c.overrides]) {
     for (const ref of [base, head]) {
       if (ref !== null && (ref === "" || ref.startsWith("-"))) throw new Error(`Invalid git ref: ${ref}`);
@@ -91,6 +92,7 @@ async function findRepos(dir: string): Promise<{ root: string; repos: string[] |
     const repos = names.filter((_, i) => found[i]);
     if (repos.length) return { root: abs, repos };
   }
+
   try {
     return { root: await gitText(abs, ["rev-parse", "--show-toplevel"]), repos: null };
   } catch {
@@ -102,11 +104,13 @@ export async function computeDiff(dir: string, compare: Partial<Comparison> = {}
   const c = normalize(compare);
   const { root, repos } = await findRepos(dir);
   checkOverrides(root, repos, c.overrides);
+
   if (!repos) {
     const { repo, commits, commitCount, files } = await diffRepo(root, c, "");
     const { baseCommit, headCommit, oldCommit } = repo;
     return { repoRoot: root, ...c, baseCommit, headCommit, oldCommit, repos: [repo], commits, commitCount, files };
   }
+
   const parts = await mapLimit(repos, REPO_LIMIT, (name) => {
     const range = rangeFor(c, name);
     return diffRepo(path.join(root, name), range, name).catch((err: unknown) => failedPart(name, range, err));
@@ -115,6 +119,7 @@ export async function computeDiff(dir: string, compare: Partial<Comparison> = {}
   if (states.every((r) => r.error !== null)) {
     throw new Error(repoFailures(states).map((f) => `${f.error} (${f.dirs.join(", ")})`).join("; "));
   }
+
   return {
     repoRoot: root,
     ...c,
@@ -158,6 +163,7 @@ async function diffRepo(repo: string, { base, head, threeDot }: RefRange, dir: s
     head === null ? git(root, ["ls-files", "--others", "--exclude-standard", "-z"]) : Buffer.alloc(0),
     listCommits(root, baseCommit, tip),
   ]);
+
   const entries = parseRaw(raw);
   const sections = splitSections(patch.toString("utf8"));
   const aligned = sections.length === entries.length;
@@ -202,6 +208,7 @@ async function repoVersion(repo: string, base: string, head: string | null): Pro
     git(repo, ["rev-parse", `${base}^{commit}`, `${head ?? "HEAD"}^{commit}`], [0, 128]),
     head === null ? git(repo, ["status", "--porcelain", "-z", "--untracked-files=all"]) : null,
   ]);
+
   const hash = createHash("sha256").update(commits);
   if (status) {
     const records = status.toString("utf8").split("\0");
@@ -214,6 +221,7 @@ async function repoVersion(repo: string, base: string, head: string | null): Pro
       entries.push(`${r.startsWith("??") ? "?" : "t"} ${r.slice(3)} ${from}`);
       paths.push(r.slice(3));
     }
+
     const known = contentHashes.get(repo);
     const next = new Map<string, FileHash>();
     const versions = await mapLimit(paths, STAT_LIMIT, (p) => fileVersion(path.join(repo, p), known, next));
@@ -299,6 +307,7 @@ export async function listRefs(dir: string, repo: string | null = null): Promise
     return repoRefs(path.join(root, repo));
   }
   if (!repos) return repoRefs(root);
+
   const lists = await mapLimit(repos, REPO_LIMIT, (name) => repoRefs(path.join(root, name)).catch(() => null));
   const merge = (pick: (l: RefList) => string[]) => {
     const names = lists.map((l) => (l ? pick(l) : []));
@@ -306,6 +315,7 @@ export async function listRefs(dir: string, repo: string | null = null): Promise
     for (let i = 0; names.some((n) => i < n.length); i++) for (const n of names) if (i < n.length) out.add(n[i]!);
     return [...out];
   };
+
   const commits = lists
     .flatMap((l, i) => (l ? l.commits.map((c) => ({ ...c, repo: repos[i]! })) : []))
     .sort((a, b) => byDate(b, a))
@@ -342,6 +352,7 @@ async function readBlobs(root: string, ids: string[]): Promise<Map<string, Conte
   const unique = [...new Set(ids)];
   if (unique.length === 0) return out;
   const checks = (await git(root, ["cat-file", "--batch-check"], [0], `${unique.join("\n")}\n`)).toString("utf8").split("\n");
+
   const batches: string[][] = [[]];
   let bytes = 0;
   for (const [i, id] of unique.entries()) {
@@ -362,6 +373,7 @@ async function readBlobs(root: string, ids: string[]): Promise<Map<string, Conte
     batches.at(-1)!.push(id);
     bytes += size;
   }
+
   for (const wanted of batches) {
     if (wanted.length === 0) continue;
     const buf = await git(root, ["cat-file", "--batch"], [0], `${wanted.join("\n")}\n`);
@@ -457,6 +469,7 @@ function parseSection(lines: string[]): ParsedSection {
       throw new Error(`Hunk line count mismatch at -${b.oldStart} +${b.newStart}`);
     }
   }
+
   const modeChange = oldMode && newMode ? { from: oldMode, to: newMode } : null;
   return { binary, modeChange, blocks };
 }
@@ -542,8 +555,10 @@ async function trackedFile(ctx: RepoContext, entry: RawEntry, section: string[] 
     const one = await git(ctx.root, [...DIFF_ARGS, "-U0", ...ctx.range, "--", ...paths]);
     section = splitSections(one.toString("utf8"))[0] ?? [];
   }
+
   const parsed = parseSection(section);
   const blocks = assignIds(ctx.prefix + entry.path, parsed.blocks);
+
   const oldC = status === "added" || !ctx.oldCommit ? ABSENT : (ctx.blobs.get(entry.oldOid) ?? ABSENT);
   const newC =
     status === "deleted" ? ABSENT : ctx.headCommit ? (ctx.blobs.get(entry.newOid) ?? ABSENT) : await readWorkTree(ctx.root, entry.path);
@@ -557,6 +572,7 @@ async function trackedFile(ctx: RepoContext, entry: RawEntry, section: string[] 
     additions: sum(blocks, (b) => b.newCount),
     deletions: sum(blocks, (b) => b.oldCount),
   });
+
   if (binary) return file;
   if (diffTooLarge(blocks)) return withoutLines(file, blocks);
   const old = matchingText(oldC, blocks, "old");
@@ -577,6 +593,7 @@ async function untrackedFile(ctx: RepoContext, filePath: string): Promise<FileDi
   if (c.kind !== "text") return file;
   const lines = splitLines(c.text);
   if (lines.length === 0) return file;
+
   const raw: RawBlock = {
     oldStart: 0,
     oldCount: 0,
@@ -588,6 +605,7 @@ async function untrackedFile(ctx: RepoContext, filePath: string): Promise<FileDi
     newNoEol: !c.text.endsWith("\n"),
     section: "",
   };
+
   const blocks = assignIds(ctx.prefix + filePath, [raw]);
   const added = { ...file, additions: lines.length };
   if (diffTooLarge(blocks)) return withoutLines(added, blocks);

@@ -79,6 +79,7 @@ export function FileCard({ file: next, blocks: nextBlocks = next.blocks, anchor,
     const r = el.getBoundingClientRect();
     if (r.bottom > -window.innerHeight && r.top < 2 * window.innerHeight) setNear(true);
   }, []);
+
   const { threadsFor, create, versions, revealSeq, peekReveal } = useComments();
   useEffect(() => {
     const thread = peekReveal();
@@ -90,6 +91,7 @@ export function FileCard({ file: next, blocks: nextBlocks = next.blocks, anchor,
     setNear(true);
     if (placed && anchor.side !== null) setForceLoad(true);
   }, [revealSeq]);
+
   const threads = threadsFor(file.path);
   const fileThreads = threads.filter((t) => t.anchor.side === null);
   const unplaced = partial
@@ -226,6 +228,7 @@ function FileBody({
       </div>
     );
   }
+
   return (
     <>
       {file.modeChange && (
@@ -323,6 +326,7 @@ const sameText = (a: FileDiff, b: FileDiff) =>
 function useShown(file: FileDiff, blocks: Block[], enabled: boolean): Shown {
   const lang = languageFor(file.path);
   const want = enabled && lang !== null;
+
   const [shown, setShown] = useState<Shown>({ file, blocks, tokens: null });
   let current = shown;
   if (shown.file !== file || shown.blocks !== blocks) {
@@ -332,6 +336,7 @@ function useShown(file: FileDiff, blocks: Block[], enabled: boolean): Shown {
       setShown(current);
     }
   }
+
   useEffect(() => {
     if (!want) return;
     let cancelled = false;
@@ -346,6 +351,7 @@ function useShown(file: FileDiff, blocks: Block[], enabled: boolean): Shown {
       cancelled = true;
     };
   }, [want, lang, file.oldContent, file.newContent, file.oldPath, file.path]);
+
   return current;
 }
 
@@ -360,6 +366,7 @@ function DiffStat({ additions, deletions }: { additions: number; deletions: numb
     green = Math.round((additions / total) * 5);
     red = Math.min(5 - green, Math.round((deletions / total) * 5));
   }
+
   return (
     <span className="diffstat" aria-label={`${additions} additions, ${deletions} deletions`}>
       <span className="count-add">+{additions}</span>
