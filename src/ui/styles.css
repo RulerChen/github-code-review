@@ -388,6 +388,111 @@ button {
   padding: 8px;
 }
 
+.search-results section + section {
+  margin-top: 8px;
+}
+
+.search-results ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.search-count {
+  margin: 0 0 8px;
+  padding: 0 8px;
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+
+.search-file {
+  display: flex;
+  margin: 0;
+  padding: 4px 8px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.search-dir {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-muted);
+  font-weight: 400;
+  text-overflow: ellipsis;
+}
+
+.search-hit {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+  padding: 2px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  font: 12px/20px var(--mono);
+  text-align: left;
+  cursor: pointer;
+}
+
+.search-hit:hover {
+  background: var(--bg-subtle);
+}
+
+.search-hit.is-current {
+  background: var(--accent-subtle);
+}
+
+.search-no {
+  flex: none;
+  min-width: 32px;
+  color: var(--fg-muted);
+  text-align: right;
+}
+
+.search-hit.add .search-no {
+  color: var(--success);
+}
+
+.search-hit.del .search-no {
+  color: var(--danger);
+}
+
+.search-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: pre;
+}
+
+.search-text mark {
+  border-radius: 2px;
+  background: var(--selected-num);
+  color: inherit;
+}
+
+.diff tr.is-found > .code {
+  animation: line-found 1300ms var(--ease-out);
+}
+
+.diff tr.is-found > .num {
+  animation: line-found-num 1300ms var(--ease-out);
+}
+
+@keyframes line-found {
+  0%,
+  40% {
+    background-color: var(--selected);
+  }
+}
+
+@keyframes line-found-num {
+  0%,
+  40% {
+    background-color: var(--selected-num);
+  }
+}
+
 .file {
   margin-bottom: 16px;
   border: 1px solid var(--border);

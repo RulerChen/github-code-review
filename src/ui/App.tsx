@@ -1,7 +1,7 @@
-import { Fragment, type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Fragment, type ReactNode, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { comparisonFromQuery, comparisonQuery, isFor, repoFailures, sameComparison } from "../shared/comparison";
-import type { CommitInfo, Comparison, DiffResult, FileDiff, Grouping, Review, Thread, ThreadAnchor, ViewData } from "../shared/types";
 import { splitLines } from "../shared/hunks";
+import type { CommitInfo, Comparison, DiffResult, FileDiff, Grouping, Review, Thread, ThreadAnchor, ViewData } from "../shared/types";
 import { errorMessage, sum } from "../shared/util";
 import { followActiveFile } from "./active";
 import { scrollToTop, startAnchoring } from "./anchor";
@@ -28,6 +28,7 @@ import { go, KeyboardButton, ShortcutHelp, stepSection, useShortcuts } from "./k
 import { contextOf, locate } from "./locate";
 import { comparePaths } from "./paths";
 import { ReviewBar } from "./ReviewBar";
+import { type Hit, revealLine, searchDiff, SearchResults } from "./Search";
 import { useStoredState, useViewed } from "./storage";
 import { SubmitReview } from "./SubmitReview";
 import { ChangeStats, RefreshButton, SidebarToggle, type Tab, ThemeToggle, ViewTabs } from "./TopBar";
@@ -71,6 +72,8 @@ export function App({ viewId }: Props) {
   const [tab, setTab] = useState<Tab>("topics");
   const [sidebarOpen, setSidebarOpen] = useStoredState("diff-review:sidebar", true);
   const [filter, setFilter] = useState("");
+  const [query, setQuery] = useState("");
+  const [hit, setHit] = useState<Hit | null>(null);
 
   const [threads, setThreads] = useState<Thread[]>([]);
   const [reviews, setReviews] = useState<Review[]>([]);
@@ -341,6 +344,20 @@ export function App({ viewId }: Props) {
   );
 
   const view: Tab = tab === "topics" ? "topics" : tab === "commits" && diff?.commits.length ? "commits" : "files";
+
+  const searched = useDeferredValue(query);
+  const found = useMemo(() => searchDiff(shown.map((e) => e.file), searched), [shown, searched]);
+  const openHit = (next: Hit) => {
+    setHit(next);
+    if (view !== "files") setTab("files");
+    revealLine(next);
+  };
+  const stepHit = (dir: 1 | -1) => {
+    const { hits } = found;
+    const i = hit ? hits.indexOf(hit) : -1;
+    const next = hits[i < 0 ? (dir > 0 ? 0 : hits.length - 1) : (i + dir + hits.length) % hits.length];
+    if (next) openHit(next);
+  };
   const topicTab = view === "topics" && topics.length > 0;
 
   useEffect(() => (diff !== null ? startAnchoring() : undefined), [diff !== null]);
@@ -499,11 +516,28 @@ export function App({ viewId }: Props) {
                     onChange={(e) => setFilter(e.target.value)}
                     aria-label="Filter files"
                   />
-                  <FileTree
-                    entries={treeEntries}
-                    isViewed={topicTab ? isTopicFileViewed : isViewed}
-                    onSelect={onSelect}
+                  <input
+                    className="filter"
+                    type="search"
+                    placeholder="Search in the diff"
+                    value={query}
+                    onChange={(e) => {
+                      setQuery(e.target.value);
+                      setHit(null);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key !== "Enter" || e.nativeEvent.isComposing) return;
+                      e.preventDefault();
+                      stepHit(e.shiftKey ? -1 : 1);
+                    }}
+                    aria-label="Search in the diff"
+                    title="Enter goes to the next match, Shift+Enter to the previous one"
                   />
+                  {searched.trim() ? (
+                    <SearchResults found={found} query={searched} current={hit} onOpen={openHit} />
+                  ) : (
+                    <FileTree entries={treeEntries} isViewed={topicTab ? isTopicFileViewed : isViewed} onSelect={onSelect} />
+                  )}
                 </div>
               </aside>
 

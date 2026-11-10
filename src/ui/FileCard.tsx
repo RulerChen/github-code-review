@@ -9,6 +9,7 @@ import { CollapseButton, CommentButton, CopyButton, ViewedToggle } from "./contr
 import { DiffTable, hasLine, type OnExpand, toSplitRows, twoExpanders } from "./DiffTable";
 import { highlight, languageFor, type TokenLines } from "./highlight";
 import { useAction } from "./hooks";
+import { showLineTarget, useLineTarget } from "./Search";
 
 const AUTO_LOAD_LINES = 400;
 const AUTO_LOAD_CHARS = 20 * 1024;
@@ -124,6 +125,17 @@ export const FileCard = memo(function FileCard({ file: next, blocks: nextBlocks 
     setNear(true);
     if (placed && anchor.side !== null) setForceLoad(true);
   }, [revealSeq]);
+
+  const lineSeq = useLineTarget(next.path);
+  useEffect(() => {
+    if (!lineSeq || partial) return;
+    setCollapsed(false);
+    setNear(true);
+    setForceLoad(true);
+  }, [lineSeq]);
+  useEffect(() => {
+    if (lineSeq && !partial) showLineTarget(ref.current, next.path);
+  });
 
   const threads = threadsFor(file.path);
   const fileThreads = threads.filter((t) => t.anchor.side === null);
