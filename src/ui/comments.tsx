@@ -5,6 +5,7 @@ import { pin } from "./anchor";
 import { type Format, format, suggestion, type TextEdit } from "./format";
 import { useAction } from "./hooks";
 import { Octicon, PencilIcon, TrashIcon } from "./icons";
+import { isOutdated } from "./locate";
 import { Markdown } from "./Markdown";
 
 type NewAnchor = Omit<LineAnchor, "commit"> | Omit<FileAnchor, "commit"> | Omit<TopicAnchor, "compare">;
@@ -64,7 +65,7 @@ export function readableCount(thread: Thread): number {
 }
 
 export const onShownVersion = (thread: Thread, versions: CommentsApi["versions"]) =>
-  thread.anchor.side === null || thread.anchor.commit === versions(thread.anchor.path)[thread.anchor.side];
+  thread.anchor.side === null || (!isOutdated(thread) && thread.anchor.commit === versions(thread.anchor.path)[thread.anchor.side]);
 
 interface FormProps {
   placeholder: string;
@@ -379,9 +380,11 @@ export function ThreadView({ thread, withVersion = false }: { thread: Thread; wi
     };
   }, [thread, unreadCount, markRead]);
 
-  const where = whereText(thread.anchor, withVersion);
+  const gone = isOutdated(thread);
+  const where = gone ? null : whereText(thread.anchor, withVersion);
   return (
     <div ref={ref} className="thread" data-thread={thread.id}>
+      {gone && <OutdatedLines snippet={thread.snippet} />}
       {thread.comments.map((c, i) => (
         <CommentView key={c.id} thread={thread} comment={c} where={i === 0 ? where : null} />
       ))}
@@ -401,6 +404,26 @@ export function ThreadView({ thread, withVersion = false }: { thread: Thread; wi
             Reply…
           </button>
         )}
+      </div>
+    </div>
+  );
+}
+
+const MARK_CLASS: Record<string, string> = { "+": " add", "-": " del" };
+
+function OutdatedLines({ snippet }: { snippet: string }) {
+  return (
+    <div className="thread-outdated">
+      <div className="thread-outdated-head">
+        <span className="outdated-label">Outdated</span>
+        These lines changed after the comment was written.
+      </div>
+      <div className="suggestion-lines">
+        {snippet.split("\n").map((l, k) => (
+          <div key={k} className={`suggestion-line${MARK_CLASS[l[0] ?? ""] ?? ""}`} data-mark={l[0]}>
+            {l.slice(1)}
+          </div>
+        ))}
       </div>
     </div>
   );

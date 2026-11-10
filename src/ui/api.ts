@@ -1,5 +1,5 @@
 import { comparisonQuery } from "../shared/comparison";
-import type { Comparison, FileDiff, Grouping, RefList, Thread, ThreadAnchor, ViewData } from "../shared/types";
+import type { Comparison, FileDiff, Grouping, RefList, Thread, ThreadAnchor, ThreadContext, ViewData } from "../shared/types";
 
 export class ApiError extends Error {
   constructor(
@@ -55,8 +55,15 @@ export function fetchRefs(viewId: string, repo: string | null = null): Promise<R
   return request<RefList>(url, (b) => Array.isArray(b.branches));
 }
 
-export function createThread(viewId: string, anchor: ThreadAnchor, snippet: string, body: string, single: boolean): Promise<Thread> {
-  return threadRequest(viewUrl(viewId, "threads"), "POST", { anchor, snippet, body, single });
+export function createThread(
+  viewId: string,
+  anchor: ThreadAnchor,
+  snippet: string,
+  context: ThreadContext | null,
+  body: string,
+  single: boolean,
+): Promise<Thread> {
+  return threadRequest(viewUrl(viewId, "threads"), "POST", { anchor, snippet, context, body, single });
 }
 
 export function replyToThread(viewId: string, threadId: string, body: string, single: boolean): Promise<Thread> {

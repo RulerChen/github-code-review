@@ -1,6 +1,7 @@
 import { Fragment, type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { comparisonFromQuery, comparisonQuery, isFor, repoFailures, sameComparison } from "../shared/comparison";
 import type { CommitInfo, Comparison, DiffResult, FileDiff, Grouping, Review, Thread, ThreadAnchor, ViewData } from "../shared/types";
+import { splitLines } from "../shared/hunks";
 import { errorMessage, sum } from "../shared/util";
 import { followActiveFile } from "./active";
 import { scrollToTop, startAnchoring } from "./anchor";
@@ -24,6 +25,7 @@ import { ConversationsButton, ConversationsPanel, type Place, useConversations }
 import { FileCard, FileLoader } from "./FileCard";
 import { FileTree } from "./FileTree";
 import { go, KeyboardButton, ShortcutHelp, stepSection, useShortcuts } from "./keyboard";
+import { contextOf, locate } from "./locate";
 import { comparePaths } from "./paths";
 import { ReviewBar } from "./ReviewBar";
 import { useStoredState, useViewed } from "./storage";
@@ -194,7 +196,21 @@ export function App({ viewId }: Props) {
     [diff?.base, diff?.head, diff?.threeDot, diff?.overrides],
   );
   const repoCommits = JSON.stringify(diff?.repos.map((r) => [r.dir, r.oldCommit, r.headCommit]) ?? []);
-  const live = useMemo(() => threads.filter((t) => t.comments.length > 0), [threads]);
+
+  const newLines = useMemo(() => {
+    const cache = new Map<string, string[] | null>();
+    return (path: string) => {
+      let lines = cache.get(path);
+      if (lines === undefined) {
+        const text = diff?.files.find((f) => f.path === path)?.newContent ?? null;
+        lines = text === null ? null : splitLines(text);
+        cache.set(path, lines);
+      }
+      return lines;
+    };
+  }, [diff]);
+  const latestLines = useRef(newLines);
+  latestLines.current = newLines;
 
   const actions = useMemo<CommentActions>(() => {
     const repos = JSON.parse(repoCommits) as [string, string | null, string | null][];
@@ -209,7 +225,9 @@ export function App({ viewId }: Props) {
       create: async (anchor, snippet, body, single) => {
         if (!viewId || !current) return;
         const full: ThreadAnchor = anchor.path === null ? { ...anchor, compare: current } : { ...anchor, commit: versions(anchor.path)[anchor.side ?? "new"] };
-        update(await createThread(viewId, full, snippet, body, single));
+        const lines = full.side === "new" && full.commit === null ? latestLines.current(full.path) : null;
+        const context = lines && full.side !== null ? contextOf(lines, full.start, full.end) : null;
+        update(await createThread(viewId, full, snippet, context, body, single));
       },
       reply: async (threadId, body, single) => {
         if (viewId) update(await replyToThread(viewId, threadId, body, single));
@@ -222,6 +240,22 @@ export function App({ viewId }: Props) {
       },
     };
   }, [viewId, repoCommits, current]);
+
+  const placed = useMemo(() => {
+    const cache = new WeakMap<Thread, Thread>();
+    return (t: Thread) => {
+      let p = cache.get(t);
+      if (!p) {
+        const { anchor } = t;
+        const onWorkingTree = anchor.side === "new" && anchor.commit === null && actions.versions(anchor.path).new === null;
+        const lines = onWorkingTree ? newLines(anchor.path) : null;
+        p = lines ? locate(t, lines) : t;
+        cache.set(t, p);
+      }
+      return p;
+    };
+  }, [newLines, actions]);
+  const live = useMemo(() => threads.filter((t) => t.comments.length > 0).map(placed), [threads, placed]);
 
   const pathThreads = useRef(new Map<string, Thread[]>());
   const comments = useMemo<Pick<CommentsApi, keyof CommentActions | "threadsFor" | "threadsForTopic" | "pending" | "listening">>(() => {

@@ -119,11 +119,17 @@ export interface ThreadComment {
   editedAt: string | null;
 }
 
+export interface ThreadContext {
+  before: string[];
+  after: string[];
+}
+
 export interface Thread {
   id: string;
   rev: number;
   anchor: ThreadAnchor;
   snippet: string;
+  context: ThreadContext | null;
   comments: ThreadComment[];
 }
 

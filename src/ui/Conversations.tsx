@@ -3,6 +3,7 @@ import { lineNumbers } from "../shared/comments";
 import type { Thread, ThreadAnchor } from "../shared/types";
 import { anchorLabel, authorName, type CommentsApi, readableCount, ThreadView } from "./comments";
 import { CloseIcon, ConversationIcon } from "./icons";
+import { isOutdated } from "./locate";
 import { basename, comparePaths } from "./paths";
 import { readStorage, useStoredState, writeStorage } from "./storage";
 import "./conversations.css";
@@ -241,6 +242,7 @@ function ConversationItem({ thread, inDiff, current, unread, onOpen }: ItemProps
           <span className="conv-lines">{lineLabel(anchor)}</span>
         </span>
       )}
+      {isOutdated(thread) && <span className="outdated-label">Outdated</span>}
       {thread.comments.some((c) => c.draft) && <span className="pending-label">Pending</span>}
       {unread > 0 && <span className="conv-badge">{unread} new</span>}
     </span>

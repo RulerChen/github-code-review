@@ -1312,6 +1312,38 @@ button {
   line-height: 18px;
 }
 
+.outdated-label {
+  flex: none;
+  padding: 0 7px;
+  border: 1px solid var(--border);
+  border-radius: 2em;
+  color: var(--fg-muted);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 18px;
+}
+
+.thread-outdated {
+  overflow: hidden;
+  border-bottom: 1px solid var(--border-muted);
+  border-radius: 6px 6px 0 0;
+}
+
+.thread-outdated-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: var(--bg-subtle);
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+
+.thread-outdated .suggestion-lines {
+  max-height: 160px;
+  overflow-y: auto;
+}
+
 .comment .markdown {
   margin-top: 2px;
 }

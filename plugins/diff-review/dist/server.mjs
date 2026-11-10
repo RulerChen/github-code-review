@@ -37618,8 +37618,8 @@ var RepoThreads = class {
     this.listeningListeners.add(fn);
     return () => this.listeningListeners.delete(fn);
   }
-  create(anchor2, snippet, body, single) {
-    const thread = { id: newId(), rev: 0, anchor: anchor2, snippet, comments: [] };
+  create(anchor2, snippet, context, body, single) {
+    const thread = { id: newId(), rev: 0, anchor: anchor2, snippet, context, comments: [] };
     this.threads.push(thread);
     this.addComment(thread, body, single);
     return thread;
@@ -37814,6 +37814,7 @@ var PORT_COUNT = 10;
 var MAX_REQUEST_BYTES = 256 * 1024;
 var MAX_COMMENT = 20 * 1024;
 var MAX_SNIPPET = 64 * 1024;
+var MAX_CONTEXT_LINES = 3;
 var MAX_FOCUS = 2e3;
 var MAX_REF = 1024;
 var MAX_OVERRIDES = 1e3;
@@ -38021,11 +38022,11 @@ var ReviewServer = class {
         return sendJson(res, 202, { groupings: this.groupings });
       }
       case "POST threads": {
-        const { anchor: anchor2, snippet, body, single } = await readJson(req);
-        if (!isComment(body, single) || !isAnchor(anchor2) || !isText(snippet, MAX_SNIPPET)) {
+        const { anchor: anchor2, snippet, context, body, single } = await readJson(req);
+        if (!isComment(body, single) || !isAnchor(anchor2) || !isText(snippet, MAX_SNIPPET) || !isContext(context)) {
           return sendJson(res, 400, { error: "Invalid comment" });
         }
-        return sendJson(res, 201, { thread: threads.create(anchor2, snippet, body.trim(), single === true) });
+        return sendJson(res, 201, { thread: threads.create(anchor2, snippet, context, body.trim(), single === true) });
       }
       case "POST threads/thread": {
         const { body, single } = await readJson(req);
@@ -38166,6 +38167,10 @@ function isAnchor(a) {
   if (a.commit !== null && !(typeof a.commit === "string" && SHA.test(a.commit))) return false;
   if (a.side === null) return a.start === null && a.end === null;
   return (a.side === "old" || a.side === "new") && line(a.start) && line(a.end) && a.start <= a.end;
+}
+function isContext(c) {
+  const lines = (v) => Array.isArray(v) && v.length <= MAX_CONTEXT_LINES && v.every((l) => isText(l, MAX_SNIPPET));
+  return c === null || isRecord(c) && lines(c.before) && lines(c.after);
 }
 function isComparison(c) {
   return isRange(c) && Array.isArray(c.overrides) && c.overrides.length <= MAX_OVERRIDES && c.overrides.every((o) => isRange(o) && isText(o.dir, MAX_REF, true));

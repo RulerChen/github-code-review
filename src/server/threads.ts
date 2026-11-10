@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { lineRange, MENTION } from "../shared/comments.js";
 import { describeComparison } from "../shared/comparison.js";
-import type { Thread, ThreadAnchor, ThreadComment } from "../shared/types.js";
+import type { Thread, ThreadAnchor, ThreadComment, ThreadContext } from "../shared/types.js";
 import { errorMessage } from "../shared/util.js";
 import { ask } from "./claude.js";
 
@@ -47,8 +47,8 @@ export class RepoThreads {
     return () => this.listeningListeners.delete(fn);
   }
 
-  create(anchor: ThreadAnchor, snippet: string, body: string, single: boolean): Thread {
-    const thread: Thread = { id: newId(), rev: 0, anchor, snippet, comments: [] };
+  create(anchor: ThreadAnchor, snippet: string, context: ThreadContext | null, body: string, single: boolean): Thread {
+    const thread: Thread = { id: newId(), rev: 0, anchor, snippet, context, comments: [] };
     this.threads.push(thread);
     this.addComment(thread, body, single);
     return thread;

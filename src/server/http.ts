@@ -7,7 +7,7 @@ import { promisify } from "node:util";
 import { gzip } from "node:zlib";
 import { computeDiff, diffVersion, listRefs } from "../engine/diff.js";
 import { comparisonFromQuery, comparisonQuery, isFor } from "../shared/comparison.js";
-import type { Comparison, DiffResult, FileDiff, Grouping, Review, Thread, ThreadAnchor, Topic, ViewData } from "../shared/types.js";
+import type { Comparison, DiffResult, FileDiff, Grouping, Review, Thread, ThreadAnchor, ThreadContext, Topic, ViewData } from "../shared/types.js";
 import { errorMessage, isRecord, sum } from "../shared/util.js";
 import { groupChanges } from "./group.js";
 import { RepoThreads } from "./threads.js";
@@ -43,6 +43,7 @@ const PORT_COUNT = 10;
 const MAX_REQUEST_BYTES = 256 * 1024;
 const MAX_COMMENT = 20 * 1024;
 const MAX_SNIPPET = 64 * 1024;
+const MAX_CONTEXT_LINES = 3;
 const MAX_FOCUS = 2000;
 const MAX_REF = 1024;
 const MAX_OVERRIDES = 1000;
@@ -281,11 +282,11 @@ export class ReviewServer {
         return sendJson(res, 202, { groupings: this.groupings });
       }
       case "POST threads": {
-        const { anchor, snippet, body, single } = await readJson(req);
-        if (!isComment(body, single) || !isAnchor(anchor) || !isText(snippet, MAX_SNIPPET)) {
+        const { anchor, snippet, context, body, single } = await readJson(req);
+        if (!isComment(body, single) || !isAnchor(anchor) || !isText(snippet, MAX_SNIPPET) || !isContext(context)) {
           return sendJson(res, 400, { error: "Invalid comment" });
         }
-        return sendJson(res, 201, { thread: threads.create(anchor, snippet, body.trim(), single === true) });
+        return sendJson(res, 201, { thread: threads.create(anchor, snippet, context, body.trim(), single === true) });
       }
       case "POST threads/thread": {
         const { body, single } = await readJson(req);
@@ -439,6 +440,11 @@ function isAnchor(a: unknown): a is ThreadAnchor {
   if (a.commit !== null && !(typeof a.commit === "string" && SHA.test(a.commit))) return false;
   if (a.side === null) return a.start === null && a.end === null;
   return (a.side === "old" || a.side === "new") && line(a.start) && line(a.end) && (a.start as number) <= (a.end as number);
+}
+
+function isContext(c: unknown): c is ThreadContext | null {
+  const lines = (v: unknown) => Array.isArray(v) && v.length <= MAX_CONTEXT_LINES && v.every((l) => isText(l, MAX_SNIPPET));
+  return c === null || (isRecord(c) && lines(c.before) && lines(c.after));
 }
 
 function isComparison(c: unknown): c is Comparison {
