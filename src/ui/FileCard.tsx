@@ -9,6 +9,7 @@ import { CollapseButton, CommentButton, CopyButton, ViewedToggle } from "./contr
 import { DiffTable, hasLine, type OnExpand, toSplitRows, twoExpanders } from "./DiffTable";
 import { highlight, languageFor, type TokenLines } from "./highlight";
 import { useAction } from "./hooks";
+import { isOutdated } from "./locate";
 import { showLineTarget, useLineTarget } from "./Search";
 
 const AUTO_LOAD_LINES = 400;
@@ -139,9 +140,9 @@ export const FileCard = memo(function FileCard({ file: next, blocks: nextBlocks 
 
   const threads = threadsFor(file.path);
   const fileThreads = threads.filter((t) => t.anchor.side === null);
-  const unplaced = partial
-    ? []
-    : threads.filter((t) => t.anchor.side !== null && (!onShownVersion(t, versions) || !hasLine(hunks, t.anchor.side, t.anchor.end)));
+  const unplaced = threads.filter(
+    (t) => t.anchor.side !== null && (partial ? isOutdated(t) : !onShownVersion(t, versions) || !hasLine(hunks, t.anchor.side, t.anchor.end)),
+  );
   const cheap = deferred || hunks.length === 0;
   const additions = partial ? sum(blocks, (b) => b.newCount) : file.additions;
   const deletions = partial ? sum(blocks, (b) => b.oldCount) : file.deletions;
