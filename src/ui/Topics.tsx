@@ -85,12 +85,18 @@ export function topicShows(topic: TopicView, thread: Thread, versions: CommentsA
 interface SectionProps {
   topic: TopicView;
   viewed: boolean;
+  opening: { anchor: string } | null;
   onToggleViewed: () => void;
 }
 
-export function TopicSection({ topic, viewed, onToggleViewed }: SectionProps) {
+export function TopicSection({ topic, viewed, opening, onToggleViewed }: SectionProps) {
   const [collapsed, setCollapsed] = useState(viewed || !topic.related);
   useEffect(() => setCollapsed(viewed || !topic.related), [viewed]);
+  const [opened, setOpened] = useState(opening);
+  if (opening !== opened) {
+    setOpened(opening);
+    if (opening?.anchor.startsWith(`${topic.anchor}-`)) setCollapsed(false);
+  }
   const { revealSeq, peekReveal, versions, threadsForTopic, create } = useComments();
   useEffect(() => {
     const thread = peekReveal();
@@ -168,27 +174,28 @@ export function TopicSection({ topic, viewed, onToggleViewed }: SectionProps) {
 
 interface ListProps {
   topics: TopicView[];
-  active: string | null;
   isViewed: (topic: TopicView) => boolean;
   onSelect: (anchor: string) => void;
 }
 
-export function TopicList({ topics, active, isViewed, onSelect }: ListProps) {
+export function TopicList({ topics, isViewed, onSelect }: ListProps) {
   const firstUnrelated = topics.findIndex((t) => !t.related);
   return (
-    <ul className="topic-list">
-      {topics.map((t, i) => (
-        <li key={t.key}>
-          {i === firstUnrelated && <p className="topic-list-heading">Not related to the focus</p>}
-          <button
-            className={`topic-link${active === t.anchor ? " is-active" : ""}${isViewed(t) ? " is-viewed" : ""}`}
-            onClick={() => onSelect(t.anchor)}
-          >
-            <span className="topic-link-title">{t.title}</span>
-            <span className="topic-link-count">{t.changeCount}</span>
-          </button>
-        </li>
-      ))}
-    </ul>
+    <nav className="topic-list" aria-label="Topics">
+      <h2 className="topic-list-title">Topics</h2>
+      <ul>
+        {topics.map((t, i) => (
+          <li key={t.key}>
+            {i === firstUnrelated && <p className="topic-list-heading">Not related to the focus</p>}
+            <button className={`topic-link${isViewed(t) ? " is-viewed" : ""}`} onClick={() => onSelect(t.anchor)}>
+              <span className="topic-link-title">{t.title}</span>
+              <span className="topic-link-meta">
+                {plural(t.changeCount, "change")} in {plural(t.parts.length, "file")}
+              </span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </nav>
   );
 }

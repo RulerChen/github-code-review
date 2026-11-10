@@ -933,13 +933,34 @@ button {
 }
 
 .topic-list {
+  margin-bottom: 24px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.topic-list-title {
+  margin: 0;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border-muted);
+  background: var(--bg-subtle);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.topic-list ul {
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
+.topic-list li + li {
+  border-top: 1px solid var(--border-muted);
+}
+
 .topic-list-heading {
-  margin: 16px 8px 4px;
+  margin: 0;
+  padding: 8px 16px 0;
   color: var(--fg-muted);
   font-size: 12px;
   font-weight: 600;
@@ -947,12 +968,11 @@ button {
 
 .topic-link {
   display: flex;
-  align-items: flex-start;
-  gap: 8px;
+  align-items: baseline;
+  gap: 16px;
   width: 100%;
-  padding: 6px 8px;
+  padding: 8px 16px;
   border: 0;
-  border-radius: 6px;
   background: none;
   text-align: left;
   cursor: pointer;
@@ -960,10 +980,6 @@ button {
 
 .topic-link:hover {
   background: var(--bg-subtle);
-}
-
-.topic-link.is-active {
-  background: var(--accent-subtle);
 }
 
 .topic-link.is-viewed .topic-link-title {
@@ -975,14 +991,11 @@ button {
   min-width: 0;
 }
 
-.topic-link-count {
+.topic-link-meta {
   flex: none;
-  min-width: 22px;
-  padding: 0 6px;
-  border-radius: 10px;
-  background: var(--bar-neutral);
+  color: var(--fg-muted);
   font-size: 12px;
-  text-align: center;
+  white-space: nowrap;
 }
 
 .markdown > :first-child {

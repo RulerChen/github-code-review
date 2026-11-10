@@ -246,11 +246,15 @@ export function App({ viewId }: Props) {
         .map((file, i) => ({ file, anchor: `file-${i}` })),
     [diff],
   );
-  const shown = useMemo(() => {
-    const q = filter.trim().toLowerCase();
-    return q ? entries.filter((e) => e.file.path.toLowerCase().includes(q)) : entries;
-  }, [entries, filter]);
+  const shown = useMemo(() => matching(entries, filter), [entries, filter]);
   const topics = useMemo(() => (review ? buildTopics(review, entries.map((e) => e.file)) : []), [review, entries]);
+  const topicFiles = useMemo(
+    () =>
+      topics
+        .flatMap((t) => t.parts.filter((p) => t.firstFor.has(p.file.path)))
+        .sort((a, b) => comparePaths(a.file.path, b.file.path)),
+    [topics],
+  );
 
   const view: Tab = tab === "topics" ? "topics" : tab === "commits" && diff?.commits.length ? "commits" : "files";
   const topicTab = view === "topics" && topics.length > 0;
@@ -277,6 +281,12 @@ export function App({ viewId }: Props) {
     pendingSelect.current = null;
     if (target) go(target, setActive);
   }, [view]);
+
+  const [opening, setOpening] = useState<{ anchor: string } | null>(null);
+  useLayoutEffect(() => {
+    const target = opening && document.getElementById(opening.anchor);
+    if (target) go(target, setActive);
+  }, [opening]);
 
   useLayoutEffect(() => {
     if (!resetScroll.current) return;
@@ -327,15 +337,18 @@ export function App({ viewId }: Props) {
     (t: TopicView) => t.key,
     (t) => t.signature,
   );
+  const isTopicFileViewed = (f: FileDiff) =>
+    topics.every((t) => isTopicViewed(t) || !t.parts.some((p) => p.file.path === f.path));
 
   const select = (anchor: string) => {
-    if (view === "commits") {
+    if (!topicTab && view !== "files") {
       pendingSelect.current = anchor;
       setTab("files");
       return;
     }
     const el = document.getElementById(anchor);
     if (el) go(el, setActive);
+    else if (topicTab) setOpening({ anchor });
     else setActive(anchor);
   };
 
@@ -359,7 +372,6 @@ export function App({ viewId }: Props) {
   }
   if (!diff) return <Notice title="Loading diff…" />;
 
-  const byTopic = view === "topics";
   const firstUnrelated = topics.findIndex((t) => !t.related);
 
   return (
@@ -386,23 +398,22 @@ export function App({ viewId }: Props) {
 
         <div className={`layout${conv.open ? " with-conversations" : ""}${sidebarOpen ? "" : " no-sidebar"}`}>
           <aside className="sidebar" hidden={!sidebarOpen}>
-            {byTopic ? (
-              <div className="view" key="topics">
-                <TopicList topics={topics} active={active} isViewed={isTopicViewed} onSelect={select} />
-              </div>
-            ) : (
-              <div className="view" key="files">
-                <input
-                  className="filter"
-                  type="search"
-                  placeholder="Filter files"
-                  value={filter}
-                  onChange={(e) => setFilter(e.target.value)}
-                  aria-label="Filter files"
-                />
-                <FileTree entries={shown} active={view === "files" ? active : null} isViewed={isViewed} onSelect={select} />
-              </div>
-            )}
+            <div className="view">
+              <input
+                className="filter"
+                type="search"
+                placeholder="Filter files"
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+                aria-label="Filter files"
+              />
+              <FileTree
+                entries={topicTab ? matching(topicFiles, filter) : shown}
+                active={view === "commits" ? null : active}
+                isViewed={topicTab ? isTopicFileViewed : isViewed}
+                onSelect={select}
+              />
+            </div>
           </aside>
 
           <main className={`files${switching ? " is-switching" : ""}`}>
@@ -423,10 +434,16 @@ export function App({ viewId }: Props) {
                   onPick={showReview}
                   onGroup={group}
                 />
+                {topics.length > 0 && <TopicList topics={topics} isViewed={isTopicViewed} onSelect={select} />}
                 {topics.map((t, i) => (
                   <Fragment key={t.key}>
                     {i === firstUnrelated && <h2 className="topic-divider">Not related to the focus</h2>}
-                    <TopicSection topic={t} viewed={isTopicViewed(t)} onToggleViewed={() => toggleTopicViewed(t)} />
+                    <TopicSection
+                      topic={t}
+                      viewed={isTopicViewed(t)}
+                      opening={opening}
+                      onToggleViewed={() => toggleTopicViewed(t)}
+                    />
                   </Fragment>
                 ))}
               </div>
@@ -456,6 +473,11 @@ export function App({ viewId }: Props) {
       {help && <ShortcutHelp onClose={() => setHelp(false)} />}
     </CommentsContext.Provider>
   );
+}
+
+function matching<T extends { file: FileDiff }>(list: T[], filter: string): T[] {
+  const q = filter.trim().toLowerCase();
+  return q ? list.filter((e) => e.file.path.toLowerCase().includes(q)) : list;
 }
 
 function mergeThreads(base: Thread[], updates: Thread[]): Thread[] {
