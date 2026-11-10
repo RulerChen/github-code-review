@@ -1,4 +1,4 @@
-import { createContext, type FormEvent, type KeyboardEvent, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createContext, type FormEvent, type KeyboardEvent, memo, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { lineRange, MENTION } from "../shared/comments";
 import type { FileAnchor, LineAnchor, Thread, ThreadAnchor, ThreadComment, TopicAnchor } from "../shared/types";
 import { pin } from "./anchor";
@@ -26,9 +26,13 @@ export interface CommentsApi {
   takeReveal: (threadId: string) => boolean;
 }
 
+export type CommentActions = Pick<CommentsApi, "versions" | "create" | "reply" | "edit" | "remove">;
+
 export const CommentsContext = createContext<CommentsApi | null>(null);
+export const CommentActionsContext = createContext<CommentActions | null>(null);
 
 export const useComments = () => useContext(CommentsContext)!;
+export const useCommentActions = () => useContext(CommentActionsContext)!;
 
 export const authorName = (c: ThreadComment) => (c.author === "claude" ? "Claude" : "You");
 
@@ -402,8 +406,8 @@ export function ThreadView({ thread, withVersion = false }: { thread: Thread; wi
   );
 }
 
-function CommentView({ thread, comment: c, where }: { thread: Thread; comment: ThreadComment; where: string | null }) {
-  const { edit, remove } = useComments();
+const CommentView = memo(function CommentView({ thread, comment: c, where }: { thread: Thread; comment: ThreadComment; where: string | null }) {
+  const { edit, remove } = useCommentActions();
   const [mode, setMode] = useState<"view" | "edit" | "delete">("view");
   const takesThread = thread.comments[0]?.id === c.id && thread.comments.length > 1;
 
@@ -452,7 +456,7 @@ function CommentView({ thread, comment: c, where }: { thread: Thread; comment: T
       )}
     </div>
   );
-}
+});
 
 function ConfirmDelete({ message, onCancel, onConfirm }: { message: string; onCancel: () => void; onConfirm: () => Promise<void> }) {
   const { busy, error, run } = useAction(onConfirm);

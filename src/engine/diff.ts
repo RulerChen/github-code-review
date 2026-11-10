@@ -536,6 +536,7 @@ function fileDiff(filePath: string, fields: Partial<FileDiff>): FileDiff {
     binary: false,
     tooLarge: false,
     generated: false,
+    lazy: false,
     diffTooLarge: false,
     modeChange: null,
     additions: 0,

@@ -1,4 +1,4 @@
-import { Fragment, type ReactNode } from "react";
+import { Fragment, memo, type ReactNode } from "react";
 
 const LIST_ITEM = /^\s*([-*]|\d+\.)\s+/;
 const TASK = /^\[([ xX])\]\s+/;
@@ -7,9 +7,9 @@ const HEADING = /^#{1,6}\s+/;
 const QUOTE = /^\s*>\s?/;
 const SAFE_URL = /^(https?:\/\/|mailto:)/i;
 
-export function Markdown({ text, className, base }: { text: string; className?: string; base?: string }) {
+export const Markdown = memo(function Markdown({ text, className, base }: { text: string; className?: string; base?: string }) {
   return <div className={className ? `markdown ${className}` : "markdown"}>{blocks(text, base)}</div>;
-}
+});
 
 function blocks(text: string, base: string | undefined): ReactNode[] {
   const lines = text.replace(/\r\n/g, "\n").split("\n");

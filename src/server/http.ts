@@ -3,10 +3,12 @@ import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { type AddressInfo, isIP } from "node:net";
 import path from "node:path";
+import { promisify } from "node:util";
+import { gzip } from "node:zlib";
 import { computeDiff, diffVersion, listRefs } from "../engine/diff.js";
-import { comparisonFromQuery, isFor } from "../shared/comparison.js";
-import type { Comparison, Grouping, Review, Thread, ThreadAnchor, Topic, ViewData } from "../shared/types.js";
-import { errorMessage, isRecord } from "../shared/util.js";
+import { comparisonFromQuery, comparisonQuery, isFor } from "../shared/comparison.js";
+import type { Comparison, DiffResult, FileDiff, Grouping, Review, Thread, ThreadAnchor, Topic, ViewData } from "../shared/types.js";
+import { errorMessage, isRecord, sum } from "../shared/util.js";
 import { groupChanges } from "./group.js";
 import { RepoThreads } from "./threads.js";
 
@@ -14,6 +16,16 @@ interface View {
   id: string;
   repo: string;
   compare: Comparison;
+}
+
+export interface LoadedDiff {
+  version: string;
+  diff: DiffResult;
+}
+
+interface CachedDiff extends LoadedDiff {
+  key: string;
+  chars: number;
 }
 
 const MIME: Record<string, string> = {
@@ -35,10 +47,12 @@ const MAX_FOCUS = 2000;
 const MAX_REF = 1024;
 const MAX_OVERRIDES = 1000;
 const MAX_PATH = 4096;
+const MAX_CACHED_DIFFS = 2;
+const MAX_CACHED_CHARS = 64 * 1024 * 1024;
 
 const PING_MS = 25_000;
 const PAGE = /^\/v\/[\w-]+$/;
-const API = /^\/api\/views\/([\w-]+)\/(diff|events|refs|threads|review|wait|version|topics)(?:\/([\w-]+)\/comments(?:\/([\w-]+))?)?$/;
+const API = /^\/api\/views\/([\w-]+)\/(diff|file|events|refs|threads|review|wait|version|topics)(?:\/([\w-]+)\/comments(?:\/([\w-]+))?)?$/;
 const SHA = /^[0-9a-f]{40,64}$/;
 
 const sshAddress = process.env.SSH_CONNECTION?.split(" ")[2] ?? "";
@@ -54,6 +68,7 @@ export class ReviewServer {
   private readonly reviews: Review[] = [];
   private readonly groupings: Grouping[] = [];
   private readonly pages = new Set<(event: string, data: unknown) => void>();
+  private diffs: CachedDiff[] = [];
   private readonly token = randomBytes(32).toString("base64url");
   private readonly uiDir: string;
   private server: Server | null = null;
@@ -105,6 +120,23 @@ export class ReviewServer {
     return view;
   }
 
+  keepDiff(repo: string, compare: Comparison, loaded: LoadedDiff): void {
+    const key = `${repo}\0${comparisonQuery(compare)}`;
+    const chars = sum(loaded.diff.files, (f) => (f.oldContent?.length ?? 0) + (f.newContent?.length ?? 0));
+    this.diffs = [{ ...loaded, key, chars }, ...this.diffs.filter((d) => d.key !== key)].slice(0, MAX_CACHED_DIFFS);
+    while (this.diffs.length && sum(this.diffs, (d) => d.chars) > MAX_CACHED_CHARS) this.diffs.pop();
+  }
+
+  private async loadDiff(repo: string, compare: Comparison): Promise<LoadedDiff> {
+    const key = `${repo}\0${comparisonQuery(compare)}`;
+    const version = await diffVersion(repo, compare);
+    const cached = this.diffs.find((d) => d.key === key && d.version === version);
+    if (cached) return cached;
+    const loaded = { version, diff: await computeDiff(repo, compare) };
+    this.keepDiff(repo, compare, loaded);
+    return loaded;
+  }
+
   repoThreads(): { repo: string; threads: RepoThreads; view: View }[] {
     const newest = new Map<string, View>();
     for (const v of this.views.values()) newest.set(v.repo, v);
@@ -143,7 +175,7 @@ export class ReviewServer {
 
     void (async () => {
       try {
-        const diff = await computeDiff(view.repo, compare);
+        const { diff } = await this.loadDiff(view.repo, compare);
         if (!diff.files.length) throw new Error("This comparison has no changes to group.");
         const onActivity = (activity: string) => {
           job.activity = activity;
@@ -214,10 +246,10 @@ export class ReviewServer {
 
     switch (`${req.method} ${target}`) {
       case "GET diff": {
-        const version = await diffVersion(view.repo, compare);
-        const diff = await computeDiff(view.repo, compare);
+        const { version, diff } = await this.loadDiff(view.repo, compare);
+        const commented = new Set(threads.threads.map((t) => (t.anchor.side === null ? null : t.anchor.path)));
         const data: ViewData = {
-          diff,
+          diff: { ...diff, files: diff.files.map((f) => (f.generated && f.hunks.length > 0 && !commented.has(f.path) ? withoutLines(f) : f)) },
           version,
           opened: view.compare,
           reviews: this.reviews,
@@ -225,7 +257,14 @@ export class ReviewServer {
           threads: threads.threads,
           listening: threads.listening,
         };
-        return sendJson(res, 200, data);
+        const remote = SSH_HOST !== null && /\bgzip\b/.test(String(req.headers["accept-encoding"]));
+        return remote ? sendGzipped(res, data) : sendJson(res, 200, data);
+      }
+      case "GET file": {
+        const { version, diff } = await this.loadDiff(view.repo, compare);
+        const file = diff.files.find((f) => f.path === query.get("path"));
+        if (!file || version !== query.get("version")) return sendJson(res, 409, { error: "The diff changed. Load the new changes first." });
+        return sendJson(res, 200, { file });
       }
       case "GET version":
         return sendJson(res, 200, { version: await diffVersion(view.repo, compare) });
@@ -420,13 +459,26 @@ function sendThread(res: ServerResponse, thread: Thread | null, missing: string)
   else sendJson(res, 404, { error: missing });
 }
 
+function withoutLines(file: FileDiff): FileDiff {
+  const blocks = file.blocks.map((b) => ({ ...b, del: [], add: [] }));
+  return { ...file, lazy: true, blocks, hunks: [], oldContent: null, newContent: null };
+}
+
+const JSON_HEADERS = {
+  "Content-Type": "application/json; charset=utf-8",
+  "Cache-Control": "no-store",
+  "X-Content-Type-Options": "nosniff",
+};
+
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
-  res.writeHead(status, {
-    "Content-Type": "application/json; charset=utf-8",
-    "Cache-Control": "no-store",
-    "X-Content-Type-Options": "nosniff",
-  });
+  res.writeHead(status, JSON_HEADERS);
   res.end(JSON.stringify(body));
+}
+
+async function sendGzipped(res: ServerResponse, body: unknown): Promise<void> {
+  const packed = await promisify(gzip)(JSON.stringify(body), { level: 1 });
+  res.writeHead(200, { ...JSON_HEADERS, "Content-Encoding": "gzip" });
+  res.end(packed);
 }
 
 function sendText(res: ServerResponse, status: number, body: string): void {

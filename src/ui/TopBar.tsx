@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from "react";
+import { memo, useLayoutEffect, useRef, useState } from "react";
 import type { FileDiff } from "../shared/types";
 import { plural, sum } from "../shared/util";
 import { MoonIcon, SidebarIcon, SunIcon, SyncIcon } from "./icons";
@@ -40,7 +40,7 @@ export function SidebarToggle({ open, onToggle }: { open: boolean; onToggle: () 
   );
 }
 
-export function ChangeStats({ files }: { files: FileDiff[] }) {
+export const ChangeStats = memo(function ChangeStats({ files }: { files: FileDiff[] }) {
   return (
     <div className="topbar-stats">
       <span>{plural(files.length, "file")} changed</span>
@@ -48,7 +48,7 @@ export function ChangeStats({ files }: { files: FileDiff[] }) {
       <span className="count-del">−{sum(files, (f) => f.deletions).toLocaleString()}</span>
     </div>
   );
-}
+});
 
 export function RefreshButton({ stale, loading, onClick }: { stale: boolean; loading: boolean; onClick: () => void }) {
   const label = "Load new changes";
@@ -61,6 +61,7 @@ export function RefreshButton({ stale, loading, onClick }: { stale: boolean; loa
       title={label}
     >
       <SyncIcon />
+      <span className="refresh-label">{label}</span>
     </button>
   );
 }

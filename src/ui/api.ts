@@ -1,5 +1,5 @@
 import { comparisonQuery } from "../shared/comparison";
-import type { Comparison, Grouping, RefList, Thread, ThreadAnchor, ViewData } from "../shared/types";
+import type { Comparison, FileDiff, Grouping, RefList, Thread, ThreadAnchor, ViewData } from "../shared/types";
 
 export class ApiError extends Error {
   constructor(
@@ -36,6 +36,13 @@ const threadRequest = async (url: string, method: string, payload: unknown) =>
 
 export function fetchView(viewId: string, compare: Comparison | null): Promise<ViewData> {
   return request<ViewData>(withComparison(viewUrl(viewId, "diff"), compare), (b) => !!b.diff && !!b.opened);
+}
+
+export async function fetchFile(viewId: string, compare: Comparison | null, version: string, path: string): Promise<FileDiff> {
+  const params = new URLSearchParams(compare ? comparisonQuery(compare) : "");
+  params.set("path", path);
+  params.set("version", version);
+  return (await request<{ file: FileDiff }>(`${viewUrl(viewId, "file")}?${params}`, (b) => !!b.file)).file;
 }
 
 export async function fetchVersion(viewId: string, compare: Comparison | null): Promise<string> {

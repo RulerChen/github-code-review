@@ -1,5 +1,6 @@
-import { type CSSProperties, useState } from "react";
+import { type CSSProperties, memo, useEffect, useMemo, useRef, useState } from "react";
 import type { FileDiff } from "../shared/types";
+import { useIsActiveFile } from "./active";
 import { ChevronIcon, DirIcon, FileIcon, StatusIcon } from "./icons";
 import { basename } from "./paths";
 
@@ -42,12 +43,11 @@ function compress(node: DirNode): DirNode {
 
 interface Props {
   entries: { file: FileDiff; anchor: string }[];
-  active: string | null;
   isViewed: (file: FileDiff) => boolean;
   onSelect: (anchor: string) => void;
 }
 
-export function FileTree({ entries, active, isViewed, onSelect }: Props) {
+export const FileTree = memo(function FileTree({ entries, isViewed, onSelect }: Props) {
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   const toggle = (path: string) =>
     setCollapsed((prev) => {
@@ -55,21 +55,20 @@ export function FileTree({ entries, active, isViewed, onSelect }: Props) {
       if (!next.delete(path)) next.add(path);
       return next;
     });
-  const tree = buildTree(entries);
+  const tree = useMemo(() => buildTree(entries), [entries]);
   if (entries.length === 0) return <p className="tree-empty">No matching files.</p>;
 
   return (
     <ul className="tree" role="tree">
-      <TreeLevel node={tree} path="" depth={0} active={active} isViewed={isViewed} onSelect={onSelect} collapsed={collapsed} onToggle={toggle} />
+      <TreeLevel node={tree} path="" depth={0} isViewed={isViewed} onSelect={onSelect} collapsed={collapsed} onToggle={toggle} />
     </ul>
   );
-}
+});
 
 interface LevelProps {
   node: DirNode;
   path: string;
   depth: number;
-  active: string | null;
   isViewed: (file: FileDiff) => boolean;
   onSelect: (anchor: string) => void;
   collapsed: ReadonlySet<string>;
@@ -77,7 +76,7 @@ interface LevelProps {
 }
 
 function TreeLevel({ node, path, depth, ...rest }: LevelProps) {
-  const { active, isViewed, onSelect, collapsed, onToggle } = rest;
+  const { isViewed, onSelect, collapsed, onToggle } = rest;
   const indent = { "--depth": depth } as CSSProperties;
   return (
     <>
@@ -104,20 +103,40 @@ function TreeLevel({ node, path, depth, ...rest }: LevelProps) {
           );
         })}
       {node.files.map(({ file, anchor }) => (
-        <li key={anchor} role="treeitem">
-          <button
-            className={`tree-file${active === anchor ? " is-active" : ""}${isViewed(file) ? " is-viewed" : ""}`}
-            style={indent}
-            onClick={() => onSelect(anchor)}
-            title={file.path}
-          >
-            <span className="tree-toggle" />
-            <FileIcon className="tree-icon" />
-            <span className="tree-name">{basename(file.path)}</span>
-            <StatusIcon status={file.status} />
-          </button>
-        </li>
+        <TreeFile key={anchor} file={file} viewed={isViewed(file)} indent={indent} onSelect={() => onSelect(anchor)} />
       ))}
     </>
+  );
+}
+
+interface FileProps {
+  file: FileDiff;
+  viewed: boolean;
+  indent: CSSProperties;
+  onSelect: () => void;
+}
+
+function TreeFile({ file, viewed, indent, onSelect }: FileProps) {
+  const active = useIsActiveFile(file.path);
+  const ref = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (active) ref.current?.scrollIntoView({ block: "nearest" });
+  }, [active]);
+
+  return (
+    <li role="treeitem" aria-current={active || undefined}>
+      <button
+        className={`tree-file${active ? " is-active" : ""}${viewed ? " is-viewed" : ""}`}
+        style={indent}
+        onClick={onSelect}
+        title={file.path}
+        ref={ref}
+      >
+        <span className="tree-toggle" />
+        <FileIcon className="tree-icon" />
+        <span className="tree-name">{basename(file.path)}</span>
+        <StatusIcon status={file.status} />
+      </button>
+    </li>
   );
 }

@@ -3,6 +3,7 @@ import { flushSync } from "react-dom";
 const UNIT = "tr, .file-body, .file-note, .file-threads, .unplaced, .topic-summary, .topic-threads, .focus, .topic-divider, section";
 const STICKY = ".file-header, .topic-header";
 const LEAF = "tr, .file-note, .topic-summary, .focus, .topic-divider";
+const SKIPPED = `${STICKY}, colgroup`;
 const READER_INPUT = ["wheel", "touchstart", "keydown", "mousedown"] as const;
 
 interface Anchor {
@@ -35,24 +36,55 @@ function firstUnder(el: Element, root: Element, y: number): Element | null {
   return walker.nextNode() as Element | null;
 }
 
+export function childUnder(parent: Element, y: number): Element | null {
+  const kids = parent.children;
+  const under = (el: Element) => !el.matches(SKIPPED) && laidOut(el) && el.getBoundingClientRect().bottom > y;
+  if (kids.length > 8) {
+    const first = kids[0]!.matches(SKIPPED) ? 1 : 0;
+    let lo = first;
+    let hi = kids.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (kids[mid]!.getBoundingClientRect().bottom > y) hi = mid;
+      else lo = mid + 1;
+    }
+    const before = kids[lo - 1];
+    const sorted = (lo === kids.length || under(kids[lo]!)) && (lo === first || (laidOut(before!) && !under(before!)));
+    if (sorted) return kids[lo] ?? null;
+  }
+  for (let i = 0; i < kids.length; i++) {
+    if (under(kids[i]!)) return kids[i]!;
+  }
+  return null;
+}
+
 function pick(): Element | null {
   const main = document.querySelector("main.files");
   if (!main) return null;
-  const box = main.getBoundingClientRect();
-  const x = box.left + box.width / 2;
   let y = topBar() + 1;
+  let scope = main;
+  let el: Element | null = null;
+  let last: Element | null = null;
 
-  for (let header = document.elementFromPoint(x, y)?.closest(STICKY); header && main.contains(header); ) {
-    y = header.getBoundingClientRect().bottom + 1;
-    const below = document.elementFromPoint(x, y)?.closest(STICKY);
-    header = below === header ? null : below;
+  for (;;) {
+    const child = childUnder(scope, y);
+    if (!child) break;
+    last = child;
+    const r = child.getBoundingClientRect();
+    const header = child.firstElementChild;
+    const bar = header?.matches(STICKY) && laidOut(header) ? header.getBoundingClientRect() : null;
+    if (bar && bar.top <= y && bar.bottom + 1 > y) {
+      y = bar.bottom + 1;
+      if (r.bottom <= y) continue;
+    } else if (r.top > y - 1) {
+      if (child.matches(UNIT)) el = child;
+      break;
+    }
+    if (child.matches(UNIT)) el = child;
+    if (child.matches(LEAF)) break;
+    scope = child;
   }
-
-  const hit = document.elementsFromPoint(x, y).find((e) => e !== main && main.contains(e) && !e.closest(STICKY));
-  let el = hit?.closest(UNIT) ?? null;
-  if (!el || !main.contains(el)) {
-    el = [...(hit ?? main).children].find((c) => laidOut(c) && c.getBoundingClientRect().bottom > y) ?? null;
-  }
+  el ??= last;
 
   const r = el?.getBoundingClientRect();
   if (el && r && r.top < y - 1 && !(el.matches(LEAF) && y - r.top < r.bottom - y)) el = firstUnder(el, main, y) ?? el;
@@ -82,6 +114,10 @@ export function startAnchoring(): () => void {
     window.removeEventListener("scroll", settle);
     anchor = null;
   };
+}
+
+export function pinnedElement(): Element | null {
+  return laidOut(pinned) ? pinned : null;
 }
 
 export function scrollToTop(): void {

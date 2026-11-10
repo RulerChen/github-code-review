@@ -36684,6 +36684,17 @@ var rangeOf = (r) => ({ base: r.base, head: r.head, threeDot: r.threeDot });
 var sameRange = (a, b) => a.base === b.base && a.head === b.head && a.threeDot === b.threeDot;
 var rangeFor = (c, dir) => c.overrides.find((o) => o.dir === dir) ?? rangeOf(c);
 var sortOverrides = (overrides) => [...overrides].sort((a, b) => compareText(a.dir, b.dir));
+function comparisonQuery(c) {
+  const params = new URLSearchParams();
+  const add = (r, suffix) => {
+    params.set(`base${suffix}`, r.base);
+    if (r.head !== null) params.set(`head${suffix}`, r.head);
+    if (!r.threeDot) params.set(`dots${suffix}`, "2");
+  };
+  add(c, "");
+  for (const o of c.overrides) add(o, `@${o.dir}`);
+  return params.toString();
+}
 function comparisonFromQuery(params) {
   const read = (suffix) => {
     const base = params.get(`base${suffix}`);
@@ -37228,6 +37239,7 @@ function fileDiff(filePath, fields) {
     binary: false,
     tooLarge: false,
     generated: false,
+    lazy: false,
     diffTooLarge: false,
     modeChange: null,
     additions: 0,
@@ -37401,6 +37413,8 @@ import { readFile as readFile2 } from "node:fs/promises";
 import { createServer } from "node:http";
 import { isIP } from "node:net";
 import path3 from "node:path";
+import { promisify } from "node:util";
+import { gzip } from "node:zlib";
 
 // src/shared/comments.ts
 var MENTION = /(^|\s)@claude\b/i;
@@ -37804,9 +37818,11 @@ var MAX_FOCUS = 2e3;
 var MAX_REF = 1024;
 var MAX_OVERRIDES = 1e3;
 var MAX_PATH = 4096;
+var MAX_CACHED_DIFFS = 2;
+var MAX_CACHED_CHARS = 64 * 1024 * 1024;
 var PING_MS = 25e3;
 var PAGE = /^\/v\/[\w-]+$/;
-var API = /^\/api\/views\/([\w-]+)\/(diff|events|refs|threads|review|wait|version|topics)(?:\/([\w-]+)\/comments(?:\/([\w-]+))?)?$/;
+var API = /^\/api\/views\/([\w-]+)\/(diff|file|events|refs|threads|review|wait|version|topics)(?:\/([\w-]+)\/comments(?:\/([\w-]+))?)?$/;
 var SHA = /^[0-9a-f]{40,64}$/;
 var sshAddress = process.env.SSH_CONNECTION?.split(" ")[2] ?? "";
 var SSH_HOST = isIP(sshAddress) ? sshAddress : null;
@@ -37817,6 +37833,7 @@ var ReviewServer = class {
   reviews = [];
   groupings = [];
   pages = /* @__PURE__ */ new Set();
+  diffs = [];
   token = randomBytes2(32).toString("base64url");
   uiDir;
   server = null;
@@ -37861,6 +37878,21 @@ var ReviewServer = class {
     this.broadcast("view", { view: id, repo, compare });
     return view;
   }
+  keepDiff(repo, compare, loaded) {
+    const key = `${repo}\0${comparisonQuery(compare)}`;
+    const chars = sum(loaded.diff.files, (f) => (f.oldContent?.length ?? 0) + (f.newContent?.length ?? 0));
+    this.diffs = [{ ...loaded, key, chars }, ...this.diffs.filter((d) => d.key !== key)].slice(0, MAX_CACHED_DIFFS);
+    while (this.diffs.length && sum(this.diffs, (d) => d.chars) > MAX_CACHED_CHARS) this.diffs.pop();
+  }
+  async loadDiff(repo, compare) {
+    const key = `${repo}\0${comparisonQuery(compare)}`;
+    const version2 = await diffVersion(repo, compare);
+    const cached2 = this.diffs.find((d) => d.key === key && d.version === version2);
+    if (cached2) return cached2;
+    const loaded = { version: version2, diff: await computeDiff(repo, compare) };
+    this.keepDiff(repo, compare, loaded);
+    return loaded;
+  }
   repoThreads() {
     const newest = /* @__PURE__ */ new Map();
     for (const v of this.views.values()) newest.set(v.repo, v);
@@ -37893,7 +37925,7 @@ var ReviewServer = class {
     this.broadcast("groupings", this.groupings);
     void (async () => {
       try {
-        const diff = await computeDiff(view.repo, compare);
+        const { diff } = await this.loadDiff(view.repo, compare);
         if (!diff.files.length) throw new Error("This comparison has no changes to group.");
         const onActivity = (activity) => {
           job.activity = activity;
@@ -37954,10 +37986,10 @@ var ReviewServer = class {
     const target = commentId ? `${route}/comment` : threadId ? `${route}/thread` : route;
     switch (`${req.method} ${target}`) {
       case "GET diff": {
-        const version2 = await diffVersion(view.repo, compare);
-        const diff = await computeDiff(view.repo, compare);
+        const { version: version2, diff } = await this.loadDiff(view.repo, compare);
+        const commented = new Set(threads.threads.map((t) => t.anchor.side === null ? null : t.anchor.path));
         const data = {
-          diff,
+          diff: { ...diff, files: diff.files.map((f) => f.generated && f.hunks.length > 0 && !commented.has(f.path) ? withoutLines2(f) : f) },
           version: version2,
           opened: view.compare,
           reviews: this.reviews,
@@ -37965,7 +37997,14 @@ var ReviewServer = class {
           threads: threads.threads,
           listening: threads.listening
         };
-        return sendJson(res, 200, data);
+        const remote = SSH_HOST !== null && /\bgzip\b/.test(String(req.headers["accept-encoding"]));
+        return remote ? sendGzipped(res, data) : sendJson(res, 200, data);
+      }
+      case "GET file": {
+        const { version: version2, diff } = await this.loadDiff(view.repo, compare);
+        const file2 = diff.files.find((f) => f.path === query.get("path"));
+        if (!file2 || version2 !== query.get("version")) return sendJson(res, 409, { error: "The diff changed. Load the new changes first." });
+        return sendJson(res, 200, { file: file2 });
       }
       case "GET version":
         return sendJson(res, 200, { version: await diffVersion(view.repo, compare) });
@@ -38138,13 +38177,23 @@ function sendThread(res, thread, missing) {
   if (thread) sendJson(res, 200, { thread });
   else sendJson(res, 404, { error: missing });
 }
+function withoutLines2(file2) {
+  const blocks = file2.blocks.map((b) => ({ ...b, del: [], add: [] }));
+  return { ...file2, lazy: true, blocks, hunks: [], oldContent: null, newContent: null };
+}
+var JSON_HEADERS = {
+  "Content-Type": "application/json; charset=utf-8",
+  "Cache-Control": "no-store",
+  "X-Content-Type-Options": "nosniff"
+};
 function sendJson(res, status, body) {
-  res.writeHead(status, {
-    "Content-Type": "application/json; charset=utf-8",
-    "Cache-Control": "no-store",
-    "X-Content-Type-Options": "nosniff"
-  });
+  res.writeHead(status, JSON_HEADERS);
   res.end(JSON.stringify(body));
+}
+async function sendGzipped(res, body) {
+  const packed = await promisify(gzip)(JSON.stringify(body), { level: 1 });
+  res.writeHead(200, { ...JSON_HEADERS, "Content-Encoding": "gzip" });
+  res.end(packed);
 }
 function sendText(res, status, body) {
   res.writeHead(status, { "Content-Type": "text/plain; charset=utf-8", "X-Content-Type-Options": "nosniff" });
@@ -38177,7 +38226,7 @@ async function attempt(failure2, run) {
   }
 }
 async function openViewer(repo, compare, focus, topics, session) {
-  const diff = await computeDiff(repo, compare);
+  const [version2, diff] = await Promise.all([diffVersion(repo, compare), computeDiff(repo, compare)]);
   let grouped = null;
   let note = "";
   if (topics) {
@@ -38192,6 +38241,7 @@ ${unassigned.length} change(s) are in no topic and appear under "Other changes":
     grouped = { focus: focus?.trim() || null, topics };
   }
   const server = await getServer();
+  server.keepDiff(diff.repoRoot, compare, { version: version2, diff });
   const view = server.addView(diff.repoRoot, compare, grouped, repo, session && SESSION_ID.test(session) ? session : null);
   const shown = server.pageOpen ? "\nThe viewer page already open in the user's browser has switched to this comparison, so they do not need to open the URL again." : "";
   const failed = describeFailures(diff).map((l) => `

@@ -35,14 +35,19 @@ export function useViewed<T>(key: string | null, idOf: (item: T) => string, sign
   const { marks } = stored;
 
   const isViewed = useCallback((item: T) => marks[idOf(item)] === signatureOf(item), [marks]);
-  const toggle = (item: T) => {
-    if (key === null) return;
-    const next = { ...marks };
-    if (isViewed(item)) delete next[idOf(item)];
-    else next[idOf(item)] = signatureOf(item);
-    setStored({ key, marks: next });
-    writeStorage(key, next);
-  };
+  const toggle = useCallback(
+    (item: T) => {
+      if (key === null) return;
+      setStored((prev) => {
+        const next = { ...prev.marks };
+        if (next[idOf(item)] === signatureOf(item)) delete next[idOf(item)];
+        else next[idOf(item)] = signatureOf(item);
+        writeStorage(key, next);
+        return { key, marks: next };
+      });
+    },
+    [key],
+  );
 
   return [isViewed, toggle] as const;
 }

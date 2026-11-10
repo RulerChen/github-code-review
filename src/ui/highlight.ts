@@ -1,64 +1,28 @@
-import { createHighlighterCore, type HighlighterCore } from "shiki/core";
-import { createJavaScriptRegexEngine } from "shiki/engine/javascript";
+import type { Lang } from "./highlight.worker";
 import { basename } from "./paths";
+
+export type Style = Record<string, string>;
 
 export interface Token {
   content: string;
-  style?: Record<string, string>;
+  style?: Style;
 }
-export type TokenLines = Token[][];
 
-const LANGS = {
-  astro: () => import("@shikijs/langs/astro"),
-  c: () => import("@shikijs/langs/c"),
-  cmake: () => import("@shikijs/langs/cmake"),
-  cpp: () => import("@shikijs/langs/cpp"),
-  csharp: () => import("@shikijs/langs/csharp"),
-  css: () => import("@shikijs/langs/css"),
-  dart: () => import("@shikijs/langs/dart"),
-  diff: () => import("@shikijs/langs/diff"),
-  dockerfile: () => import("@shikijs/langs/dockerfile"),
-  elixir: () => import("@shikijs/langs/elixir"),
-  go: () => import("@shikijs/langs/go"),
-  graphql: () => import("@shikijs/langs/graphql"),
-  haskell: () => import("@shikijs/langs/haskell"),
-  hcl: () => import("@shikijs/langs/hcl"),
-  html: () => import("@shikijs/langs/html"),
-  ini: () => import("@shikijs/langs/ini"),
-  java: () => import("@shikijs/langs/java"),
-  javascript: () => import("@shikijs/langs/javascript"),
-  json: () => import("@shikijs/langs/json"),
-  jsonc: () => import("@shikijs/langs/jsonc"),
-  jsx: () => import("@shikijs/langs/jsx"),
-  kotlin: () => import("@shikijs/langs/kotlin"),
-  less: () => import("@shikijs/langs/less"),
-  lua: () => import("@shikijs/langs/lua"),
-  make: () => import("@shikijs/langs/make"),
-  markdown: () => import("@shikijs/langs/markdown"),
-  nix: () => import("@shikijs/langs/nix"),
-  php: () => import("@shikijs/langs/php"),
-  powershell: () => import("@shikijs/langs/powershell"),
-  proto: () => import("@shikijs/langs/proto"),
-  python: () => import("@shikijs/langs/python"),
-  ruby: () => import("@shikijs/langs/ruby"),
-  rust: () => import("@shikijs/langs/rust"),
-  scala: () => import("@shikijs/langs/scala"),
-  scss: () => import("@shikijs/langs/scss"),
-  shellscript: () => import("@shikijs/langs/shellscript"),
-  sql: () => import("@shikijs/langs/sql"),
-  svelte: () => import("@shikijs/langs/svelte"),
-  swift: () => import("@shikijs/langs/swift"),
-  terraform: () => import("@shikijs/langs/terraform"),
-  toml: () => import("@shikijs/langs/toml"),
-  tsx: () => import("@shikijs/langs/tsx"),
-  typescript: () => import("@shikijs/langs/typescript"),
-  vue: () => import("@shikijs/langs/vue"),
-  xml: () => import("@shikijs/langs/xml"),
-  yaml: () => import("@shikijs/langs/yaml"),
-  zig: () => import("@shikijs/langs/zig"),
-} as const;
+export interface TokenLines {
+  lines: (string | number)[][];
+  styles: Style[];
+}
 
-type Lang = keyof typeof LANGS;
+export interface HighlightRequest {
+  id: number;
+  code: string;
+  lang: Lang;
+}
+
+export interface HighlightResult {
+  id: number;
+  tokens: TokenLines | null;
+}
 
 const BY_EXTENSION: Record<string, Lang> = {
   astro: "astro",
@@ -152,49 +116,55 @@ export function languageFor(filePath: string): Lang | null {
 }
 
 const MAX_HIGHLIGHT_CHARS = 400_000;
-
-const SOFT_DARK_COLORS: Record<string, string> = { "#adbac7": "#d1d7e0", "#768390": "#9198a1" };
-
-async function softDarkTheme() {
-  const theme = (await import("@shikijs/themes/github-dark-dimmed")).default;
-  return JSON.parse(JSON.stringify(theme).replace(/#adbac7|#768390/gi, (c) => SOFT_DARK_COLORS[c.toLowerCase()]!));
-}
-
-let highlighter: Promise<HighlighterCore> | null = null;
-const loaded = new Map<Lang, Promise<void>>();
-
-function getHighlighter(): Promise<HighlighterCore> {
-  highlighter ??= createHighlighterCore({
-    themes: [import("@shikijs/themes/github-light-default"), softDarkTheme()],
-    langs: [],
-    engine: createJavaScriptRegexEngine(),
-  });
-  return highlighter;
-}
-
 const MAX_CACHED = 64;
 const cache = new Map<string, Promise<TokenLines | null>>();
+const waiting = new Map<number, (tokens: TokenLines | null) => void>();
+let worker: Worker | null = null;
+let failed = false;
+let nextId = 0;
+
+function fail(): void {
+  failed = true;
+  for (const done of waiting.values()) done(null);
+  waiting.clear();
+}
+
+function request(code: string, lang: Lang): Promise<TokenLines | null> {
+  if (failed) return Promise.resolve(null);
+  try {
+    if (!worker) {
+      worker = new Worker(new URL("./highlight.worker.ts", import.meta.url), { type: "module" });
+      worker.onmessage = (e: MessageEvent<HighlightResult>) => {
+        waiting.get(e.data.id)?.(e.data.tokens);
+        waiting.delete(e.data.id);
+      };
+      worker.onerror = fail;
+    }
+    const id = nextId++;
+    worker.postMessage({ id, code, lang } satisfies HighlightRequest);
+    return new Promise((resolve) => waiting.set(id, resolve));
+  } catch {
+    fail();
+    return Promise.resolve(null);
+  }
+}
 
 export function highlight(code: string, lang: Lang): Promise<TokenLines | null> {
+  if (code.length > MAX_HIGHLIGHT_CHARS) return Promise.resolve(null);
   const key = `${lang}\0${code}`;
   let result = cache.get(key);
   if (!result) {
-    result = highlightUncached(code, lang);
+    result = request(code, lang);
     cache.set(key, result);
     if (cache.size > MAX_CACHED) cache.delete(cache.keys().next().value!);
   }
   return result;
 }
 
-async function highlightUncached(code: string, lang: Lang): Promise<TokenLines | null> {
-  if (code.length > MAX_HIGHLIGHT_CHARS) return null;
-  const h = await getHighlighter();
-  let ready = loaded.get(lang);
-  if (!ready) {
-    ready = h.loadLanguage(LANGS[lang]());
-    loaded.set(lang, ready);
-  }
-  await ready;
-  const { tokens } = h.codeToTokens(code, { lang, themes: { light: "github-light-default", dark: "github-dark-dimmed" } });
-  return tokens.map((line) => line.map((t) => ({ content: t.content, style: t.htmlStyle })));
+export function tokensAt(tokens: TokenLines | null, line: number): Token[] | undefined {
+  const flat = tokens?.lines[line];
+  if (!tokens || !flat) return undefined;
+  const out: Token[] = [];
+  for (let i = 0; i < flat.length; i += 2) out.push({ content: flat[i] as string, style: tokens.styles[flat[i + 1] as number] });
+  return out;
 }

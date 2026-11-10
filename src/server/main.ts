@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { computeDiff, describeFailures, summarize } from "../engine/diff.js";
+import { computeDiff, describeFailures, diffVersion, summarize } from "../engine/diff.js";
 import { sameRange, sortOverrides } from "../shared/comparison.js";
 import type { Comparison, Topic } from "../shared/types.js";
 import { errorMessage, plural } from "../shared/util.js";
@@ -43,7 +43,7 @@ async function attempt(failure: string, run: () => Promise<string>) {
 }
 
 async function openViewer(repo: string, compare: Comparison, focus?: string, topics?: Topic[], session?: string): Promise<string> {
-  const diff = await computeDiff(repo, compare);
+  const [version, diff] = await Promise.all([diffVersion(repo, compare), computeDiff(repo, compare)]);
   let grouped: { focus: string | null; topics: Topic[] } | null = null;
   let note = "";
 
@@ -59,6 +59,7 @@ async function openViewer(repo: string, compare: Comparison, focus?: string, top
   }
 
   const server = await getServer();
+  server.keepDiff(diff.repoRoot, compare, { version, diff });
   const view = server.addView(diff.repoRoot, compare, grouped, repo, session && SESSION_ID.test(session) ? session : null);
   const shown = server.pageOpen
     ? "\nThe viewer page already open in the user's browser has switched to this comparison, so they do not need to open the URL again."

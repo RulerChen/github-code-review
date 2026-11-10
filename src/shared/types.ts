@@ -44,6 +44,7 @@ export interface FileDiff {
   binary: boolean;
   tooLarge: boolean;
   generated: boolean;
+  lazy: boolean;
   diffTooLarge: boolean;
   modeChange: { from: string; to: string } | null;
   additions: number;

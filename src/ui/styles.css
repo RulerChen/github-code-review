@@ -151,6 +151,14 @@ button {
   cursor: default;
 }
 
+.button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--bg-subtle), var(--fg) 6%);
+}
+
+.button:active:not(:disabled) {
+  background: color-mix(in srgb, var(--bg-subtle), var(--fg) 12%);
+}
+
 .banner {
   position: fixed;
   top: calc(var(--topbar-h) + 8px);
@@ -439,27 +447,39 @@ button {
 }
 
 .refresh-button {
+  display: none;
+  gap: 6px;
+  width: auto;
+  padding: 0 10px 0 6px;
+  background: var(--accent-subtle);
   color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
   opacity: 0;
-  transform: scale(0.9) rotate(-90deg);
-  visibility: hidden;
+  transform: scale(0.96);
   transition:
     opacity 150ms var(--ease-out),
     transform 150ms var(--ease-out),
-    visibility 0s linear 150ms;
+    display 150ms allow-discrete;
 }
 
 .refresh-button.is-shown {
+  display: inline-flex;
+  align-items: center;
   opacity: 1;
   transform: none;
-  visibility: visible;
-  transition:
-    opacity 200ms var(--ease-out),
-    transform 200ms var(--ease-out),
-    visibility 0s;
+}
+
+@starting-style {
+  .refresh-button.is-shown {
+    opacity: 0;
+    transform: scale(0.96);
+  }
 }
 
 .refresh-button:hover {
+  background: color-mix(in srgb, var(--accent-subtle), var(--accent) 12%);
   color: var(--accent);
 }
 
@@ -538,6 +558,10 @@ button {
   background: var(--bg);
   font-size: 12px;
   cursor: pointer;
+}
+
+.viewed-toggle:hover {
+  background: var(--bg-subtle);
 }
 
 .file.is-viewed .viewed-toggle {
@@ -749,6 +773,10 @@ button {
 
 .segmented button + button {
   border-left: 1px solid var(--border);
+}
+
+.segmented button:hover:not([aria-selected="true"]) {
+  background: color-mix(in srgb, var(--bg-subtle), var(--fg) 6%);
 }
 
 .segmented button[aria-selected="true"] {
@@ -1112,6 +1140,14 @@ button {
   color: var(--primary-fg);
 }
 
+.button.primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--primary), #000 8%);
+}
+
+.button.primary:active:not(:disabled) {
+  background: color-mix(in srgb, var(--primary), #000 16%);
+}
+
 .diff .num[data-n]:not([data-n=""]) {
   cursor: pointer;
 }
@@ -1311,6 +1347,14 @@ button {
 .button.danger:disabled {
   opacity: 0.6;
   color: #ffffff;
+}
+
+.button.danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger), #000 8%);
+}
+
+.button.danger:active:not(:disabled) {
+  background: color-mix(in srgb, var(--danger), #000 16%);
 }
 
 .thread-foot {

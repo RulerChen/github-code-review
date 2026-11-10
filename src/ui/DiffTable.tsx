@@ -2,8 +2,8 @@ import { memo, type MouseEvent, type ReactNode, useEffect, useMemo, useState } f
 import { stripCr } from "../shared/hunks";
 import type { DiffLine, DisplayHunk, Expansion, Thread } from "../shared/types";
 import { keepInPlace } from "./anchor";
-import { NewThread, onShownVersion, ThreadView, unmark, useComments } from "./comments";
-import type { Token, TokenLines } from "./highlight";
+import { NewThread, onShownVersion, ThreadView, unmark, useCommentActions } from "./comments";
+import { type Token, type TokenLines, tokensAt } from "./highlight";
 import { type ExpandDir, ExpandIcon } from "./icons";
 
 type Side = "old" | "new";
@@ -36,6 +36,7 @@ interface Props {
   hunks: DisplayHunk[];
   oldTokens: TokenLines | null;
   newTokens: TokenLines | null;
+  threads: Thread[];
   onExpand: OnExpand;
 }
 
@@ -43,9 +44,8 @@ const MARK = { add: "+", del: "-", context: " " } as const;
 const EXPAND_STEP = 20;
 
 function tokensFor(line: DiffLine, oldTokens: TokenLines | null, newTokens: TokenLines | null): Token[] | undefined {
-  if (line.kind === "del") return line.oldNo ? oldTokens?.[line.oldNo - 1] : undefined;
-  if (line.newNo && newTokens) return newTokens[line.newNo - 1];
-  return line.oldNo ? oldTokens?.[line.oldNo - 1] : undefined;
+  if (line.kind !== "del" && line.newNo && newTokens) return tokensAt(newTokens, line.newNo - 1);
+  return line.oldNo ? tokensAt(oldTokens, line.oldNo - 1) : undefined;
 }
 
 function Code({ line, tokens }: { line: DiffLine; tokens: Token[] | undefined }) {
@@ -67,12 +67,11 @@ function Code({ line, tokens }: { line: DiffLine; tokens: Token[] | undefined })
   );
 }
 
-export function DiffTable({ path, hunks, oldTokens, newTokens, onExpand }: Props) {
-  const { threadsFor, create, versions } = useComments();
+export const DiffTable = memo(function DiffTable({ path, hunks, oldTokens, newTokens, threads, onExpand }: Props) {
+  const { create, versions } = useCommentActions();
   const [selection, setSelection] = useState<Selection | null>(null);
   const [drag, setDrag] = useState<Drag | null>(null);
 
-  const threads = threadsFor(path);
   const rows = useMemo(() => hunks.map((h) => toSplitRows(h.lines)), [hunks]);
   const threadsAt = useMemo(() => {
     const at = new Map<string, Thread[]>();
@@ -190,7 +189,7 @@ export function DiffTable({ path, hunks, oldTokens, newTokens, onExpand }: Props
       <tbody>{body}</tbody>
     </table>
   );
-}
+});
 
 type Expand = (e: MouseEvent<HTMLButtonElement>, dir: ExpandDir, blockId: string, lines: number) => void;
 

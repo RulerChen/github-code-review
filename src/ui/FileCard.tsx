@@ -1,12 +1,14 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createContext, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { buildHunks, splitLines } from "../shared/hunks";
-import type { Block, DiffLine, DisplayHunk, Expansion, FileDiff } from "../shared/types";
+import type { Block, DiffLine, DisplayHunk, Expansion, FileDiff, Thread } from "../shared/types";
 import { sum } from "../shared/util";
 import { keepHeaderInPlace, keepInPlace } from "./anchor";
 import { focusForm, onShownVersion, ThreadList, ThreadView, useComments } from "./comments";
 import { CollapseButton, CommentButton, CopyButton, ViewedToggle } from "./controls";
 import { DiffTable, hasLine, type OnExpand, toSplitRows, twoExpanders } from "./DiffTable";
 import { highlight, languageFor, type TokenLines } from "./highlight";
+import { useAction } from "./hooks";
 
 const AUTO_LOAD_LINES = 400;
 const AUTO_LOAD_CHARS = 20 * 1024;
@@ -42,15 +44,40 @@ function whenNear(el: Element, callback: () => void): () => void {
   };
 }
 
+const sizings: { el: HTMLElement; hunks: DisplayHunk[]; threads: number }[] = [];
+const arrivals: { el: Element; show: () => void }[] = [];
+let settling = false;
+
+function settleSoon(): void {
+  if (settling) return;
+  settling = true;
+  queueMicrotask(() => {
+    settling = false;
+    const sized = sizings.splice(0).map((s) => ({ ...s, width: s.el.clientWidth }));
+    for (const s of sized) {
+      if (s.width > 0) s.el.style.height = `${estimateHeight(s.hunks, s.width) + s.threads * THREAD_PX}px`;
+    }
+
+    const near = arrivals.splice(0).filter(({ el }) => {
+      if (el.getClientRects().length === 0) return false;
+      const r = el.getBoundingClientRect();
+      return r.bottom > -window.innerHeight && r.top < 2 * window.innerHeight;
+    });
+    if (near.length) flushSync(() => near.forEach((a) => a.show()));
+  });
+}
+
+export const FileLoader = createContext<(path: string) => Promise<void>>(async () => {});
+
 interface Props {
   file: FileDiff;
   blocks?: Block[];
   anchor: string;
   viewed?: boolean;
-  onToggleViewed?: () => void;
+  onToggleViewed?: (file: FileDiff) => void;
 }
 
-export function FileCard({ file: next, blocks: nextBlocks = next.blocks, anchor, viewed = false, onToggleViewed }: Props) {
+export const FileCard = memo(function FileCard({ file: next, blocks: nextBlocks = next.blocks, anchor, viewed = false, onToggleViewed }: Props) {
   const [collapsed, setCollapsed] = useState(viewed);
   const [forceLoad, setForceLoad] = useState(false);
   const [expansion, setExpansion] = useState(NO_EXPANSION);
@@ -60,6 +87,11 @@ export function FileCard({ file: next, blocks: nextBlocks = next.blocks, anchor,
 
   const { lineCount, charCount } = useMemo(() => sizeOf(baseHunksOf(next, nextBlocks)), [next, nextBlocks]);
   const deferred = (next.generated || lineCount > AUTO_LOAD_LINES || charCount > AUTO_LOAD_CHARS) && !forceLoad;
+  const loadFile = useContext(FileLoader);
+  const loading = useAction(() => loadFile(next.path));
+  useEffect(() => {
+    if (forceLoad && next.lazy) void loading.run();
+  }, [forceLoad, next]);
   const { file, blocks, tokens } = useShown(next, nextBlocks, near && !collapsed && !deferred);
   const partial = blocks !== file.blocks;
   const baseHunks = baseHunksOf(file, blocks);
@@ -67,17 +99,18 @@ export function FileCard({ file: next, blocks: nextBlocks = next.blocks, anchor,
     () => (expansion === NO_EXPANSION ? baseHunks : hunksOf(file, blocks, expansion)),
     [file, blocks, expansion, baseHunks],
   );
-  const expand: OnExpand = (dir, id, lines) =>
-    setExpansion((e) => ({ ...e, [dir]: { ...e[dir], [id]: (e[dir][id] ?? 0) + lines } }));
+  const expand = useCallback<OnExpand>(
+    (dir, id, lines) => setExpansion((e) => ({ ...e, [dir]: { ...e[dir], [id]: (e[dir][id] ?? 0) + lines } })),
+    [],
+  );
 
   const ref = useRef<HTMLElement>(null);
   const header = useRef<HTMLElement>(null);
   useEffect(() => (near || !ref.current ? undefined : whenNear(ref.current, () => setNear(true))), [near]);
   useLayoutEffect(() => {
-    const el = ref.current;
-    if (near || !el || el.getClientRects().length === 0) return;
-    const r = el.getBoundingClientRect();
-    if (r.bottom > -window.innerHeight && r.top < 2 * window.innerHeight) setNear(true);
+    if (near || !ref.current) return;
+    arrivals.push({ el: ref.current, show: () => setNear(true) });
+    settleSoon();
   }, []);
 
   const { threadsFor, create, versions, revealSeq, peekReveal } = useComments();
@@ -102,7 +135,7 @@ export function FileCard({ file: next, blocks: nextBlocks = next.blocks, anchor,
   const deletions = partial ? sum(blocks, (b) => b.oldCount) : file.deletions;
 
   return (
-    <section className={`file${viewed ? " is-viewed" : ""}`} id={anchor} ref={ref}>
+    <section className={`file${viewed ? " is-viewed" : ""}`} id={anchor} data-path={file.path} ref={ref}>
       <header className="file-header" ref={header}>
         <CollapseButton
           collapsed={collapsed}
@@ -145,7 +178,7 @@ export function FileCard({ file: next, blocks: nextBlocks = next.blocks, anchor,
               keepHeaderInPlace(header.current, () => {
                 setCollapsed(!viewed);
                 setNear(true);
-                onToggleViewed();
+                onToggleViewed(next);
               })
             }
           />
@@ -177,14 +210,16 @@ export function FileCard({ file: next, blocks: nextBlocks = next.blocks, anchor,
             lineCount={lineCount}
             charCount={charCount}
             onLoad={() => setForceLoad(true)}
+            loadError={loading.error}
             onExpand={expand}
             tokens={tokens ?? NO_TOKENS}
+            threads={threads}
           />
         </div>
       )}
     </section>
   );
-}
+});
 
 function FileBody({
   file,
@@ -193,8 +228,10 @@ function FileBody({
   lineCount,
   charCount,
   onLoad,
+  loadError,
   onExpand,
   tokens,
+  threads,
 }: {
   file: FileDiff;
   hunks: DisplayHunk[];
@@ -202,14 +239,16 @@ function FileBody({
   lineCount: number;
   charCount: number;
   onLoad: () => void;
+  loadError: string | null;
   onExpand: OnExpand;
   tokens: Tokens;
+  threads: Thread[];
 }) {
   if (file.binary) return <p className="file-note">Binary file not shown.</p>;
   if (file.diffTooLarge) {
     return <p className="file-note">Diff too large to display ({(file.additions + file.deletions).toLocaleString()} changed lines).</p>;
   }
-  if (hunks.length === 0) {
+  if (hunks.length === 0 && !file.lazy) {
     if (file.tooLarge) return <p className="file-note">File too large to display.</p>;
     if (file.modeChange) return <p className="file-note">File mode changed from {file.modeChange.from} to {file.modeChange.to}.</p>;
     if (file.status === "renamed") return <p className="file-note">File renamed without changes.</p>;
@@ -226,6 +265,7 @@ function FileBody({
       </div>
     );
   }
+  if (file.lazy) return <p className="file-note">{loadError ? `Could not load the diff: ${loadError}` : "Loading diff…"}</p>;
 
   return (
     <>
@@ -236,14 +276,14 @@ function FileBody({
       )}
       {file.tooLarge && <p className="file-note inline">File too large to load in full: context lines and highlighting are off.</p>}
       <div className="diff-scroll">
-        <DiffTable path={file.path} hunks={hunks} oldTokens={tokens.old} newTokens={tokens.new} onExpand={onExpand} />
+        <DiffTable path={file.path} hunks={hunks} oldTokens={tokens.old} newTokens={tokens.new} threads={threads} onExpand={onExpand} />
       </div>
     </>
   );
 }
 
 function hunksOf(file: FileDiff, blocks: Block[], expansion: Expansion | null): DisplayHunk[] {
-  if (blocks.length === 0 || file.diffTooLarge) return [];
+  if (blocks.length === 0 || file.diffTooLarge || file.lazy) return [];
   const lines = (text: string | null) => (text === null ? null : splitLines(text));
   return buildHunks(blocks, lines(file.oldContent), lines(file.newContent), file.blocks, expansion);
 }
@@ -274,11 +314,13 @@ function sizeOf(hunks: DisplayHunk[]): { lineCount: number; charCount: number } 
 
 function Placeholder({ hunks, threads }: { hunks: DisplayHunk[]; threads: number }) {
   const ref = useRef<HTMLDivElement>(null);
+  const height = useMemo(() => estimateHeight(hunks, 1000), [hunks]);
   useLayoutEffect(() => {
-    const el = ref.current;
-    if (el && el.clientWidth > 0) el.style.height = `${estimateHeight(hunks, el.clientWidth) + threads * THREAD_PX}px`;
+    if (!ref.current) return;
+    sizings.push({ el: ref.current, hunks, threads });
+    settleSoon();
   }, [hunks, threads]);
-  return <div className="file-body" ref={ref} style={{ height: estimateHeight(hunks, 1000) }} />;
+  return <div className="file-body" ref={ref} style={{ height }} />;
 }
 
 let charPx = 0;
@@ -324,6 +366,7 @@ const sameText = (a: FileDiff, b: FileDiff) =>
 function useShown(file: FileDiff, blocks: Block[], enabled: boolean): Shown {
   const lang = languageFor(file.path);
   const want = enabled && lang !== null;
+  const wantOld = file.newContent === null || blocks.some((b) => b.oldCount > 0);
 
   const [shown, setShown] = useState<Shown>({ file, blocks, tokens: null });
   let current = shown;
@@ -342,18 +385,18 @@ function useShown(file: FileDiff, blocks: Block[], enabled: boolean): Shown {
       if (!cancelled) setShown({ file, blocks, tokens });
     };
     Promise.all([
-      file.oldContent !== null ? highlight(file.oldContent, languageFor(file.oldPath ?? file.path) ?? lang) : null,
+      wantOld && file.oldContent !== null ? highlight(file.oldContent, languageFor(file.oldPath ?? file.path) ?? lang) : null,
       file.newContent !== null ? highlight(file.newContent, lang) : null,
     ]).then(([o, n]) => show({ old: o, new: n }), () => show(null));
     return () => {
       cancelled = true;
     };
-  }, [want, lang, file.oldContent, file.newContent, file.oldPath, file.path]);
+  }, [want, wantOld, lang, file.oldContent, file.newContent, file.oldPath, file.path]);
 
   return current;
 }
 
-function DiffStat({ additions, deletions }: { additions: number; deletions: number }) {
+const DiffStat = memo(function DiffStat({ additions, deletions }: { additions: number; deletions: number }) {
   const total = additions + deletions;
   let green = 0;
   let red = 0;
@@ -376,4 +419,4 @@ function DiffStat({ additions, deletions }: { additions: number; deletions: numb
       </span>
     </span>
   );
-}
+});

@@ -2,12 +2,14 @@ import { Fragment, type ReactNode, useCallback, useEffect, useLayoutEffect, useM
 import { comparisonFromQuery, comparisonQuery, isFor, repoFailures, sameComparison } from "../shared/comparison";
 import type { CommitInfo, Comparison, DiffResult, FileDiff, Grouping, Review, Thread, ThreadAnchor, ViewData } from "../shared/types";
 import { errorMessage, sum } from "../shared/util";
+import { followActiveFile } from "./active";
 import { scrollToTop, startAnchoring } from "./anchor";
 import {
   ApiError,
   createThread,
   deleteComment,
   editComment,
+  fetchFile,
   fetchRefs,
   fetchVersion,
   fetchView,
@@ -16,10 +18,10 @@ import {
   submitReview,
   viewUrl,
 } from "./api";
-import { type CommentsApi, CommentsContext } from "./comments";
+import { type CommentActions, CommentActionsContext, type CommentsApi, CommentsContext } from "./comments";
 import { CommitList, CompareControls, refLabel, RepoComparisons } from "./Compare";
 import { ConversationsButton, ConversationsPanel, type Place, useConversations } from "./Conversations";
-import { FileCard } from "./FileCard";
+import { FileCard, FileLoader } from "./FileCard";
 import { FileTree } from "./FileTree";
 import { go, KeyboardButton, ShortcutHelp, stepSection, useShortcuts } from "./keyboard";
 import { comparePaths } from "./paths";
@@ -34,6 +36,7 @@ interface Props {
 }
 
 const POLL_MS = 2000;
+const NO_THREADS: Thread[] = [];
 
 const signature = (f: FileDiff) => (f.blocks.length ? f.blocks.map((b) => b.id).join(",") : `${f.status}:${f.binary}`);
 
@@ -56,7 +59,6 @@ export function App({ viewId }: Props) {
   const [tab, setTab] = useState<Tab>("topics");
   const [sidebarOpen, setSidebarOpen] = useStoredState("diff-review:sidebar", true);
   const [filter, setFilter] = useState("");
-  const [active, setActive] = useState<string | null>(null);
 
   const [threads, setThreads] = useState<Thread[]>([]);
   const [reviews, setReviews] = useState<Review[]>([]);
@@ -145,6 +147,16 @@ export function App({ viewId }: Props) {
     };
   }, [viewId]);
 
+  const loadFile = useCallback(
+    async (path: string) => {
+      const loaded = version.current;
+      if (!viewId || loaded === null) return;
+      const file = await fetchFile(viewId, requested.current, loaded, path);
+      setData((d) => (d && version.current === loaded ? { ...d, diff: { ...d.diff, files: d.diff.files.map((f) => (f.path === path ? file : f)) } } : d));
+    },
+    [viewId],
+  );
+
   const loadRefs = useCallback(() => fetchRefs(viewId ?? ""), [viewId]);
   const loadRepoRefs = useCallback((repo: string) => fetchRefs(viewId ?? "", repo), [viewId]);
 
@@ -179,22 +191,12 @@ export function App({ viewId }: Props) {
   const diff = data?.diff ?? null;
   const current = useMemo<Comparison | null>(
     () => diff && { base: diff.base, head: diff.head, threeDot: diff.threeDot, overrides: diff.overrides },
-    [diff],
+    [diff?.base, diff?.head, diff?.threeDot, diff?.overrides],
   );
   const repoCommits = JSON.stringify(diff?.repos.map((r) => [r.dir, r.oldCommit, r.headCommit]) ?? []);
   const live = useMemo(() => threads.filter((t) => t.comments.length > 0), [threads]);
 
-  const comments = useMemo<
-    Pick<CommentsApi, "versions" | "threadsFor" | "threadsForTopic" | "create" | "reply" | "edit" | "remove" | "pending" | "listening">
-  >(() => {
-    const byPath = new Map<string, Thread[]>();
-    const byTopic = new Map<string, Thread[]>();
-    for (const t of live) {
-      const { anchor } = t;
-      if (anchor.path !== null) byPath.set(anchor.path, [...(byPath.get(anchor.path) ?? []), t]);
-      else if (current && sameComparison(anchor.compare, current)) byTopic.set(anchor.topic, [...(byTopic.get(anchor.topic) ?? []), t]);
-    }
-
+  const actions = useMemo<CommentActions>(() => {
     const repos = JSON.parse(repoCommits) as [string, string | null, string | null][];
     const versions = (path: string) => {
       const r = repos.find(([dir]) => dir === "" || path.startsWith(`${dir}/`));
@@ -204,8 +206,6 @@ export function App({ viewId }: Props) {
 
     return {
       versions,
-      threadsFor: (path) => byPath.get(path) ?? [],
-      threadsForTopic: (title) => byTopic.get(title) ?? [],
       create: async (anchor, snippet, body, single) => {
         if (!viewId || !current) return;
         const full: ThreadAnchor = anchor.path === null ? { ...anchor, compare: current } : { ...anchor, commit: versions(anchor.path)[anchor.side ?? "new"] };
@@ -220,10 +220,38 @@ export function App({ viewId }: Props) {
       remove: async (threadId, commentId) => {
         if (viewId) update(await deleteComment(viewId, threadId, commentId));
       },
+    };
+  }, [viewId, repoCommits, current]);
+
+  const pathThreads = useRef(new Map<string, Thread[]>());
+  const comments = useMemo<Pick<CommentsApi, keyof CommentActions | "threadsFor" | "threadsForTopic" | "pending" | "listening">>(() => {
+    const byPath = new Map<string, Thread[]>();
+    const byTopic = new Map<string, Thread[]>();
+    const add = (map: Map<string, Thread[]>, key: string, t: Thread) => {
+      const list = map.get(key);
+      if (list) list.push(t);
+      else map.set(key, [t]);
+    };
+    for (const t of live) {
+      const { anchor } = t;
+      if (anchor.path !== null) add(byPath, anchor.path, t);
+      else if (current && sameComparison(anchor.compare, current)) add(byTopic, anchor.topic, t);
+    }
+
+    for (const [path, list] of byPath) {
+      const old = pathThreads.current.get(path);
+      if (old && old.length === list.length && old.every((t, i) => t === list[i])) byPath.set(path, old);
+    }
+    pathThreads.current = byPath;
+
+    return {
+      ...actions,
+      threadsFor: (path) => byPath.get(path) ?? NO_THREADS,
+      threadsForTopic: (title) => byTopic.get(title) ?? NO_THREADS,
       pending: live.some((t) => t.comments.some((c) => c.draft)),
       listening,
     };
-  }, [live, viewId, repoCommits, current, listening]);
+  }, [live, actions, current, listening]);
 
   const drafts = sum(live, (t) => t.comments.filter((c) => c.draft).length);
   const submit = async (body: string) => {
@@ -260,6 +288,7 @@ export function App({ viewId }: Props) {
   const topicTab = view === "topics" && topics.length > 0;
 
   useEffect(() => (diff !== null ? startAnchoring() : undefined), [diff !== null]);
+  useEffect(() => (diff !== null ? followActiveFile() : undefined), [diff !== null]);
 
   const visited = useRef(new Set<Tab>());
   visited.current.add(view);
@@ -279,13 +308,13 @@ export function App({ viewId }: Props) {
     window.scrollTo(0, scrolls.current[view] ?? 0);
     const target = pendingSelect.current && document.getElementById(pendingSelect.current);
     pendingSelect.current = null;
-    if (target) go(target, setActive);
+    if (target) go(target);
   }, [view]);
 
   const [opening, setOpening] = useState<{ anchor: string } | null>(null);
   useLayoutEffect(() => {
     const target = opening && document.getElementById(opening.anchor);
-    if (target) go(target, setActive);
+    if (target) go(target);
   }, [opening]);
 
   useLayoutEffect(() => {
@@ -325,8 +354,8 @@ export function App({ viewId }: Props) {
 
   const [help, setHelp] = useState(false);
   useShortcuts({
-    j: () => stepSection(1, active, setActive),
-    k: () => stepSection(-1, active, setActive),
+    j: () => stepSection(1),
+    k: () => stepSection(-1),
     u: conv.nextUnread,
     Escape: () => (help ? setHelp(false) : conv.setOpen(false)),
   });
@@ -337,8 +366,10 @@ export function App({ viewId }: Props) {
     (t: TopicView) => t.key,
     (t) => t.signature,
   );
-  const isTopicFileViewed = (f: FileDiff) =>
-    topics.every((t) => isTopicViewed(t) || !t.parts.some((p) => p.file.path === f.path));
+  const isTopicFileViewed = useCallback(
+    (f: FileDiff) => topics.every((t) => isTopicViewed(t) || !t.parts.some((p) => p.file.path === f.path)),
+    [topics, isTopicViewed],
+  );
 
   const select = (anchor: string) => {
     if (!topicTab && view !== "files") {
@@ -347,10 +378,13 @@ export function App({ viewId }: Props) {
       return;
     }
     const el = document.getElementById(anchor);
-    if (el) go(el, setActive);
+    if (el) go(el);
     else if (topicTab) setOpening({ anchor });
-    else setActive(anchor);
   };
+  const latestSelect = useRef(select);
+  latestSelect.current = select;
+  const onSelect = useCallback((anchor: string) => latestSelect.current(anchor), []);
+  const treeEntries = useMemo(() => (topicTab ? matching(topicFiles, filter) : shown), [topicTab, topicFiles, filter, shown]);
 
   if (!viewId) {
     return <Notice title="This link is incomplete">Open the exact link Claude gave you.</Notice>;
@@ -375,103 +409,106 @@ export function App({ viewId }: Props) {
   const firstUnrelated = topics.findIndex((t) => !t.related);
 
   return (
-    <CommentsContext.Provider value={commentsValue}>
-      <div className="app">
-        <header className="topbar">
-          <div className={`loading-bar${switching ? " is-active" : ""}`} aria-hidden="true" />
-          <SidebarToggle open={sidebarOpen} onToggle={() => setSidebarOpen((o) => !o)} />
-          <div className="topbar-title">
-            <CompareControls diff={diff} loadRefs={loadRefs} onCompare={compareWith} />
-            <RepoComparisons diff={diff} loadRefs={loadRepoRefs} onCompare={compareWith} />
-          </div>
-          <ChangeStats files={diff.files} />
-          <RefreshButton stale={stale} loading={loading} onClick={() => void load(requested.current)} />
-          <span className="spacer" />
-          <ViewTabs view={view} commitCount={diff.commitCount} onSelect={setTab} />
-          <ConversationsButton conv={conv} />
-          <KeyboardButton onClick={() => setHelp(true)} />
-          <ThemeToggle />
-          <SubmitReview drafts={drafts} listening={listening} onSubmit={submit} />
-        </header>
-
-        {error && <div className="banner">{error.message}</div>}
-
-        <div className={`layout${conv.open ? " with-conversations" : ""}${sidebarOpen ? "" : " no-sidebar"}`}>
-          <aside className="sidebar" hidden={!sidebarOpen}>
-            <div className="view">
-              <input
-                className="filter"
-                type="search"
-                placeholder="Filter files"
-                value={filter}
-                onChange={(e) => setFilter(e.target.value)}
-                aria-label="Filter files"
-              />
-              <FileTree
-                entries={topicTab ? matching(topicFiles, filter) : shown}
-                active={view === "commits" ? null : active}
-                isViewed={topicTab ? isTopicFileViewed : isViewed}
-                onSelect={select}
-              />
-            </div>
-          </aside>
-
-          <main className={`files${switching ? " is-switching" : ""}`}>
-            {repoFailures(diff.repos).map((f) => (
-              <p key={f.error} className="file-note inline">
-                Not compared in {f.dirs.join(", ")}: {f.error}
-              </p>
-            ))}
-            {view !== "commits" && diff.files.length === 0 && <Notice title="No changes">{noChanges(diff)}</Notice>}
-            {visited.current.has("topics") && (
-              <div className="view" hidden={view !== "topics"}>
-                <ReviewBar
-                  reviews={reviews}
-                  review={review}
-                  grouping={grouping}
-                  repoRoot={diff.repoRoot}
-                  hasChanges={diff.files.length > 0}
-                  onPick={showReview}
-                  onGroup={group}
-                />
-                {topics.length > 0 && <TopicList topics={topics} isViewed={isTopicViewed} onSelect={select} />}
-                {topics.map((t, i) => (
-                  <Fragment key={t.key}>
-                    {i === firstUnrelated && <h2 className="topic-divider">Not related to the focus</h2>}
-                    <TopicSection
-                      topic={t}
-                      viewed={isTopicViewed(t)}
-                      opening={opening}
-                      onToggleViewed={() => toggleTopicViewed(t)}
-                    />
-                  </Fragment>
-                ))}
+    <FileLoader.Provider value={loadFile}>
+      <CommentActionsContext.Provider value={actions}>
+        <CommentsContext.Provider value={commentsValue}>
+          <div className="app">
+            <header className="topbar">
+              <div className={`loading-bar${switching ? " is-active" : ""}`} aria-hidden="true" />
+              <SidebarToggle open={sidebarOpen} onToggle={() => setSidebarOpen((o) => !o)} />
+              <div className="topbar-title">
+                <CompareControls diff={diff} loadRefs={loadRefs} onCompare={compareWith} />
+                <RepoComparisons diff={diff} loadRefs={loadRepoRefs} onCompare={compareWith} />
               </div>
-            )}
-            {visited.current.has("files") && diff.files.length > 0 && (
-              <div className="view" hidden={view !== "files"}>
-                {shown.map(({ file, anchor }) => (
-                  <FileCard
-                    key={file.path}
-                    file={file}
-                    anchor={anchor}
-                    viewed={isViewed(file)}
-                    onToggleViewed={() => toggleViewed(file)}
+              <ChangeStats files={diff.files} />
+              <RefreshButton stale={stale} loading={loading} onClick={() => void load(requested.current)} />
+              <span className="spacer" />
+              <ViewTabs view={view} commitCount={diff.commitCount} onSelect={setTab} />
+              <ConversationsButton conv={conv} />
+              <KeyboardButton onClick={() => setHelp(true)} />
+              <ThemeToggle />
+              <SubmitReview drafts={drafts} listening={listening} onSubmit={submit} />
+            </header>
+
+            {error && <div className="banner">{error.message}</div>}
+
+            <div className={`layout${conv.open ? " with-conversations" : ""}${sidebarOpen ? "" : " no-sidebar"}`}>
+              <aside className="sidebar" hidden={!sidebarOpen}>
+                <div className="view">
+                  <input
+                    className="filter"
+                    type="search"
+                    placeholder="Filter files"
+                    value={filter}
+                    onChange={(e) => setFilter(e.target.value)}
+                    aria-label="Filter files"
                   />
+                  <FileTree
+                    entries={treeEntries}
+                    isViewed={topicTab ? isTopicFileViewed : isViewed}
+                    onSelect={onSelect}
+                  />
+                </div>
+              </aside>
+
+              <main className={`files${switching ? " is-switching" : ""}`}>
+                {repoFailures(diff.repos).map((f) => (
+                  <p key={f.error} className="file-note inline">
+                    Not compared in {f.dirs.join(", ")}: {f.error}
+                  </p>
                 ))}
-              </div>
-            )}
-            {visited.current.has("commits") && diff.commits.length > 0 && (
-              <div className="view" hidden={view !== "commits"}>
-                <CommitList diff={diff} onView={viewCommit} />
-              </div>
-            )}
-          </main>
-        </div>
-        {conv.open && <ConversationsPanel conv={conv} />}
-      </div>
-      {help && <ShortcutHelp onClose={() => setHelp(false)} />}
-    </CommentsContext.Provider>
+                {view !== "commits" && diff.files.length === 0 && <Notice title="No changes">{noChanges(diff)}</Notice>}
+                {visited.current.has("topics") && (
+                  <div className="view" hidden={view !== "topics"}>
+                    <ReviewBar
+                      reviews={reviews}
+                      review={review}
+                      grouping={grouping}
+                      repoRoot={diff.repoRoot}
+                      hasChanges={diff.files.length > 0}
+                      onPick={showReview}
+                      onGroup={group}
+                    />
+                    {topics.length > 0 && <TopicList topics={topics} isViewed={isTopicViewed} onSelect={select} />}
+                    {topics.map((t, i) => (
+                      <Fragment key={t.key}>
+                        {i === firstUnrelated && <h2 className="topic-divider">Not related to the focus</h2>}
+                        <TopicSection
+                          topic={t}
+                          viewed={isTopicViewed(t)}
+                          opening={opening}
+                          onToggleViewed={() => toggleTopicViewed(t)}
+                        />
+                      </Fragment>
+                    ))}
+                  </div>
+                )}
+                {visited.current.has("files") && diff.files.length > 0 && (
+                  <div className="view" hidden={view !== "files"}>
+                    {shown.map(({ file, anchor }) => (
+                      <FileCard
+                        key={file.path}
+                        file={file}
+                        anchor={anchor}
+                        viewed={isViewed(file)}
+                        onToggleViewed={toggleViewed}
+                      />
+                    ))}
+                  </div>
+                )}
+                {visited.current.has("commits") && diff.commits.length > 0 && (
+                  <div className="view" hidden={view !== "commits"}>
+                    <CommitList diff={diff} onView={viewCommit} />
+                  </div>
+                )}
+              </main>
+            </div>
+            {conv.open && <ConversationsPanel conv={conv} />}
+          </div>
+          {help && <ShortcutHelp onClose={() => setHelp(false)} />}
+        </CommentsContext.Provider>
+      </CommentActionsContext.Provider>
+    </FileLoader.Provider>
   );
 }
 

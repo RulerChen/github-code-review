@@ -5,6 +5,7 @@ export default defineConfig({
   root: "src/ui",
   base: "/",
   plugins: [react()],
+  worker: { format: "es" },
   build: {
     outDir: "../../plugins/diff-review/dist/ui",
     emptyOutDir: true,

@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useRef } from "react";
+import { markActiveFile } from "./active";
 import { pin, topBar } from "./anchor";
 import { CloseIcon, KeyboardIcon } from "./icons";
 import "./keyboard.css";
@@ -35,15 +36,17 @@ export function useShortcuts(shortcuts: Record<string, () => void>): void {
   }, []);
 }
 
+let cursor: string | null = null;
+
 const sections = () => [...document.querySelectorAll<HTMLElement>(".files > :not([hidden]) > section[id]")];
 
 function topOffset(): number {
   return topBar() + 8;
 }
 
-function currentIndex(list: HTMLElement[], active: string | null): number {
+function currentIndex(list: HTMLElement[]): number {
   const top = topOffset();
-  const i = active ? list.findIndex((s) => s.id === active) : -1;
+  const i = cursor ? list.findIndex((s) => s.id === cursor) : -1;
   if (i >= 0) {
     const r = list[i]!.getBoundingClientRect();
     if (r.bottom > top && r.top < window.innerHeight) return i;
@@ -55,20 +58,21 @@ function currentIndex(list: HTMLElement[], active: string | null): number {
   return index;
 }
 
-export function go(el: HTMLElement, setActive: (id: string) => void): void {
+export function go(el: HTMLElement): void {
   el.scrollIntoView({ block: "start" });
   pin(el);
-  setActive(el.id);
+  cursor = el.id;
+  markActiveFile();
 }
 
-export function stepSection(dir: 1 | -1, active: string | null, setActive: (id: string) => void): void {
+export function stepSection(dir: 1 | -1): void {
   const list = sections();
   if (!list.length) return;
-  const i = currentIndex(list, active);
-  if (dir > 0) return go(list[Math.min(i + 1, list.length - 1)]!, setActive);
+  const i = currentIndex(list);
+  if (dir > 0) return go(list[Math.min(i + 1, list.length - 1)]!);
   const cur = list[i];
   const inside = cur !== undefined && cur.getBoundingClientRect().top < topOffset() - 2;
-  go(list[inside ? i : Math.max(i - 1, 0)]!, setActive);
+  go(list[inside ? i : Math.max(i - 1, 0)]!);
 }
 
 export function KeyboardButton({ onClick }: { onClick: () => void }) {
