@@ -59,7 +59,6 @@ export interface Topic {
   title: string;
   summary: string;
   ids: string[];
-  related: boolean;
 }
 
 export interface Review {

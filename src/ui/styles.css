@@ -1068,15 +1068,6 @@ button {
   font-size: 12px;
 }
 
-.topic-divider {
-  margin: 32px 0 16px;
-  padding-top: 16px;
-  border-top: 1px dashed var(--border);
-  color: var(--fg-muted);
-  font-size: 13px;
-  font-weight: 600;
-}
-
 .topic-list {
   margin-bottom: 24px;
   overflow: hidden;
@@ -1101,14 +1092,6 @@ button {
 
 .topic-list li + li {
   border-top: 1px solid var(--border-muted);
-}
-
-.topic-list-heading {
-  margin: 0;
-  padding: 8px 16px 0;
-  color: var(--fg-muted);
-  font-size: 12px;
-  font-weight: 600;
 }
 
 .topic-link {

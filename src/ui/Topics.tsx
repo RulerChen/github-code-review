@@ -20,7 +20,6 @@ export interface TopicView {
   anchor: string;
   title: string;
   summary: string;
-  related: boolean;
   parts: TopicPart[];
   changeCount: number;
   stale: number;
@@ -30,48 +29,33 @@ export interface TopicView {
 
 export function buildTopics(review: Review, files: FileDiff[]): TopicView[] {
   const known = new Set(files.flatMap(changeIds));
-  const assigned = new Set<string>();
+  const seen = new Set<string>();
 
-  const make = (key: string, index: number, title: string, summary: string, related: boolean, ids: string[]): TopicView => {
-    const present = [...new Set(ids)].filter((id) => known.has(id));
-    for (const id of present) assigned.add(id);
+  return review.topics.map((t, index) => {
+    const present = [...new Set(t.ids)].filter((id) => known.has(id));
     const chosen = new Set(present);
 
     const parts: TopicPart[] = [];
+    const firstFor = new Set<string>();
     files.forEach((f, fi) => {
       if (!changeIds(f).some((id) => chosen.has(id))) return;
       parts.push({ file: f, blocks: f.blocks.filter((b) => chosen.has(b.id)), anchor: `topic-${index}-file-${fi}` });
+      if (!seen.has(f.path)) firstFor.add(f.path);
+      seen.add(f.path);
     });
 
     return {
-      key,
+      key: `topic:${t.title}`,
       anchor: `topic-${index}`,
-      title,
-      summary,
-      related,
+      title: t.title,
+      summary: t.summary,
       parts,
       changeCount: present.length,
-      stale: ids.length - present.length,
+      stale: t.ids.length - present.length,
       signature: present.join(","),
-      firstFor: new Set(),
+      firstFor,
     };
-  };
-
-  const views = review.topics.map((t, i) => make(`topic:${t.title}`, i, t.title, t.summary, t.related, t.ids));
-  const rest = [...known].filter((id) => !assigned.has(id));
-  const other = rest.length
-    ? [make("other", views.length, "Other changes", "Changes that are in no topic, including any edited after Claude grouped them.", true, rest)]
-    : [];
-
-  const ordered = [...views.filter((v) => v.related), ...other, ...views.filter((v) => !v.related)];
-  const seen = new Set<string>();
-  for (const t of ordered) {
-    for (const { file } of t.parts) {
-      if (!seen.has(file.path)) t.firstFor.add(file.path);
-      seen.add(file.path);
-    }
-  }
-  return ordered;
+  });
 }
 
 export function topicShows(topic: TopicView, thread: Thread, versions: CommentsApi["versions"]): boolean {
@@ -90,8 +74,8 @@ interface SectionProps {
 }
 
 export function TopicSection({ topic, viewed, opening, onToggleViewed }: SectionProps) {
-  const [collapsed, setCollapsed] = useState(viewed || !topic.related);
-  useEffect(() => setCollapsed(viewed || !topic.related), [viewed]);
+  const [collapsed, setCollapsed] = useState(viewed);
+  useEffect(() => setCollapsed(viewed), [viewed]);
   const [opened, setOpened] = useState(opening);
   if (opening !== opened) {
     setOpened(opening);
@@ -135,7 +119,7 @@ export function TopicSection({ topic, viewed, opening, onToggleViewed }: Section
           viewed={viewed}
           onChange={() =>
             keepHeaderInPlace(header.current, () => {
-              setCollapsed(!viewed || !topic.related);
+              setCollapsed(!viewed);
               onToggleViewed();
             })
           }
@@ -159,8 +143,8 @@ export function TopicSection({ topic, viewed, opening, onToggleViewed }: Section
           />
           {topic.stale > 0 && (
             <p className="topic-note">
-              {plural(topic.stale, "change")} {topic.stale === 1 ? "was" : "were"} edited after Claude grouped them and now
-              appear under Other changes.
+              {plural(topic.stale, "change")} {topic.stale === 1 ? "was" : "were"} edited after Claude grouped them and left
+              this topic. Group again to bring {topic.stale === 1 ? "it" : "them"} back.
             </p>
           )}
           {topic.parts.map((p) => (
@@ -179,14 +163,12 @@ interface ListProps {
 }
 
 export function TopicList({ topics, isViewed, onSelect }: ListProps) {
-  const firstUnrelated = topics.findIndex((t) => !t.related);
   return (
     <nav className="topic-list" aria-label="Topics">
       <h2 className="topic-list-title">Topics</h2>
       <ul>
-        {topics.map((t, i) => (
+        {topics.map((t) => (
           <li key={t.key}>
-            {i === firstUnrelated && <p className="topic-list-heading">Not related to the focus</p>}
             <button className={`topic-link${isViewed(t) ? " is-viewed" : ""}`} onClick={() => onSelect(t.anchor)}>
               <span className="topic-link-title">{t.title}</span>
               <span className="topic-link-meta">

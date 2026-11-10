@@ -1,8 +1,8 @@
 import { flushSync } from "react-dom";
 
-const UNIT = "tr, .file-body, .file-note, .file-threads, .unplaced, .topic-summary, .topic-threads, .focus, .topic-divider, section";
+const UNIT = "tr, .file-body, .file-note, .file-threads, .unplaced, .topic-summary, .topic-threads, .focus, section";
 const STICKY = ".file-header, .topic-header";
-const LEAF = "tr, .file-note, .topic-summary, .focus, .topic-divider";
+const LEAF = "tr, .file-note, .topic-summary, .focus";
 const SKIPPED = `${STICKY}, colgroup`;
 const READER_INPUT = ["wheel", "touchstart", "keydown", "mousedown"] as const;
 

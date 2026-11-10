@@ -25,18 +25,21 @@ export async function groupChanges(o: GroupOptions): Promise<Topic[]> {
     res = await run(null, false, prompt);
   }
 
-  let topics = parseTopics(res.text);
+  const focused = o.focus !== null;
+  let topics = parseTopics(res.text, focused);
   const problem = typeof topics === "string" ? topics : unknownIds(o.diff, topics);
   if (problem && res.sessionId) {
     o.onActivity("Correcting its answer");
     res = await run(res.sessionId, false, `${problem} Reply again with only the corrected JSON object.`);
-    topics = parseTopics(res.text);
+    topics = parseTopics(res.text, focused);
   }
   if (typeof topics === "string") throw new Error(`Claude's answer could not be used. ${topics}`);
 
   const known = new Set(o.diff.files.flatMap(changeIds));
   const kept = topics.map((t) => ({ ...t, ids: t.ids.filter((id) => known.has(id)) })).filter((t) => t.ids.length > 0);
-  if (!kept.length) throw new Error("Claude's answer put no change of this comparison in a topic.");
+  if (!kept.length) {
+    throw new Error(focused ? "No change matches the focus." : "Claude's answer put no change of this comparison in a topic.");
+  }
   return kept;
 }
 
@@ -48,33 +51,34 @@ function buildPrompt(diff: DiffResult, focus: string | null): string {
     '- "title": a few words.',
     '- "summary": two to six sentences of Markdown on what changed and why, naming the files and functions involved and anything the reviewer should check closely.',
     '- "ids": the ids of all changes in the topic, exactly as listed below.',
-    '- "related": false if the topic has nothing to do with the focus, otherwise true.',
-    "Put every id in a topic. Order the topics the way a reviewer should read them, with the ones that match the focus first. Write titles and summaries in the language the user writes in.",
-    'Reply with only a JSON object and no other text: {"topics": [{"title": "...", "summary": "...", "ids": ["..."], "related": true}]}',
+    focus
+      ? 'Make topics only for the changes the focus asks for. Leave every other change out of your answer, and do not make a topic for changes that have nothing to do with the focus. The reviewer still finds those in the list of all files. If no change matches the focus, reply with {"topics": []}.'
+      : "Put every id in a topic.",
+    "Order the topics the way a reviewer should read them. Write titles and summaries in the language the user writes in.",
+    'Reply with only a JSON object and no other text: {"topics": [{"title": "...", "summary": "...", "ids": ["..."]}]}',
     "",
     formatChanges(diff),
   ].join("\n");
 }
 
-function parseTopics(text: string): Topic[] | string {
+function parseTopics(text: string, allowEmpty: boolean): Topic[] | string {
   const value = parseJson(text);
   if (value === undefined) return "The answer was not a JSON object.";
   const list = Array.isArray(value) ? value : isRecord(value) ? value.topics : undefined;
-  if (!Array.isArray(list) || list.length === 0) return 'The answer had no "topics" array.';
+  if (!Array.isArray(list) || (list.length === 0 && !allowEmpty)) return 'The answer had no "topics" array.';
   const topics = list.map(toTopic);
   if (topics.some((t) => t === null)) {
-    return 'Each topic needs a "title" and a "summary" string, an "ids" array of strings and an optional "related" boolean.';
+    return 'Each topic needs a "title" and a "summary" string and an "ids" array of strings.';
   }
   return topics as Topic[];
 }
 
 function toTopic(t: unknown): Topic | null {
   if (!isRecord(t)) return null;
-  const { title, summary, ids, related } = t;
+  const { title, summary, ids } = t;
   if (typeof title !== "string" || !title.trim() || typeof summary !== "string") return null;
   if (!Array.isArray(ids) || !ids.every((id) => typeof id === "string")) return null;
-  if (related !== undefined && typeof related !== "boolean") return null;
-  return { title: title.trim(), summary: summary.trim(), ids, related: related ?? true };
+  return { title: title.trim(), summary: summary.trim(), ids };
 }
 
 function parseJson(text: string): unknown {

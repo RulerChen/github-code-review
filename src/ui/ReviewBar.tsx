@@ -168,7 +168,7 @@ function ReviewPicker({ reviews, current, repoRoot, onPick }: PickerProps) {
                   >
                     <CheckMark checked={selected} />
                     <span className="review-item-text">
-                      <span className="picker-item-label">{r.focus ?? "No focus"}</span>
+                      <span className="picker-item-label">{r.focus ?? r.topics.map((t) => t.title).join(", ")}</span>
                       <span className="review-item-detail">
                         {otherRepos && `${basename(r.repo)} · `}
                         <code>{describeComparison(r.compare, refLabel)}</code> · {plural(r.topics.length, "topic")} · {time}

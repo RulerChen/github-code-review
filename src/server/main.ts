@@ -54,7 +54,7 @@ async function openViewer(repo: string, compare: Comparison, focus?: string, top
       throw new Error(`Unknown change ids: ${unknown.join(", ")}. Call list_changes again and use the ids it prints.`);
     }
     if (unassigned.length) {
-      note = `\n${unassigned.length} change(s) are in no topic and appear under "Other changes": ${unassigned.join(", ")}`;
+      note = `\n${unassigned.length} change(s) are in no topic, so they appear only in the Files tab: ${unassigned.join(", ")}`;
     }
     grouped = { focus: focus?.trim() || null, topics };
   }
@@ -179,19 +179,19 @@ async function runMcp(): Promise<void> {
               title: z.string().describe("A few words naming the topic."),
               summary: z.string().describe("Markdown explaining what changed in this topic and why."),
               ids: z.array(z.string()).describe("Ids from list_changes of the changes in this topic."),
-              related: z.boolean().optional().describe("false when the topic has nothing to do with the focus."),
             }),
           )
           .optional()
-          .describe("Every change from list_changes grouped into topics, in the order the reviewer should read them."),
+          .describe(
+            "The topics the user asked for, in the order the reviewer should read them. The Topics tab shows only these, and changes in no topic stay in the Files tab.",
+          ),
       },
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
     (args) =>
-      attempt("Could not open the diff viewer", () => {
-        const topics = args.topics?.map((t) => ({ ...t, related: t.related ?? true }));
-        return openViewer(args.repo ?? process.cwd(), comparison(args), args.focus, topics, args.session);
-      }),
+      attempt("Could not open the diff viewer", () =>
+        openViewer(args.repo ?? process.cwd(), comparison(args), args.focus, args.topics, args.session),
+      ),
   );
 
   mcp.registerTool(

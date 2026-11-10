@@ -150,8 +150,9 @@ export class ReviewServer {
 
     threads.restore(saved.threads, saved.submissions, saved.read);
     for (const r of saved.reviews) {
-      if (!this.reviews.some(isFor(view.repo, r.compare))) this.reviews.push({ ...r, view: view.id });
+      if (!this.reviews.some((x) => x.repo === view.repo && x.createdAt === r.createdAt)) this.reviews.push({ ...r, view: view.id });
     }
+    this.reviews.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
     this.broadcast("reviews", this.reviews);
     return { threads: saved.threads.length, unread: saved.submissions.length - saved.read };
   }
@@ -207,8 +208,6 @@ export class ReviewServer {
 
   private addReview(view: View, compare: Comparison, focus: string | null, topics: Topic[]): void {
     const same = isFor(view.repo, compare);
-    const old = this.reviews.findIndex(same);
-    if (old >= 0) this.reviews.splice(old, 1);
     this.reviews.push({ repo: view.repo, compare, focus, topics, createdAt: new Date().toISOString(), view: view.id });
     const failed = this.groupings.findIndex((g) => same(g) && g.error !== null);
     if (failed >= 0) this.groupings.splice(failed, 1);

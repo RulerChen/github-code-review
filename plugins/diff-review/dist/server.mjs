@@ -37526,17 +37526,20 @@ async function groupChanges(o) {
     if (o.session === null) throw err;
     res = await run(null, false, prompt);
   }
-  let topics = parseTopics(res.text);
+  const focused = o.focus !== null;
+  let topics = parseTopics(res.text, focused);
   const problem = typeof topics === "string" ? topics : unknownIds(o.diff, topics);
   if (problem && res.sessionId) {
     o.onActivity("Correcting its answer");
     res = await run(res.sessionId, false, `${problem} Reply again with only the corrected JSON object.`);
-    topics = parseTopics(res.text);
+    topics = parseTopics(res.text, focused);
   }
   if (typeof topics === "string") throw new Error(`Claude's answer could not be used. ${topics}`);
   const known = new Set(o.diff.files.flatMap(changeIds));
   const kept = topics.map((t) => ({ ...t, ids: t.ids.filter((id) => known.has(id)) })).filter((t) => t.ids.length > 0);
-  if (!kept.length) throw new Error("Claude's answer put no change of this comparison in a topic.");
+  if (!kept.length) {
+    throw new Error(focused ? "No change matches the focus." : "Claude's answer put no change of this comparison in a topic.");
+  }
   return kept;
 }
 function buildPrompt(diff, focus) {
@@ -37547,31 +37550,30 @@ function buildPrompt(diff, focus) {
     '- "title": a few words.',
     '- "summary": two to six sentences of Markdown on what changed and why, naming the files and functions involved and anything the reviewer should check closely.',
     '- "ids": the ids of all changes in the topic, exactly as listed below.',
-    '- "related": false if the topic has nothing to do with the focus, otherwise true.',
-    "Put every id in a topic. Order the topics the way a reviewer should read them, with the ones that match the focus first. Write titles and summaries in the language the user writes in.",
-    'Reply with only a JSON object and no other text: {"topics": [{"title": "...", "summary": "...", "ids": ["..."], "related": true}]}',
+    focus ? 'Make topics only for the changes the focus asks for. Leave every other change out of your answer, and do not make a topic for changes that have nothing to do with the focus. The reviewer still finds those in the list of all files. If no change matches the focus, reply with {"topics": []}.' : "Put every id in a topic.",
+    "Order the topics the way a reviewer should read them. Write titles and summaries in the language the user writes in.",
+    'Reply with only a JSON object and no other text: {"topics": [{"title": "...", "summary": "...", "ids": ["..."]}]}',
     "",
     formatChanges(diff)
   ].join("\n");
 }
-function parseTopics(text) {
+function parseTopics(text, allowEmpty) {
   const value = parseJson(text);
   if (value === void 0) return "The answer was not a JSON object.";
   const list = Array.isArray(value) ? value : isRecord(value) ? value.topics : void 0;
-  if (!Array.isArray(list) || list.length === 0) return 'The answer had no "topics" array.';
+  if (!Array.isArray(list) || list.length === 0 && !allowEmpty) return 'The answer had no "topics" array.';
   const topics = list.map(toTopic);
   if (topics.some((t) => t === null)) {
-    return 'Each topic needs a "title" and a "summary" string, an "ids" array of strings and an optional "related" boolean.';
+    return 'Each topic needs a "title" and a "summary" string and an "ids" array of strings.';
   }
   return topics;
 }
 function toTopic(t) {
   if (!isRecord(t)) return null;
-  const { title, summary, ids, related } = t;
+  const { title, summary, ids } = t;
   if (typeof title !== "string" || !title.trim() || typeof summary !== "string") return null;
   if (!Array.isArray(ids) || !ids.every((id) => typeof id === "string")) return null;
-  if (related !== void 0 && typeof related !== "boolean") return null;
-  return { title: title.trim(), summary: summary.trim(), ids, related: related ?? true };
+  return { title: title.trim(), summary: summary.trim(), ids };
 }
 function parseJson(text) {
   const fenced = /```(?:json)?[ \t]*\n([\s\S]*?)\n[ \t]*```/.exec(text)?.[1];
@@ -37960,8 +37962,9 @@ var ReviewServer = class {
     if (!saved) return null;
     threads.restore(saved.threads, saved.submissions, saved.read);
     for (const r of saved.reviews) {
-      if (!this.reviews.some(isFor(view.repo, r.compare))) this.reviews.push({ ...r, view: view.id });
+      if (!this.reviews.some((x) => x.repo === view.repo && x.createdAt === r.createdAt)) this.reviews.push({ ...r, view: view.id });
     }
+    this.reviews.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
     this.broadcast("reviews", this.reviews);
     return { threads: saved.threads.length, unread: saved.submissions.length - saved.read };
   }
@@ -38009,8 +38012,6 @@ var ReviewServer = class {
   }
   addReview(view, compare, focus, topics) {
     const same = isFor(view.repo, compare);
-    const old = this.reviews.findIndex(same);
-    if (old >= 0) this.reviews.splice(old, 1);
     this.reviews.push({ repo: view.repo, compare, focus, topics, createdAt: (/* @__PURE__ */ new Date()).toISOString(), view: view.id });
     const failed = this.groupings.findIndex((g) => same(g) && g.error !== null);
     if (failed >= 0) this.groupings.splice(failed, 1);
@@ -38343,7 +38344,7 @@ async function openViewer(repo, compare, focus, topics, session) {
     }
     if (unassigned.length) {
       note = `
-${unassigned.length} change(s) are in no topic and appear under "Other changes": ${unassigned.join(", ")}`;
+${unassigned.length} change(s) are in no topic, so they appear only in the Files tab: ${unassigned.join(", ")}`;
     }
     grouped = { focus: focus?.trim() || null, topics };
   }
@@ -38426,17 +38427,18 @@ async function runMcp() {
           external_exports.object({
             title: external_exports.string().describe("A few words naming the topic."),
             summary: external_exports.string().describe("Markdown explaining what changed in this topic and why."),
-            ids: external_exports.array(external_exports.string()).describe("Ids from list_changes of the changes in this topic."),
-            related: external_exports.boolean().optional().describe("false when the topic has nothing to do with the focus.")
+            ids: external_exports.array(external_exports.string()).describe("Ids from list_changes of the changes in this topic.")
           })
-        ).optional().describe("Every change from list_changes grouped into topics, in the order the reviewer should read them.")
+        ).optional().describe(
+          "The topics the user asked for, in the order the reviewer should read them. The Topics tab shows only these, and changes in no topic stay in the Files tab."
+        )
       },
       annotations: { readOnlyHint: true, openWorldHint: false }
     },
-    (args) => attempt("Could not open the diff viewer", () => {
-      const topics = args.topics?.map((t) => ({ ...t, related: t.related ?? true }));
-      return openViewer(args.repo ?? process.cwd(), comparison(args), args.focus, topics, args.session);
-    })
+    (args) => attempt(
+      "Could not open the diff viewer",
+      () => openViewer(args.repo ?? process.cwd(), comparison(args), args.focus, args.topics, args.session)
+    )
   );
   mcp.registerTool(
     "get_review_comments",

@@ -1,4 +1,4 @@
-import { Fragment, type ReactNode, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { comparisonFromQuery, comparisonQuery, isFor, repoFailures, sameComparison } from "../shared/comparison";
 import { splitLines } from "../shared/hunks";
 import type { CommitInfo, Comparison, DiffResult, FileDiff, Grouping, Review, Thread, ThreadAnchor, ViewData } from "../shared/types";
@@ -77,6 +77,7 @@ export function App({ viewId }: Props) {
 
   const [threads, setThreads] = useState<Thread[]>([]);
   const [reviews, setReviews] = useState<Review[]>([]);
+  const [pickedAt, setPickedAt] = useState(() => new URLSearchParams(location.search).get("review"));
   const [groupings, setGroupings] = useState<Grouping[]>([]);
   const [range, setRange] = useState(savedRange);
 
@@ -191,11 +192,19 @@ export function App({ viewId }: Props) {
   };
   const showAllCommits = () => stepping && void load(stepping.compare, true);
 
-  const showReview = (r: Opened) => {
+  const showReview = (r: Opened, at: string | null = null) => {
     if (!diff) return;
+    setPickedAt(at);
     if (r.repo === diff.repoRoot) compareWith(r.compare, "topics");
-    else location.assign(`/v/${encodeURIComponent(r.view)}?${comparisonQuery(r.compare)}`);
+    else location.assign(`/v/${encodeURIComponent(r.view)}?${comparisonQuery(r.compare)}${at ? `&review=${encodeURIComponent(at)}` : ""}`);
   };
+
+  const reviewCount = useRef<number | null>(null);
+  useEffect(() => {
+    if (!data) return;
+    if (reviewCount.current !== null && reviews.length > reviewCount.current) setPickedAt(null);
+    reviewCount.current = reviews.length;
+  }, [data !== null, reviews]);
 
   const onOpened = useRef(showReview);
   onOpened.current = showReview;
@@ -317,7 +326,11 @@ export function App({ viewId }: Props) {
     return result.delivered;
   };
 
-  const review = useMemo(() => (diff ? (reviews.find(isFor(diff.repoRoot, diff)) ?? null) : null), [reviews, diff]);
+  const review = useMemo(() => {
+    if (!diff) return null;
+    const mine = reviews.filter(isFor(diff.repoRoot, diff));
+    return mine.find((r) => r.createdAt === pickedAt) ?? mine.at(-1) ?? null;
+  }, [reviews, diff, pickedAt]);
   const grouping = diff ? (groupings.find(isFor(diff.repoRoot, diff)) ?? null) : null;
   const group = async (focus: string) => {
     if (viewId && current) setGroupings(await groupTopics(viewId, current, focus));
@@ -476,8 +489,6 @@ export function App({ viewId }: Props) {
   }
   if (!diff) return <Notice title="Loading diff…" />;
 
-  const firstUnrelated = topics.findIndex((t) => !t.related);
-
   return (
     <FileLoader.Provider value={loadFile}>
       <CommentActionsContext.Provider value={actions}>
@@ -556,20 +567,18 @@ export function App({ viewId }: Props) {
                       grouping={grouping}
                       repoRoot={diff.repoRoot}
                       hasChanges={diff.files.length > 0}
-                      onPick={showReview}
+                      onPick={(r) => showReview(r, r.createdAt)}
                       onGroup={group}
                     />
                     {topics.length > 0 && <TopicList topics={topics} isViewed={isTopicViewed} onSelect={select} />}
-                    {topics.map((t, i) => (
-                      <Fragment key={t.key}>
-                        {i === firstUnrelated && <h2 className="topic-divider">Not related to the focus</h2>}
-                        <TopicSection
-                          topic={t}
-                          viewed={isTopicViewed(t)}
-                          opening={opening}
-                          onToggleViewed={() => toggleTopicViewed(t)}
-                        />
-                      </Fragment>
+                    {topics.map((t) => (
+                      <TopicSection
+                        key={t.key}
+                        topic={t}
+                        viewed={isTopicViewed(t)}
+                        opening={opening}
+                        onToggleViewed={() => toggleTopicViewed(t)}
+                      />
                     ))}
                   </div>
                 )}
