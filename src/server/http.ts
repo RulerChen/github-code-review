@@ -5,7 +5,7 @@ import { type AddressInfo, isIP } from "node:net";
 import path from "node:path";
 import { promisify } from "node:util";
 import { gzip } from "node:zlib";
-import { computeDiff, diffVersion, listRefs } from "../engine/diff.js";
+import { computeDiff, listRefs, probeDiff } from "../engine/diff.js";
 import { comparisonFromQuery, comparisonQuery, isFor } from "../shared/comparison.js";
 import type { Comparison, DiffResult, FileDiff, Grouping, Review, Thread, ThreadAnchor, ThreadContext, Topic, ViewData } from "../shared/types.js";
 import { errorMessage, isRecord, sum } from "../shared/util.js";
@@ -182,10 +182,10 @@ export class ReviewServer {
 
   private async loadDiff(repo: string, compare: Comparison): Promise<LoadedDiff> {
     const key = `${repo}\0${comparisonQuery(compare)}`;
-    const version = await diffVersion(repo, compare);
-    const cached = this.diffs.find((d) => d.key === key && d.version === version);
+    const probe = await probeDiff(repo, compare);
+    const cached = this.diffs.find((d) => d.key === key && d.version === probe.version);
     if (cached) return cached;
-    const loaded = { version, diff: await computeDiff(repo, compare) };
+    const loaded = { version: probe.version, diff: await computeDiff(probe) };
     this.keepDiff(repo, compare, loaded);
     return loaded;
   }
@@ -321,7 +321,7 @@ export class ReviewServer {
         return sendJson(res, 200, { file });
       }
       case "GET version":
-        return sendJson(res, 200, { version: await diffVersion(view.repo, compare) });
+        return sendJson(res, 200, { version: (await probeDiff(view.repo, compare)).version });
       case "GET refs":
         return sendJson(res, 200, await listRefs(view.repo, query.get("repo")));
       case "GET events":

@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { computeDiff, describeFailures, diffVersion, summarize } from "../engine/diff.js";
+import { computeDiff, describeFailures, probeDiff, summarize } from "../engine/diff.js";
 import { sameRange, sortOverrides } from "../shared/comparison.js";
 import type { Comparison, Topic } from "../shared/types.js";
 import { errorMessage, plural } from "../shared/util.js";
@@ -43,7 +43,8 @@ async function attempt(failure: string, run: () => Promise<string>) {
 }
 
 async function openViewer(repo: string, compare: Comparison, focus?: string, topics?: Topic[], session?: string): Promise<string> {
-  const [version, diff] = await Promise.all([diffVersion(repo, compare), computeDiff(repo, compare)]);
+  const probe = await probeDiff(repo, compare);
+  const diff = await computeDiff(probe);
   let grouped: { focus: string | null; topics: Topic[] } | null = null;
   let note = "";
 
@@ -59,7 +60,7 @@ async function openViewer(repo: string, compare: Comparison, focus?: string, top
   }
 
   const server = await getServer();
-  server.keepDiff(diff.repoRoot, compare, { version, diff });
+  server.keepDiff(diff.repoRoot, compare, { version: probe.version, diff });
   const { view, restored } = server.addView(diff.repoRoot, compare, grouped, repo, session && SESSION_ID.test(session) ? session : null);
   if (restored?.threads) note += `\nBrought back ${plural(restored.threads, "comment thread")} from the viewer this session had open before.`;
   if (restored?.unread) {
@@ -146,7 +147,7 @@ async function runMcp(): Promise<void> {
       inputSchema: { repo, base, head, threeDot, overrides },
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
-    (args) => attempt("Could not list changes", async () => formatChanges(await computeDiff(args.repo ?? process.cwd(), comparison(args)))),
+    (args) => attempt("Could not list changes", async () => formatChanges(await computeDiff(await probeDiff(args.repo ?? process.cwd(), comparison(args))))),
   );
 
   mcp.registerTool(

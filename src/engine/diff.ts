@@ -20,6 +20,7 @@ const STAT_LIMIT = 16;
 const COMMIT_FORMAT = "%H%x1f%P%x1f%an%x1f%aI%x1f%s";
 const DIFF_ARGS = ["diff", "--no-color", "--no-ext-diff", "--no-textconv", "--submodule=short", "--find-renames"];
 const HUNK_RE = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)$/;
+const COMMIT_RE = /^([0-9a-f]{40,64}) commit /;
 const STATUS: Record<string, FileStatus> = { A: "added", D: "deleted", R: "renamed" };
 
 type Content = { kind: "text"; text: string } | { kind: "binary" } | { kind: "tooLarge" } | { kind: "absent" };
@@ -60,6 +61,31 @@ interface FileHash {
   hash: string;
 }
 
+interface Change {
+  code: string;
+  path: string;
+  from: string;
+}
+
+interface RepoProbe {
+  dir: string;
+  root: string;
+  range: RefRange;
+  baseCommit: string | null;
+  tip: string | null;
+  changes: Change[] | null;
+  version: string;
+  error: string | null;
+}
+
+export interface DiffProbe {
+  version: string;
+  root: string;
+  compare: Comparison;
+  repos: RepoProbe[];
+  nested: boolean;
+}
+
 const ABSENT: Content = { kind: "absent" };
 const contentHashes = new Map<string, Map<string, FileHash>>();
 
@@ -77,7 +103,7 @@ function normalize(compare: Partial<Comparison>): Comparison {
 
   for (const { base, head } of [c, ...c.overrides]) {
     for (const ref of [base, head]) {
-      if (ref !== null && (ref === "" || ref.startsWith("-"))) throw new Error(`Invalid git ref: ${ref}`);
+      if (ref !== null && (ref === "" || ref.startsWith("-") || ref.includes("\n"))) throw new Error(`Invalid git ref: ${ref}`);
     }
   }
   return c;
@@ -100,21 +126,17 @@ async function findRepos(dir: string): Promise<{ root: string; repos: string[] |
   }
 }
 
-export async function computeDiff(dir: string, compare: Partial<Comparison> = {}): Promise<DiffResult> {
-  const c = normalize(compare);
-  const { root, repos } = await findRepos(dir);
-  checkOverrides(root, repos, c.overrides);
+export async function computeDiff(probe: DiffProbe): Promise<DiffResult> {
+  const { root, compare: c, repos, nested } = probe;
+  checkOverrides(root, nested ? repos.map((r) => r.dir) : null, c.overrides);
 
-  if (!repos) {
-    const { repo, commits, commitCount, files } = await diffRepo(root, c, "");
+  if (!nested) {
+    const { repo, commits, commitCount, files } = await diffRepo(repos[0]!);
     const { baseCommit, headCommit, oldCommit } = repo;
     return { repoRoot: root, ...c, baseCommit, headCommit, oldCommit, repos: [repo], commits, commitCount, files };
   }
 
-  const parts = await mapLimit(repos, REPO_LIMIT, (name) => {
-    const range = rangeFor(c, name);
-    return diffRepo(path.join(root, name), range, name).catch((err: unknown) => failedPart(name, range, err));
-  });
+  const parts = await mapLimit(repos, REPO_LIMIT, (r) => diffRepo(r).catch((err: unknown) => failedPart(r.dir, r.range, err)));
   const states = parts.map((p) => p.repo);
   if (states.every((r) => r.error !== null)) {
     throw new Error(repoFailures(states).map((f) => `${f.error} (${f.dirs.join(", ")})`).join("; "));
@@ -145,29 +167,26 @@ function checkOverrides(root: string, repos: string[] | null, overrides: RepoRan
   throw new Error(`No repository named ${unknown.join(", ")} directly under ${root}.`);
 }
 
-async function diffRepo(repo: string, { base, head, threeDot }: RefRange, dir: string): Promise<RepoPart> {
-  const root = await gitText(repo, ["rev-parse", "--show-toplevel"]);
-  const [baseCommit, headCommit, headOfRepo] = await Promise.all([
-    resolveCommit(root, base),
-    head === null ? null : resolveCommit(root, head),
-    head === null ? resolveCommit(root, "HEAD") : null,
-  ]);
-  if (head !== null && headCommit === null) throw new Error(`Unknown git ref: ${head}`);
-  const tip = headCommit ?? headOfRepo;
-  const oldCommit = threeDot && baseCommit && tip ? await mergeBase(root, baseCommit, tip, base, head) : baseCommit;
+async function diffRepo({ dir, root, range: { base, head, threeDot }, baseCommit, tip, changes, error }: RepoProbe): Promise<RepoPart> {
+  if (error !== null) throw new Error(error);
+  if (baseCommit === null && base !== "HEAD") throw new Error(`Unknown git ref: ${base}`);
+  if (head !== null && tip === null) throw new Error(`Unknown git ref: ${head}`);
+  const headCommit = head === null ? null : tip;
+  const oldCommit = threeDot && baseCommit && tip && baseCommit !== tip ? await mergeBase(root, baseCommit, tip, base, head) : baseCommit;
+  const repo: DiffRepo = { dir, base, head, threeDot, baseCommit, headCommit, oldCommit, error: null };
+  if (oldCommit !== null && oldCommit === tip && !changes?.length) return { repo, commits: [], commitCount: 0, files: [] };
   const range = headCommit ? [oldCommit ?? EMPTY_TREE, headCommit] : [oldCommit ?? EMPTY_TREE];
 
-  const [raw, patch, untracked, commits] = await Promise.all([
+  const [raw, patch, commits] = await Promise.all([
     git(root, [...DIFF_ARGS, "--raw", "-z", "--no-abbrev", ...range, "--"]),
     git(root, [...DIFF_ARGS, "-U0", ...range, "--"]),
-    head === null ? git(root, ["ls-files", "--others", "--exclude-standard", "-z"]) : Buffer.alloc(0),
     listCommits(root, baseCommit, tip),
   ]);
 
   const entries = parseRaw(raw);
   const sections = splitSections(patch.toString("utf8"));
   const aligned = sections.length === entries.length;
-  const untrackedPaths = untracked.toString("utf8").split("\0").filter(Boolean);
+  const untrackedPaths = (changes ?? []).filter((c) => c.code === "??").map((c) => c.path);
   const blobIds = entries.flatMap((e) => {
     const status = statusOf(e.code);
     return [status !== "added" && oldCommit ? e.oldOid : null, status !== "deleted" && headCommit ? e.newOid : null];
@@ -186,45 +205,68 @@ async function diffRepo(repo: string, { base, head, threeDot }: RefRange, dir: s
     f.path = ctx.prefix + f.path;
     if (f.oldPath !== null) f.oldPath = ctx.prefix + f.oldPath;
   }
-  return { repo: { dir, base, head, threeDot, baseCommit, headCommit, oldCommit, error: null }, ...commits, files };
+  return { repo, ...commits, files };
 }
 
-export async function diffVersion(dir: string, compare: Partial<Comparison> = {}): Promise<string> {
+export async function probeDiff(dir: string, compare: Partial<Comparison> = {}): Promise<DiffProbe> {
   const c = normalize(compare);
   const { root, repos } = await findRepos(dir);
-  if (!repos) return repoVersion(root, c.base, c.head);
-  const versions = await mapLimit(repos, REPO_LIMIT, (name) => {
-    const { base, head } = rangeFor(c, name);
-    return repoVersion(path.join(root, name), base, head).catch((err: unknown) => `! ${errorMessage(err)}`);
+  if (!repos) {
+    const repo = await probeRepo(root, c, "");
+    return { version: repo.version, root, compare: c, repos: [repo], nested: false };
+  }
+
+  const probed = await mapLimit(repos, REPO_LIMIT, (name) => {
+    const range = rangeFor(c, name);
+    const repo = path.join(root, name);
+    return probeRepo(repo, range, name).catch((err: unknown): RepoProbe => {
+      const error = errorMessage(err);
+      return { dir: name, root: repo, range, baseCommit: null, tip: null, changes: null, version: `! ${error}`, error };
+    });
   });
-  return createHash("sha256")
-    .update(repos.map((name, i) => `${name}\0${versions[i]}`).join("\n"))
+  const version = createHash("sha256")
+    .update(probed.map((r) => `${r.dir}\0${r.version}`).join("\n"))
     .digest("hex")
     .slice(0, 16);
+  return { version, root, compare: c, repos: probed, nested: true };
 }
 
-async function repoVersion(repo: string, base: string, head: string | null): Promise<string> {
-  const [commits, status] = await Promise.all([
-    git(repo, ["rev-parse", `${base}^{commit}`, `${head ?? "HEAD"}^{commit}`], [0, 128]),
-    head === null ? git(repo, ["status", "--porcelain", "-z", "--untracked-files=all"]) : null,
+async function probeRepo(root: string, range: RefRange, dir: string): Promise<RepoProbe> {
+  const { base, head } = range;
+  const [refs, tree] = await Promise.allSettled([
+    git(root, ["cat-file", "--batch-check"], [0], `${base}^{commit}\n${head ?? "HEAD"}^{commit}\n`),
+    head === null ? git(root, ["status", "--porcelain", "-z", "--untracked-files=all"]) : null,
   ]);
+  if (refs.status === "rejected") throw refs.reason;
+  if (tree.status === "rejected") throw tree.reason;
 
-  const hash = createHash("sha256").update(commits);
-  if (status) {
-    const records = status.toString("utf8").split("\0");
-    const entries: string[] = [];
-    const paths: string[] = [];
-    for (let i = 0; i < records.length; i++) {
-      const r = records[i]!;
-      if (r.length < 4) continue;
-      const from = /[RC]/.test(r.slice(0, 2)) ? records[++i] : "";
-      entries.push(`${r.startsWith("??") ? "?" : "t"} ${r.slice(3)} ${from}`);
-      paths.push(r.slice(3));
-    }
+  const lines = refs.value.toString("utf8").split("\n");
+  const commit = (i: number) => COMMIT_RE.exec(lines[i] ?? "")?.[1] ?? null;
+  const baseCommit = commit(0);
+  const tip = commit(1);
+  const changes = tree.value && parseStatus(tree.value);
+  return { dir, root, range, baseCommit, tip, changes, version: await repoVersion(root, baseCommit, tip, changes), error: null };
+}
 
+function parseStatus(buf: Buffer): Change[] {
+  const records = buf.toString("utf8").split("\0");
+  const out: Change[] = [];
+  for (let i = 0; i < records.length; i++) {
+    const r = records[i]!;
+    if (r.length < 4) continue;
+    const code = r.slice(0, 2);
+    out.push({ code, path: r.slice(3), from: /[RC]/.test(code) ? (records[++i] ?? "") : "" });
+  }
+  return out;
+}
+
+async function repoVersion(repo: string, baseCommit: string | null, tip: string | null, changes: Change[] | null): Promise<string> {
+  const hash = createHash("sha256").update(`${baseCommit} ${tip}`);
+  if (changes) {
+    const entries = changes.map((c) => `${c.code === "??" ? "?" : "t"} ${c.path} ${c.from}`);
     const known = contentHashes.get(repo);
     const next = new Map<string, FileHash>();
-    const versions = await mapLimit(paths, STAT_LIMIT, (p) => fileVersion(path.join(repo, p), known, next));
+    const versions = await mapLimit(changes, STAT_LIMIT, (c) => fileVersion(path.join(repo, c.path), known, next));
     contentHashes.set(repo, next);
     hash.update(entries.join("\0")).update(versions.join("\0"));
   }
@@ -264,15 +306,6 @@ export function describeFailures(result: DiffResult): string[] {
   return repoFailures(result.repos).map((f) => `Not compared in ${f.dirs.join(", ")}: ${f.error}`);
 }
 
-async function resolveCommit(root: string, ref: string): Promise<string | null> {
-  try {
-    return await gitText(root, ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`]);
-  } catch {
-    if (ref === "HEAD") return null;
-    throw new Error(`Unknown git ref: ${ref}`);
-  }
-}
-
 async function mergeBase(root: string, a: string, b: string, base: string, head: string | null): Promise<string> {
   const out = await gitText(root, ["merge-base", a, b], [0, 1]);
   if (out) return out;
@@ -280,7 +313,7 @@ async function mergeBase(root: string, a: string, b: string, base: string, head:
 }
 
 async function listCommits(root: string, from: string | null, to: string | null): Promise<{ commits: CommitInfo[]; commitCount: number }> {
-  if (!from || !to) return { commits: [], commitCount: 0 };
+  if (!from || !to || from === to) return { commits: [], commitCount: 0 };
   const range = `${from}..${to}`;
   const [log, count] = await Promise.all([
     git(root, ["log", "-z", `-n${MAX_COMMITS}`, "--reverse", `--format=${COMMIT_FORMAT}`, range, "--"]),

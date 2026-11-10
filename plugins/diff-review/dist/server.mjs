@@ -36839,6 +36839,7 @@ var STAT_LIMIT = 16;
 var COMMIT_FORMAT = "%H%x1f%P%x1f%an%x1f%aI%x1f%s";
 var DIFF_ARGS = ["diff", "--no-color", "--no-ext-diff", "--no-textconv", "--submodule=short", "--find-renames"];
 var HUNK_RE = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)$/;
+var COMMIT_RE = /^([0-9a-f]{40,64}) commit /;
 var STATUS = { A: "added", D: "deleted", R: "renamed" };
 var ABSENT = { kind: "absent" };
 var contentHashes = /* @__PURE__ */ new Map();
@@ -36854,7 +36855,7 @@ function normalize(compare) {
   };
   for (const { base, head } of [c, ...c.overrides]) {
     for (const ref of [base, head]) {
-      if (ref !== null && (ref === "" || ref.startsWith("-"))) throw new Error(`Invalid git ref: ${ref}`);
+      if (ref !== null && (ref === "" || ref.startsWith("-") || ref.includes("\n"))) throw new Error(`Invalid git ref: ${ref}`);
     }
   }
   return c;
@@ -36874,19 +36875,15 @@ async function findRepos(dir) {
     throw new Error(`${dir} is not in a git repository and has no git repository directly under it.`);
   }
 }
-async function computeDiff(dir, compare = {}) {
-  const c = normalize(compare);
-  const { root, repos } = await findRepos(dir);
-  checkOverrides(root, repos, c.overrides);
-  if (!repos) {
-    const { repo, commits, commitCount, files } = await diffRepo(root, c, "");
+async function computeDiff(probe) {
+  const { root, compare: c, repos, nested } = probe;
+  checkOverrides(root, nested ? repos.map((r) => r.dir) : null, c.overrides);
+  if (!nested) {
+    const { repo, commits, commitCount, files } = await diffRepo(repos[0]);
     const { baseCommit, headCommit, oldCommit } = repo;
     return { repoRoot: root, ...c, baseCommit, headCommit, oldCommit, repos: [repo], commits, commitCount, files };
   }
-  const parts = await mapLimit(repos, REPO_LIMIT, (name) => {
-    const range = rangeFor(c, name);
-    return diffRepo(path.join(root, name), range, name).catch((err) => failedPart(name, range, err));
-  });
+  const parts = await mapLimit(repos, REPO_LIMIT, (r) => diffRepo(r).catch((err) => failedPart(r.dir, r.range, err)));
   const states = parts.map((p) => p.repo);
   if (states.every((r) => r.error !== null)) {
     throw new Error(repoFailures(states).map((f) => `${f.error} (${f.dirs.join(", ")})`).join("; "));
@@ -36913,27 +36910,24 @@ function checkOverrides(root, repos, overrides) {
   if (!repos) throw new Error(`${root} is a single repository, so no repository in it can compare a range of its own.`);
   throw new Error(`No repository named ${unknown2.join(", ")} directly under ${root}.`);
 }
-async function diffRepo(repo, { base, head, threeDot }, dir) {
-  const root = await gitText(repo, ["rev-parse", "--show-toplevel"]);
-  const [baseCommit, headCommit, headOfRepo] = await Promise.all([
-    resolveCommit(root, base),
-    head === null ? null : resolveCommit(root, head),
-    head === null ? resolveCommit(root, "HEAD") : null
-  ]);
-  if (head !== null && headCommit === null) throw new Error(`Unknown git ref: ${head}`);
-  const tip = headCommit ?? headOfRepo;
-  const oldCommit = threeDot && baseCommit && tip ? await mergeBase(root, baseCommit, tip, base, head) : baseCommit;
+async function diffRepo({ dir, root, range: { base, head, threeDot }, baseCommit, tip, changes, error: error62 }) {
+  if (error62 !== null) throw new Error(error62);
+  if (baseCommit === null && base !== "HEAD") throw new Error(`Unknown git ref: ${base}`);
+  if (head !== null && tip === null) throw new Error(`Unknown git ref: ${head}`);
+  const headCommit = head === null ? null : tip;
+  const oldCommit = threeDot && baseCommit && tip && baseCommit !== tip ? await mergeBase(root, baseCommit, tip, base, head) : baseCommit;
+  const repo = { dir, base, head, threeDot, baseCommit, headCommit, oldCommit, error: null };
+  if (oldCommit !== null && oldCommit === tip && !changes?.length) return { repo, commits: [], commitCount: 0, files: [] };
   const range = headCommit ? [oldCommit ?? EMPTY_TREE, headCommit] : [oldCommit ?? EMPTY_TREE];
-  const [raw, patch, untracked, commits] = await Promise.all([
+  const [raw, patch, commits] = await Promise.all([
     git(root, [...DIFF_ARGS, "--raw", "-z", "--no-abbrev", ...range, "--"]),
     git(root, [...DIFF_ARGS, "-U0", ...range, "--"]),
-    head === null ? git(root, ["ls-files", "--others", "--exclude-standard", "-z"]) : Buffer.alloc(0),
     listCommits(root, baseCommit, tip)
   ]);
   const entries = parseRaw(raw);
   const sections = splitSections(patch.toString("utf8"));
   const aligned = sections.length === entries.length;
-  const untrackedPaths = untracked.toString("utf8").split("\0").filter(Boolean);
+  const untrackedPaths = (changes ?? []).filter((c) => c.code === "??").map((c) => c.path);
   const blobIds = entries.flatMap((e) => {
     const status = statusOf(e.code);
     return [status !== "added" && oldCommit ? e.oldOid : null, status !== "deleted" && headCommit ? e.newOid : null];
@@ -36951,38 +36945,61 @@ async function diffRepo(repo, { base, head, threeDot }, dir) {
     f.path = ctx.prefix + f.path;
     if (f.oldPath !== null) f.oldPath = ctx.prefix + f.oldPath;
   }
-  return { repo: { dir, base, head, threeDot, baseCommit, headCommit, oldCommit, error: null }, ...commits, files };
+  return { repo, ...commits, files };
 }
-async function diffVersion(dir, compare = {}) {
+async function probeDiff(dir, compare = {}) {
   const c = normalize(compare);
   const { root, repos } = await findRepos(dir);
-  if (!repos) return repoVersion(root, c.base, c.head);
-  const versions = await mapLimit(repos, REPO_LIMIT, (name) => {
-    const { base, head } = rangeFor(c, name);
-    return repoVersion(path.join(root, name), base, head).catch((err) => `! ${errorMessage(err)}`);
+  if (!repos) {
+    const repo = await probeRepo(root, c, "");
+    return { version: repo.version, root, compare: c, repos: [repo], nested: false };
+  }
+  const probed = await mapLimit(repos, REPO_LIMIT, (name) => {
+    const range = rangeFor(c, name);
+    const repo = path.join(root, name);
+    return probeRepo(repo, range, name).catch((err) => {
+      const error62 = errorMessage(err);
+      return { dir: name, root: repo, range, baseCommit: null, tip: null, changes: null, version: `! ${error62}`, error: error62 };
+    });
   });
-  return createHash("sha256").update(repos.map((name, i) => `${name}\0${versions[i]}`).join("\n")).digest("hex").slice(0, 16);
+  const version2 = createHash("sha256").update(probed.map((r) => `${r.dir}\0${r.version}`).join("\n")).digest("hex").slice(0, 16);
+  return { version: version2, root, compare: c, repos: probed, nested: true };
 }
-async function repoVersion(repo, base, head) {
-  const [commits, status] = await Promise.all([
-    git(repo, ["rev-parse", `${base}^{commit}`, `${head ?? "HEAD"}^{commit}`], [0, 128]),
-    head === null ? git(repo, ["status", "--porcelain", "-z", "--untracked-files=all"]) : null
+async function probeRepo(root, range, dir) {
+  const { base, head } = range;
+  const [refs, tree] = await Promise.allSettled([
+    git(root, ["cat-file", "--batch-check"], [0], `${base}^{commit}
+${head ?? "HEAD"}^{commit}
+`),
+    head === null ? git(root, ["status", "--porcelain", "-z", "--untracked-files=all"]) : null
   ]);
-  const hash2 = createHash("sha256").update(commits);
-  if (status) {
-    const records = status.toString("utf8").split("\0");
-    const entries = [];
-    const paths = [];
-    for (let i = 0; i < records.length; i++) {
-      const r = records[i];
-      if (r.length < 4) continue;
-      const from = /[RC]/.test(r.slice(0, 2)) ? records[++i] : "";
-      entries.push(`${r.startsWith("??") ? "?" : "t"} ${r.slice(3)} ${from}`);
-      paths.push(r.slice(3));
-    }
+  if (refs.status === "rejected") throw refs.reason;
+  if (tree.status === "rejected") throw tree.reason;
+  const lines = refs.value.toString("utf8").split("\n");
+  const commit = (i) => COMMIT_RE.exec(lines[i] ?? "")?.[1] ?? null;
+  const baseCommit = commit(0);
+  const tip = commit(1);
+  const changes = tree.value && parseStatus(tree.value);
+  return { dir, root, range, baseCommit, tip, changes, version: await repoVersion(root, baseCommit, tip, changes), error: null };
+}
+function parseStatus(buf) {
+  const records = buf.toString("utf8").split("\0");
+  const out = [];
+  for (let i = 0; i < records.length; i++) {
+    const r = records[i];
+    if (r.length < 4) continue;
+    const code = r.slice(0, 2);
+    out.push({ code, path: r.slice(3), from: /[RC]/.test(code) ? records[++i] ?? "" : "" });
+  }
+  return out;
+}
+async function repoVersion(repo, baseCommit, tip, changes) {
+  const hash2 = createHash("sha256").update(`${baseCommit} ${tip}`);
+  if (changes) {
+    const entries = changes.map((c) => `${c.code === "??" ? "?" : "t"} ${c.path} ${c.from}`);
     const known = contentHashes.get(repo);
     const next = /* @__PURE__ */ new Map();
-    const versions = await mapLimit(paths, STAT_LIMIT, (p) => fileVersion(path.join(repo, p), known, next));
+    const versions = await mapLimit(changes, STAT_LIMIT, (c) => fileVersion(path.join(repo, c.path), known, next));
     contentHashes.set(repo, next);
     hash2.update(entries.join("\0")).update(versions.join("\0"));
   }
@@ -37014,21 +37031,13 @@ function summarize(result2) {
 function describeFailures(result2) {
   return repoFailures(result2.repos).map((f) => `Not compared in ${f.dirs.join(", ")}: ${f.error}`);
 }
-async function resolveCommit(root, ref) {
-  try {
-    return await gitText(root, ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`]);
-  } catch {
-    if (ref === "HEAD") return null;
-    throw new Error(`Unknown git ref: ${ref}`);
-  }
-}
 async function mergeBase(root, a, b, base, head) {
   const out = await gitText(root, ["merge-base", a, b], [0, 1]);
   if (out) return out;
   throw new Error(`${base} and ${head ?? "HEAD"} share no history, so there is no merge base. Compare them directly instead.`);
 }
 async function listCommits(root, from, to) {
-  if (!from || !to) return { commits: [], commitCount: 0 };
+  if (!from || !to || from === to) return { commits: [], commitCount: 0 };
   const range = `${from}..${to}`;
   const [log, count] = await Promise.all([
     git(root, ["log", "-z", `-n${MAX_COMMITS}`, "--reverse", `--format=${COMMIT_FORMAT}`, range, "--"]),
@@ -37984,10 +37993,10 @@ var ReviewServer = class {
   }
   async loadDiff(repo, compare) {
     const key = `${repo}\0${comparisonQuery(compare)}`;
-    const version2 = await diffVersion(repo, compare);
-    const cached2 = this.diffs.find((d) => d.key === key && d.version === version2);
+    const probe = await probeDiff(repo, compare);
+    const cached2 = this.diffs.find((d) => d.key === key && d.version === probe.version);
     if (cached2) return cached2;
-    const loaded = { version: version2, diff: await computeDiff(repo, compare) };
+    const loaded = { version: probe.version, diff: await computeDiff(probe) };
     this.keepDiff(repo, compare, loaded);
     return loaded;
   }
@@ -38106,7 +38115,7 @@ var ReviewServer = class {
         return sendJson(res, 200, { file: file2 });
       }
       case "GET version":
-        return sendJson(res, 200, { version: await diffVersion(view.repo, compare) });
+        return sendJson(res, 200, { version: (await probeDiff(view.repo, compare)).version });
       case "GET refs":
         return sendJson(res, 200, await listRefs(view.repo, query.get("repo")));
       case "GET events":
@@ -38329,7 +38338,8 @@ async function attempt(failure2, run) {
   }
 }
 async function openViewer(repo, compare, focus, topics, session) {
-  const [version2, diff] = await Promise.all([diffVersion(repo, compare), computeDiff(repo, compare)]);
+  const probe = await probeDiff(repo, compare);
+  const diff = await computeDiff(probe);
   let grouped = null;
   let note = "";
   if (topics) {
@@ -38344,7 +38354,7 @@ ${unassigned.length} change(s) are in no topic and appear under "Other changes":
     grouped = { focus: focus?.trim() || null, topics };
   }
   const server = await getServer();
-  server.keepDiff(diff.repoRoot, compare, { version: version2, diff });
+  server.keepDiff(diff.repoRoot, compare, { version: probe.version, diff });
   const { view, restored } = server.addView(diff.repoRoot, compare, grouped, repo, session && SESSION_ID.test(session) ? session : null);
   if (restored?.threads) note += `
 Brought back ${plural2(restored.threads, "comment thread")} from the viewer this session had open before.`;
@@ -38401,7 +38411,7 @@ async function runMcp() {
       inputSchema: { repo, base, head, threeDot, overrides },
       annotations: { readOnlyHint: true, openWorldHint: false }
     },
-    (args) => attempt("Could not list changes", async () => formatChanges(await computeDiff(args.repo ?? process.cwd(), comparison(args))))
+    (args) => attempt("Could not list changes", async () => formatChanges(await computeDiff(await probeDiff(args.repo ?? process.cwd(), comparison(args)))))
   );
   mcp.registerTool(
     "open_diff_viewer",
