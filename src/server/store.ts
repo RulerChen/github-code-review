@@ -9,14 +9,13 @@ const DIR = process.env.CLAUDE_PLUGIN_DATA ? path.join(process.env.CLAUDE_PLUGIN
 const FORMAT = 1;
 const KEEP_MS = 3 * 24 * 60 * 60 * 1000;
 
-export interface SavedState {
+interface SavedState {
   threads: Thread[];
   submissions: Submission[];
   read: number;
   reviews: Review[];
 }
 
-// One file per session and repository, so sessions that review the same repository keep their own comments.
 function fileFor(session: string, repo: string): string {
   return path.join(DIR!, `${session}-${createHash("sha256").update(repo).digest("hex").slice(0, 16)}.json`);
 }
@@ -50,7 +49,5 @@ export function dropOldStates(): void {
       const file = path.join(DIR, name);
       if (Date.now() - statSync(file).mtimeMs > KEEP_MS) unlinkSync(file);
     }
-  } catch {
-    // Nothing was saved yet.
-  }
+  } catch {}
 }

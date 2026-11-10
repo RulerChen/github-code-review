@@ -2,7 +2,7 @@ import { useEffect, useRef, useSyncExternalStore } from "react";
 import type { DiffLine, FileDiff } from "../shared/types";
 import { plural } from "../shared/util";
 import { pin } from "./anchor";
-import { basename } from "./paths";
+import { basename, dirPrefix } from "./paths";
 
 const MAX_HITS = 500;
 const LEAD_CHARS = 16;
@@ -17,7 +17,7 @@ export interface Hit {
   at: number;
 }
 
-export interface Found {
+interface Found {
   groups: { path: string; hits: Hit[] }[];
   hits: Hit[];
   capped: boolean;
@@ -34,20 +34,15 @@ export function searchDiff(files: FileDiff[], query: string): Found {
       for (const line of hunk.lines) {
         const at = line.text.toLowerCase().indexOf(q);
         if (at < 0) continue;
-        if (found.hits.length + hits.length === MAX_HITS) {
-          found.capped = true;
-          break;
-        }
+        if (found.hits.length === MAX_HITS) return { ...found, capped: true };
+
         const side = line.kind === "del" ? "old" : "new";
-        hits.push({ path: file.path, side, no: (side === "old" ? line.oldNo : line.newNo)!, kind: line.kind, text: line.text, at });
+        const hit: Hit = { path: file.path, side, no: (side === "old" ? line.oldNo : line.newNo)!, kind: line.kind, text: line.text, at };
+        if (!hits.length) found.groups.push({ path: file.path, hits });
+        hits.push(hit);
+        found.hits.push(hit);
       }
-      if (found.capped) break;
     }
-    if (hits.length) {
-      found.groups.push({ path: file.path, hits });
-      found.hits.push(...hits);
-    }
-    if (found.capped) break;
   }
   return found;
 }
@@ -106,7 +101,7 @@ export function SearchResults({ found, query, current, onOpen }: Props) {
       {found.groups.map((g) => (
         <section key={g.path}>
           <h3 className="search-file" title={g.path}>
-            <span className="search-dir">{g.path.slice(0, g.path.length - basename(g.path).length)}</span>
+            <span className="search-dir">{dirPrefix(g.path)}</span>
             {basename(g.path)}
           </h3>
           <ul>

@@ -4,7 +4,7 @@ import type { Thread, ThreadAnchor } from "../shared/types";
 import { anchorLabel, authorName, type CommentsApi, readableCount, ThreadView } from "./comments";
 import { CloseIcon, ConversationIcon } from "./icons";
 import { isOutdated } from "./locate";
-import { basename, comparePaths } from "./paths";
+import { basename, comparePaths, dirPrefix } from "./paths";
 import { readStorage, useStoredState, writeStorage } from "./storage";
 import "./conversations.css";
 
@@ -236,7 +236,7 @@ function ConversationItem({ thread, inDiff, current, unread, onOpen }: ItemProps
       ) : (
         <span className="conv-where" title={`${anchor.path}, ${anchorLabel(anchor).toLowerCase()}`}>
           <span className="conv-file">
-            <span className="conv-dir">{anchor.path.slice(0, anchor.path.length - basename(anchor.path).length)}</span>
+            <span className="conv-dir">{dirPrefix(anchor.path)}</span>
             {basename(anchor.path)}
           </span>
           <span className="conv-lines">{lineLabel(anchor)}</span>

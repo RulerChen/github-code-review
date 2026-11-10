@@ -1,5 +1,7 @@
 export const basename = (p: string) => p.slice(p.lastIndexOf("/") + 1);
 
+export const dirPrefix = (p: string) => p.slice(0, p.lastIndexOf("/") + 1);
+
 export function comparePaths(a: string, b: string): number {
   const pa = a.split("/");
   const pb = b.split("/");

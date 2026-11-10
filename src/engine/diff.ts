@@ -78,7 +78,7 @@ interface RepoProbe {
   error: string | null;
 }
 
-export interface DiffProbe {
+interface DiffProbe {
   version: string;
   root: string;
   compare: Comparison;
@@ -174,7 +174,7 @@ async function diffRepo({ dir, root, range: { base, head, threeDot }, baseCommit
   const headCommit = head === null ? null : tip;
   const oldCommit = threeDot && baseCommit && tip && baseCommit !== tip ? await mergeBase(root, baseCommit, tip, base, head) : baseCommit;
   const repo: DiffRepo = { dir, base, head, threeDot, baseCommit, headCommit, oldCommit, error: null };
-  if (oldCommit !== null && oldCommit === tip && !changes?.length) return { repo, commits: [], commitCount: 0, files: [] };
+  if (oldCommit === tip && !changes?.length) return { repo, commits: [], commitCount: 0, files: [] };
   const range = headCommit ? [oldCommit ?? EMPTY_TREE, headCommit] : [oldCommit ?? EMPTY_TREE];
 
   const [raw, patch, commits] = await Promise.all([
@@ -211,12 +211,7 @@ async function diffRepo({ dir, root, range: { base, head, threeDot }, baseCommit
 export async function probeDiff(dir: string, compare: Partial<Comparison> = {}): Promise<DiffProbe> {
   const c = normalize(compare);
   const { root, repos } = await findRepos(dir);
-  if (!repos) {
-    const repo = await probeRepo(root, c, "");
-    return { version: repo.version, root, compare: c, repos: [repo], nested: false };
-  }
-
-  const probed = await mapLimit(repos, REPO_LIMIT, (name) => {
+  const probed = await mapLimit(repos ?? [""], REPO_LIMIT, (name) => {
     const range = rangeFor(c, name);
     const repo = path.join(root, name);
     return probeRepo(repo, range, name).catch((err: unknown): RepoProbe => {
@@ -228,7 +223,7 @@ export async function probeDiff(dir: string, compare: Partial<Comparison> = {}):
     .update(probed.map((r) => `${r.dir}\0${r.version}`).join("\n"))
     .digest("hex")
     .slice(0, 16);
-  return { version, root, compare: c, repos: probed, nested: true };
+  return { version, root, compare: c, repos: probed, nested: repos !== null };
 }
 
 async function probeRepo(root: string, range: RefRange, dir: string): Promise<RepoProbe> {
@@ -240,10 +235,7 @@ async function probeRepo(root: string, range: RefRange, dir: string): Promise<Re
   if (refs.status === "rejected") throw refs.reason;
   if (tree.status === "rejected") throw tree.reason;
 
-  const lines = refs.value.toString("utf8").split("\n");
-  const commit = (i: number) => COMMIT_RE.exec(lines[i] ?? "")?.[1] ?? null;
-  const baseCommit = commit(0);
-  const tip = commit(1);
+  const [baseCommit = null, tip = null] = refs.value.toString("utf8").split("\n").map((line) => COMMIT_RE.exec(line)?.[1] ?? null);
   const changes = tree.value && parseStatus(tree.value);
   return { dir, root, range, baseCommit, tip, changes, version: await repoVersion(root, baseCommit, tip, changes), error: null };
 }

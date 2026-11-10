@@ -19,12 +19,12 @@ interface View {
   compare: Comparison;
 }
 
-export interface Restored {
+interface Restored {
   threads: number;
   unread: number;
 }
 
-export interface LoadedDiff {
+interface LoadedDiff {
   version: string;
   diff: DiffResult;
 }
@@ -143,7 +143,6 @@ export class ReviewServer {
     return { view, restored };
   }
 
-  // Brings back what an earlier viewer of the session saved for the repository, unless this one already holds comments.
   private restore(view: View, threads: RepoThreads, session: string): Restored | null {
     if (threads.threads.length || threads.submissions.length) return null;
     const saved = loadState(session, view.repo);

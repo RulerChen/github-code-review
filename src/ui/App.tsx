@@ -174,28 +174,26 @@ export function App({ viewId }: Props) {
     [viewId],
   );
 
-  const loadRefs = useCallback(() => fetchRefs(viewId ?? ""), [viewId]);
-  const loadRepoRefs = useCallback((repo: string) => fetchRefs(viewId ?? "", repo), [viewId]);
+  const loadRefs = useCallback((repo?: string) => fetchRefs(viewId ?? "", repo), [viewId]);
 
-  const compareWith = (next: Comparison, nextTab?: Tab) => {
-    if (data) void load(sameComparison(next, data.opened) ? null : next, true, nextTab);
+  const diff = data?.diff ?? null;
+  const compareWith = (next: Comparison, nextTab?: Tab, nextRange: CommitRange | null = null) => {
+    if (data) void load(sameComparison(next, data.opened) ? null : next, true, nextTab, nextRange);
   };
 
-  const shownDiff = data?.diff;
-  const stepIndex = range && shownDiff ? range.commits.findIndex((c) => c.parents.length > 0 && sameComparison(commitComparison(c), shownDiff)) : -1;
+  const stepIndex = range && diff ? range.commits.findIndex((c) => c.parents.length > 0 && sameComparison(commitComparison(c), diff)) : -1;
   const stepping = stepIndex >= 0 ? range : null;
 
   const viewCommit = (c: CommitInfo) => {
-    if (!data) return;
-    const next = commitComparison(c);
-    const outer = stepping ?? { compare: requested.current, commits: data.diff.commits, count: data.diff.commitCount };
-    void load(sameComparison(next, data.opened) ? null : next, true, "files", outer);
+    if (!diff) return;
+    const outer = stepping ?? { compare: requested.current, commits: diff.commits, count: diff.commitCount };
+    compareWith(commitComparison(c), "files", outer);
   };
   const showAllCommits = () => stepping && void load(stepping.compare, true);
 
   const showReview = (r: Opened) => {
-    if (!data) return;
-    if (r.repo === data.diff.repoRoot) compareWith(r.compare, "topics");
+    if (!diff) return;
+    if (r.repo === diff.repoRoot) compareWith(r.compare, "topics");
     else location.assign(`/v/${encodeURIComponent(r.view)}?${comparisonQuery(r.compare)}`);
   };
 
@@ -215,7 +213,6 @@ export function App({ viewId }: Props) {
     return () => events.close();
   }, [viewId]);
 
-  const diff = data?.diff ?? null;
   const current = useMemo<Comparison | null>(
     () => diff && { base: diff.base, head: diff.head, threeDot: diff.threeDot, overrides: diff.overrides },
     [diff?.base, diff?.head, diff?.threeDot, diff?.overrides],
@@ -491,7 +488,7 @@ export function App({ viewId }: Props) {
               <SidebarToggle open={sidebarOpen} onToggle={() => setSidebarOpen((o) => !o)} />
               <div className="topbar-title">
                 <CompareControls diff={diff} loadRefs={loadRefs} onCompare={compareWith} />
-                <RepoComparisons diff={diff} loadRefs={loadRepoRefs} onCompare={compareWith} />
+                <RepoComparisons diff={diff} loadRefs={loadRefs} onCompare={compareWith} />
               </div>
               <ChangeStats files={diff.files} />
               <RefreshButton stale={stale} loading={loading} onClick={() => void load(requested.current)} />

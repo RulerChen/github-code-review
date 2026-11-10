@@ -25,7 +25,7 @@ export function ThemeToggle() {
   const label = theme === "dark" ? "Switch to light theme" : "Switch to dark theme";
 
   return (
-    <button className="icon-button theme-toggle" onClick={toggle} aria-label={label} title={label}>
+    <button className="icon-button" onClick={toggle} aria-label={label} title={label}>
       {theme === "dark" ? <SunIcon /> : <MoonIcon />}
     </button>
   );
@@ -61,7 +61,7 @@ export function RefreshButton({ stale, loading, onClick }: { stale: boolean; loa
       title={label}
     >
       <SyncIcon />
-      <span className="refresh-label">{label}</span>
+      {label}
     </button>
   );
 }

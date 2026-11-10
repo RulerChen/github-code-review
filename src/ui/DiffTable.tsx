@@ -223,7 +223,6 @@ export const DiffTable = memo(function DiffTable({ path, hunks, oldTokens, newTo
 
 type Expand = (e: MouseEvent<HTMLButtonElement>, dir: ExpandDir, blockId: string, lines: number) => void;
 
-// Context lines are shared by both sides, so each side's number column gets the same expanders.
 function HunkRow({ header, expanders }: { header?: string; expanders: ReactNode }) {
   return (
     <tr className="hunk">
