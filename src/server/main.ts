@@ -60,7 +60,11 @@ async function openViewer(repo: string, compare: Comparison, focus?: string, top
 
   const server = await getServer();
   server.keepDiff(diff.repoRoot, compare, { version, diff });
-  const view = server.addView(diff.repoRoot, compare, grouped, repo, session && SESSION_ID.test(session) ? session : null);
+  const { view, restored } = server.addView(diff.repoRoot, compare, grouped, repo, session && SESSION_ID.test(session) ? session : null);
+  if (restored?.threads) note += `\nBrought back ${plural(restored.threads, "comment thread")} from the viewer this session had open before.`;
+  if (restored?.unread) {
+    note += `\n${plural(restored.unread, "review")} submitted there ${restored.unread === 1 ? "was" : "were"} never read. Read ${restored.unread === 1 ? "it" : "them"} with get_review_comments.`;
+  }
   const shown = server.pageOpen
     ? "\nThe viewer page already open in the user's browser has switched to this comparison, so they do not need to open the URL again."
     : "";
@@ -164,7 +168,10 @@ async function runMcp(): Promise<void> {
         session: z
           .string()
           .optional()
-          .describe("The current Claude Code session id. @claude questions in the page continue a fork of this session."),
+          .describe(
+            "The current Claude Code session id. @claude questions in the page continue a fork of this session, and the " +
+              "review's comments are saved under it, so they come back when the session opens the viewer again.",
+          ),
         topics: z
           .array(
             z.object({
@@ -225,13 +232,16 @@ async function runMcp(): Promise<void> {
 
       const parts = repos.flatMap(({ repo, threads, view }) => {
         const text = formatReviewComments(threads.threads, threads.submissions, args.after ?? null, threads.read);
-        threads.read = threads.submissions.length;
+        threads.markRead();
         if (!text) return [];
         return [
           `${repo}\n\n${text}\n\nWhen you have addressed it, reply on each thread with reply_to_review. Then wait for the next ` +
             `review by running this in the background: ${server!.waitCommand(view)}`,
         ];
       });
+      if (!all.length) {
+        return result("No viewer is open. Open it with open_diff_viewer, which brings back the comments of the viewer this session had open before.");
+      }
       return result(parts.length ? parts.join("\n\n") : "No review comments yet.");
     },
   );

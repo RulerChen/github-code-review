@@ -3262,8 +3262,8 @@ var require_utils = __commonJS({
       }
       return ind;
     }
-    function removeDotSegments(path5) {
-      let input2 = path5;
+    function removeDotSegments(path6) {
+      let input2 = path6;
       const output2 = [];
       let nextSlash = -1;
       let len = 0;
@@ -3337,11 +3337,11 @@ var require_utils = __commonJS({
       }
       return output2.join("");
     }
-    function removeDotSegmentsRelative(path5) {
-      if (path5 === "" || path5[0] === "/") {
-        return removeDotSegments(path5);
+    function removeDotSegmentsRelative(path6) {
+      if (path6 === "" || path6[0] === "/") {
+        return removeDotSegments(path6);
       }
-      const segments = path5.split("/");
+      const segments = path6.split("/");
       const last = segments.length - 1;
       const output2 = [];
       let trailingDirectory = false;
@@ -3704,8 +3704,8 @@ var require_schemes = __commonJS({
       }
       if (wsComponent.resourceName) {
         const queryIndex = wsComponent.resourceName.indexOf("?");
-        const path5 = queryIndex === -1 ? wsComponent.resourceName : wsComponent.resourceName.slice(0, queryIndex);
-        wsComponent.path = path5 && path5 !== "/" ? path5 : void 0;
+        const path6 = queryIndex === -1 ? wsComponent.resourceName : wsComponent.resourceName.slice(0, queryIndex);
+        wsComponent.path = path6 && path6 !== "/" ? path6 : void 0;
         wsComponent.query = queryIndex === -1 ? void 0 : wsComponent.resourceName.slice(queryIndex + 1);
         wsComponent.resourceName = void 0;
       }
@@ -7256,8 +7256,8 @@ var require_dist = __commonJS({
 });
 
 // src/server/main.ts
-import { readFileSync } from "node:fs";
-import path4 from "node:path";
+import { readFileSync as readFileSync2 } from "node:fs";
+import path5 from "node:path";
 import { fileURLToPath } from "node:url";
 
 // node_modules/zod/v3/helpers/util.js
@@ -7634,8 +7634,8 @@ function getErrorMap() {
 
 // node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
-  const { data, path: path5, errorMaps, issueData } = params;
-  const fullPath = [...path5, ...issueData.path || []];
+  const { data, path: path6, errorMaps, issueData } = params;
+  const fullPath = [...path6, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -7750,11 +7750,11 @@ var errorUtil;
 
 // node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
-  constructor(parent, value, path5, key) {
+  constructor(parent, value, path6, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path5;
+    this._path = path6;
     this._key = key;
   }
   get path() {
@@ -11709,10 +11709,10 @@ function mergeDefs(...defs) {
 function cloneDef(schema) {
   return mergeDefs(schema._zod.def);
 }
-function getElementAtPath(obj, path5) {
-  if (!path5)
+function getElementAtPath(obj, path6) {
+  if (!path6)
     return obj;
-  return path5.reduce((acc, key) => acc?.[key], obj);
+  return path6.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -12052,11 +12052,11 @@ function explicitlyAborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path5, issues) {
+function prefixIssues(path6, issues) {
   return issues.map((iss) => {
     var _a3;
     (_a3 = iss).path ?? (_a3.path = []);
-    iss.path.unshift(path5);
+    iss.path.unshift(path6);
     return iss;
   });
 }
@@ -12518,16 +12518,16 @@ function flattenError(error62, mapper = (issue2) => issue2.message) {
 }
 function formatError(error62, mapper = (issue2) => issue2.message) {
   const fieldErrors = { _errors: [] };
-  const processError = (error63, path5 = []) => {
+  const processError = (error63, path6 = []) => {
     for (const issue2 of error63.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path5, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path6, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path5, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path6, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path5, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path6, ...issue2.path]);
       } else {
-        const fullpath = [...path5, ...issue2.path];
+        const fullpath = [...path6, ...issue2.path];
         if (fullpath.length === 0) {
           fieldErrors._errors.push(mapper(issue2));
         } else {
@@ -12566,17 +12566,17 @@ function formatError(error62, mapper = (issue2) => issue2.message) {
 }
 function treeifyError(error62, mapper = (issue2) => issue2.message) {
   const result2 = { errors: [] };
-  const processError = (error63, path5 = []) => {
+  const processError = (error63, path6 = []) => {
     var _a3;
     for (const issue2 of error63.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path5, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path6, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path5, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path6, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path5, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path6, ...issue2.path]);
       } else {
-        const fullpath = [...path5, ...issue2.path];
+        const fullpath = [...path6, ...issue2.path];
         if (fullpath.length === 0) {
           result2.errors.push(mapper(issue2));
           continue;
@@ -12615,8 +12615,8 @@ function treeifyError(error62, mapper = (issue2) => issue2.message) {
 }
 function toDotPath(_path) {
   const segs = [];
-  const path5 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
-  for (const seg of path5) {
+  const path6 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
+  for (const seg of path6) {
     if (typeof seg === "number")
       segs.push(`[${seg}]`);
     else if (typeof seg === "symbol")
@@ -28167,11 +28167,11 @@ function normalizeObjectSchema(schema) {
   }
   return void 0;
 }
-function getDotPath(path5) {
-  if (path5.length === 0) {
+function getDotPath(path6) {
+  if (path6.length === 0) {
     return "object root";
   }
-  return path5.reduce((acc, seg, index) => {
+  return path6.reduce((acc, seg, index) => {
     if (index === 0) {
       return String(seg);
     }
@@ -30398,13 +30398,13 @@ function resolveRef(ref, ctx) {
   if (!ref.startsWith("#")) {
     throw new Error("External $ref is not supported, only local refs (#/...) are allowed");
   }
-  const path5 = ref.slice(1).split("/").filter(Boolean);
-  if (path5.length === 0) {
+  const path6 = ref.slice(1).split("/").filter(Boolean);
+  if (path6.length === 0) {
     return ctx.rootSchema;
   }
   const defsKey = ctx.version === "draft-2020-12" ? "$defs" : "definitions";
-  if (path5[0] === defsKey) {
-    const key = path5[1] === void 0 ? void 0 : decodeJSONPointerSegment(path5[1]);
+  if (path6[0] === defsKey) {
+    const key = path6[1] === void 0 ? void 0 : decodeJSONPointerSegment(path6[1]);
     if (!key || !ctx.defs[key]) {
       throw new Error(`Reference not found: ${ref}`);
     }
@@ -37412,7 +37412,7 @@ import { randomBytes as randomBytes2, randomInt, timingSafeEqual } from "node:cr
 import { readFile as readFile2 } from "node:fs/promises";
 import { createServer } from "node:http";
 import { isIP } from "node:net";
-import path3 from "node:path";
+import path4 from "node:path";
 import { promisify } from "node:util";
 import { gzip } from "node:zlib";
 
@@ -37586,10 +37586,52 @@ function unknownIds(diff, topics) {
   return unknown2.length ? `These ids are not in the list of changes: ${unknown2.join(", ")}.` : null;
 }
 
+// src/server/store.ts
+import { createHash as createHash2 } from "node:crypto";
+import { mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import path3 from "node:path";
+var DIR = process.env.CLAUDE_PLUGIN_DATA ? path3.join(process.env.CLAUDE_PLUGIN_DATA, "reviews") : null;
+var FORMAT = 1;
+var KEEP_MS = 30 * 24 * 60 * 60 * 1e3;
+function fileFor(session, repo) {
+  return path3.join(DIR, `${session}-${createHash2("sha256").update(repo).digest("hex").slice(0, 16)}.json`);
+}
+function loadState(session, repo) {
+  if (!DIR) return null;
+  try {
+    const saved = JSON.parse(readFileSync(fileFor(session, repo), "utf8"));
+    return saved.format === FORMAT ? saved.state : null;
+  } catch {
+    return null;
+  }
+}
+function saveState(session, repo, state) {
+  if (!DIR) return;
+  const file2 = fileFor(session, repo);
+  try {
+    mkdirSync(DIR, { recursive: true, mode: 448 });
+    writeFileSync(`${file2}.tmp`, JSON.stringify({ format: FORMAT, repo, state }), { mode: 384 });
+    renameSync(`${file2}.tmp`, file2);
+  } catch (err) {
+    console.error(`diff-review: could not save the review of ${repo}: ${errorMessage(err)}`);
+  }
+}
+function dropOldStates() {
+  if (!DIR) return;
+  try {
+    for (const name of readdirSync(DIR)) {
+      const file2 = path3.join(DIR, name);
+      if (Date.now() - statSync(file2).mtimeMs > KEEP_MS) unlinkSync(file2);
+    }
+  } catch {
+  }
+}
+
 // src/server/threads.ts
 import { randomBytes } from "node:crypto";
 var EMIT_INTERVAL_MS = 100;
 var REVIEWING = "The user is reviewing the code changes in a diff viewer";
+var STOPPED = "The viewer stopped before Claude answered. Ask again for an answer.";
 var ANSWER = "Answer the last comment directly and concisely, in the language it is written in, using Markdown. You can read files to check details, but do not change anything.";
 var newId = () => randomBytes(6).toString("base64url");
 var now = () => (/* @__PURE__ */ new Date()).toISOString();
@@ -37602,6 +37644,8 @@ var RepoThreads = class {
   submissions = [];
   read = 0;
   parentSession = null;
+  onChange = () => {
+  };
   fork = null;
   queue = Promise.resolve();
   listeners = /* @__PURE__ */ new Set();
@@ -37617,6 +37661,21 @@ var RepoThreads = class {
   subscribeListening(fn) {
     this.listeningListeners.add(fn);
     return () => this.listeningListeners.delete(fn);
+  }
+  restore(threads, submissions, read) {
+    for (const c of threads.flatMap((t) => t.comments)) {
+      if (c.status !== "pending") continue;
+      c.status = "error";
+      c.body = STOPPED;
+      c.activity = null;
+    }
+    this.threads.push(...threads);
+    this.submissions.push(...submissions);
+    this.read = read;
+  }
+  markRead() {
+    this.read = this.submissions.length;
+    this.onChange();
   }
   create(anchor2, snippet, context, body, single) {
     const thread = { id: newId(), rev: 0, anchor: anchor2, snippet, context, comments: [] };
@@ -37690,6 +37749,7 @@ var RepoThreads = class {
   newSubmission(body) {
     const submission = { n: this.submissions.length + 1, body, submittedAt: now() };
     this.submissions.push(submission);
+    this.onChange();
     return submission;
   }
   wake(submission) {
@@ -37705,6 +37765,7 @@ var RepoThreads = class {
   emit(thread) {
     thread.rev++;
     for (const fn of this.listeners) fn(thread);
+    this.onChange();
   }
   addComment(thread, body, single) {
     const c = comment("user", body, "done");
@@ -37822,6 +37883,7 @@ var MAX_PATH = 4096;
 var MAX_CACHED_DIFFS = 2;
 var MAX_CACHED_CHARS = 64 * 1024 * 1024;
 var PING_MS = 25e3;
+var SAVE_DELAY_MS = 500;
 var PAGE = /^\/v\/[\w-]+$/;
 var API = /^\/api\/views\/([\w-]+)\/(diff|file|events|refs|threads|review|wait|version|topics)(?:\/([\w-]+)\/comments(?:\/([\w-]+))?)?$/;
 var SHA = /^[0-9a-f]{40,64}$/;
@@ -37835,14 +37897,17 @@ var ReviewServer = class {
   groupings = [];
   pages = /* @__PURE__ */ new Set();
   diffs = [];
+  unsaved = /* @__PURE__ */ new Set();
+  saveTimer = null;
   token = randomBytes2(32).toString("base64url");
   uiDir;
   server = null;
   port = 0;
   constructor(uiDir) {
-    this.uiDir = path3.resolve(uiDir);
+    this.uiDir = path4.resolve(uiDir);
   }
   async start() {
+    dropOldStates();
     const server = createServer((req, res) => {
       this.handle(req, res).catch((err) => {
         if (!res.headersSent) sendJson(res, 500, { error: errorMessage(err) });
@@ -37857,6 +37922,7 @@ var ReviewServer = class {
     this.server = server;
   }
   close() {
+    this.save();
     this.server?.closeAllConnections();
     this.server?.close();
     this.server = null;
@@ -37871,13 +37937,44 @@ var ReviewServer = class {
     while (this.views.has(id));
     const view = { id, repo, compare };
     this.views.set(id, view);
-    const threads = this.repos.get(repo) ?? new RepoThreads(cwd);
-    this.repos.set(repo, threads);
+    let threads = this.repos.get(repo);
+    if (!threads) {
+      threads = new RepoThreads(cwd);
+      threads.onChange = () => this.saveSoon(repo);
+      this.repos.set(repo, threads);
+    }
     threads.cwd = cwd;
+    const restored = session !== null && session !== threads.parentSession ? this.restore(view, threads, session) : null;
     if (session) threads.parentSession = session;
     if (grouped) this.addReview(view, compare, grouped.focus, grouped.topics);
     this.broadcast("view", { view: id, repo, compare });
-    return view;
+    return { view, restored };
+  }
+  // Brings back what an earlier viewer of the session saved for the repository, unless this one already holds comments.
+  restore(view, threads, session) {
+    if (threads.threads.length || threads.submissions.length) return null;
+    const saved = loadState(session, view.repo);
+    if (!saved) return null;
+    threads.restore(saved.threads, saved.submissions, saved.read);
+    for (const r of saved.reviews) {
+      if (!this.reviews.some(isFor(view.repo, r.compare))) this.reviews.push({ ...r, view: view.id });
+    }
+    this.broadcast("reviews", this.reviews);
+    return { threads: saved.threads.length, unread: saved.submissions.length - saved.read };
+  }
+  saveSoon(repo) {
+    this.unsaved.add(repo);
+    this.saveTimer ??= setTimeout(() => this.save(), SAVE_DELAY_MS);
+  }
+  save() {
+    if (this.saveTimer) clearTimeout(this.saveTimer);
+    this.saveTimer = null;
+    for (const repo of this.unsaved) {
+      const { threads, submissions, read, parentSession } = this.repos.get(repo);
+      if (!parentSession) continue;
+      saveState(parentSession, repo, { threads, submissions, read, reviews: this.reviews.filter((r) => r.repo === repo) });
+    }
+    this.unsaved.clear();
   }
   keepDiff(repo, compare, loaded) {
     const key = `${repo}\0${comparisonQuery(compare)}`;
@@ -37916,6 +38013,7 @@ var ReviewServer = class {
     if (failed >= 0) this.groupings.splice(failed, 1);
     this.broadcast("reviews", this.reviews);
     this.broadcast("groupings", this.groupings);
+    this.saveSoon(view.repo);
   }
   group(view, compare, focus, threads) {
     const i = this.groupings.findIndex(isFor(view.repo, compare));
@@ -38088,8 +38186,8 @@ data: ${JSON.stringify(data)}
     });
   }
   async sendFile(res, rel, cacheControl) {
-    const abs = path3.resolve(this.uiDir, rel);
-    if (!abs.startsWith(this.uiDir + path3.sep)) return sendText(res, 404, "Not found");
+    const abs = path4.resolve(this.uiDir, rel);
+    if (!abs.startsWith(this.uiDir + path4.sep)) return sendText(res, 404, "Not found");
     let body;
     try {
       body = await readFile2(abs);
@@ -38097,7 +38195,7 @@ data: ${JSON.stringify(data)}
       return sendText(res, 404, "Not found");
     }
     res.writeHead(200, {
-      "Content-Type": MIME[path3.extname(abs)] ?? "application/octet-stream",
+      "Content-Type": MIME[path4.extname(abs)] ?? "application/octet-stream",
       "Cache-Control": cacheControl,
       "Content-Security-Policy": CSP,
       "Referrer-Policy": "no-referrer",
@@ -38206,9 +38304,9 @@ function sendText(res, status, body) {
 }
 
 // src/server/main.ts
-var DIST_DIR = path4.dirname(fileURLToPath(import.meta.url));
-var UI_DIR = path4.join(DIST_DIR, "ui");
-var VERSION = JSON.parse(readFileSync(path4.join(DIST_DIR, "..", ".claude-plugin", "plugin.json"), "utf8")).version;
+var DIST_DIR = path5.dirname(fileURLToPath(import.meta.url));
+var UI_DIR = path5.join(DIST_DIR, "ui");
+var VERSION = JSON.parse(readFileSync2(path5.join(DIST_DIR, "..", ".claude-plugin", "plugin.json"), "utf8")).version;
 var serverPromise = null;
 function getServer() {
   serverPromise ??= (async () => {
@@ -38247,7 +38345,13 @@ ${unassigned.length} change(s) are in no topic and appear under "Other changes":
   }
   const server = await getServer();
   server.keepDiff(diff.repoRoot, compare, { version: version2, diff });
-  const view = server.addView(diff.repoRoot, compare, grouped, repo, session && SESSION_ID.test(session) ? session : null);
+  const { view, restored } = server.addView(diff.repoRoot, compare, grouped, repo, session && SESSION_ID.test(session) ? session : null);
+  if (restored?.threads) note += `
+Brought back ${plural2(restored.threads, "comment thread")} from the viewer this session had open before.`;
+  if (restored?.unread) {
+    note += `
+${plural2(restored.unread, "review")} submitted there ${restored.unread === 1 ? "was" : "were"} never read. Read ${restored.unread === 1 ? "it" : "them"} with get_review_comments.`;
+  }
   const shown = server.pageOpen ? "\nThe viewer page already open in the user's browser has switched to this comparison, so they do not need to open the URL again." : "";
   const failed = describeFailures(diff).map((l) => `
 ${l}`).join("");
@@ -38311,7 +38415,9 @@ async function runMcp() {
         threeDot,
         overrides,
         focus: external_exports.string().optional().describe("What the user wants to review, in their words."),
-        session: external_exports.string().optional().describe("The current Claude Code session id. @claude questions in the page continue a fork of this session."),
+        session: external_exports.string().optional().describe(
+          "The current Claude Code session id. @claude questions in the page continue a fork of this session, and the review's comments are saved under it, so they come back when the session opens the viewer again."
+        ),
         topics: external_exports.array(
           external_exports.object({
             title: external_exports.string().describe("A few words naming the topic."),
@@ -38344,15 +38450,15 @@ async function runMcp() {
     async (args) => {
       const server = serverPromise ? await serverPromise : null;
       const all = server?.repoThreads() ?? [];
-      const wanted = args.repo ? path4.resolve(args.repo) : null;
-      const containing = wanted ? all.filter((r) => wanted === r.repo || wanted.startsWith(r.repo + path4.sep)) : all;
+      const wanted = args.repo ? path5.resolve(args.repo) : null;
+      const containing = wanted ? all.filter((r) => wanted === r.repo || wanted.startsWith(r.repo + path5.sep)) : all;
       const repos = wanted ? containing.filter((r) => !containing.some((o) => o.repo.length > r.repo.length)) : all;
       if (args.after !== void 0 && !wanted && repos.filter((r) => r.threads.submissions.length).length > 1) {
         return result("Several repositories have reviews, numbered separately. Set repo to the one the wait command named.", true);
       }
       const parts = repos.flatMap(({ repo: repo2, threads, view }) => {
         const text = formatReviewComments(threads.threads, threads.submissions, args.after ?? null, threads.read);
-        threads.read = threads.submissions.length;
+        threads.markRead();
         if (!text) return [];
         return [
           `${repo2}
@@ -38362,6 +38468,9 @@ ${text}
 When you have addressed it, reply on each thread with reply_to_review. Then wait for the next review by running this in the background: ${server.waitCommand(view)}`
         ];
       });
+      if (!all.length) {
+        return result("No viewer is open. Open it with open_diff_viewer, which brings back the comments of the viewer this session had open before.");
+      }
       return result(parts.length ? parts.join("\n\n") : "No review comments yet.");
     }
   );

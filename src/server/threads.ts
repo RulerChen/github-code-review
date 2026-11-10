@@ -7,6 +7,7 @@ import { ask } from "./claude.js";
 
 const EMIT_INTERVAL_MS = 100;
 const REVIEWING = "The user is reviewing the code changes in a diff viewer";
+const STOPPED = "The viewer stopped before Claude answered. Ask again for an answer.";
 const ANSWER =
   "Answer the last comment directly and concisely, in the language it is written in, using Markdown. You can read files to check details, but do not change anything.";
 
@@ -24,6 +25,7 @@ export class RepoThreads {
   readonly submissions: Submission[] = [];
   read = 0;
   parentSession: string | null = null;
+  onChange: () => void = () => {};
 
   private fork: { parent: string | null; session: string | null } | null = null;
   private queue: Promise<void> = Promise.resolve();
@@ -45,6 +47,23 @@ export class RepoThreads {
   subscribeListening(fn: (listening: boolean) => void): () => void {
     this.listeningListeners.add(fn);
     return () => this.listeningListeners.delete(fn);
+  }
+
+  restore(threads: Thread[], submissions: Submission[], read: number): void {
+    for (const c of threads.flatMap((t) => t.comments)) {
+      if (c.status !== "pending") continue;
+      c.status = "error";
+      c.body = STOPPED;
+      c.activity = null;
+    }
+    this.threads.push(...threads);
+    this.submissions.push(...submissions);
+    this.read = read;
+  }
+
+  markRead(): void {
+    this.read = this.submissions.length;
+    this.onChange();
   }
 
   create(anchor: ThreadAnchor, snippet: string, context: ThreadContext | null, body: string, single: boolean): Thread {
@@ -127,6 +146,7 @@ export class RepoThreads {
   private newSubmission(body: string): Submission {
     const submission: Submission = { n: this.submissions.length + 1, body, submittedAt: now() };
     this.submissions.push(submission);
+    this.onChange();
     return submission;
   }
 
@@ -145,6 +165,7 @@ export class RepoThreads {
   private emit(thread: Thread): void {
     thread.rev++;
     for (const fn of this.listeners) fn(thread);
+    this.onChange();
   }
 
   private addComment(thread: Thread, body: string, single: boolean): void {

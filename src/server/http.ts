@@ -10,12 +10,18 @@ import { comparisonFromQuery, comparisonQuery, isFor } from "../shared/compariso
 import type { Comparison, DiffResult, FileDiff, Grouping, Review, Thread, ThreadAnchor, ThreadContext, Topic, ViewData } from "../shared/types.js";
 import { errorMessage, isRecord, sum } from "../shared/util.js";
 import { groupChanges } from "./group.js";
+import { dropOldStates, loadState, saveState } from "./store.js";
 import { RepoThreads } from "./threads.js";
 
 interface View {
   id: string;
   repo: string;
   compare: Comparison;
+}
+
+export interface Restored {
+  threads: number;
+  unread: number;
 }
 
 export interface LoadedDiff {
@@ -52,6 +58,7 @@ const MAX_CACHED_DIFFS = 2;
 const MAX_CACHED_CHARS = 64 * 1024 * 1024;
 
 const PING_MS = 25_000;
+const SAVE_DELAY_MS = 500;
 const PAGE = /^\/v\/[\w-]+$/;
 const API = /^\/api\/views\/([\w-]+)\/(diff|file|events|refs|threads|review|wait|version|topics)(?:\/([\w-]+)\/comments(?:\/([\w-]+))?)?$/;
 const SHA = /^[0-9a-f]{40,64}$/;
@@ -70,6 +77,8 @@ export class ReviewServer {
   private readonly groupings: Grouping[] = [];
   private readonly pages = new Set<(event: string, data: unknown) => void>();
   private diffs: CachedDiff[] = [];
+  private readonly unsaved = new Set<string>();
+  private saveTimer: NodeJS.Timeout | null = null;
   private readonly token = randomBytes(32).toString("base64url");
   private readonly uiDir: string;
   private server: Server | null = null;
@@ -80,6 +89,7 @@ export class ReviewServer {
   }
 
   async start(): Promise<void> {
+    dropOldStates();
     const server = createServer((req, res) => {
       this.handle(req, res).catch((err: unknown) => {
         if (!res.headersSent) sendJson(res, 500, { error: errorMessage(err) });
@@ -96,6 +106,7 @@ export class ReviewServer {
   }
 
   close(): void {
+    this.save();
     this.server?.closeAllConnections();
     this.server?.close();
     this.server = null;
@@ -105,20 +116,61 @@ export class ReviewServer {
     return this.pages.size > 0;
   }
 
-  addView(repo: string, compare: Comparison, grouped: { focus: string | null; topics: Topic[] } | null, cwd: string, session: string | null): View {
+  addView(
+    repo: string,
+    compare: Comparison,
+    grouped: { focus: string | null; topics: Topic[] } | null,
+    cwd: string,
+    session: string | null,
+  ): { view: View; restored: Restored | null } {
     let id: string;
     do id = Array.from({ length: 8 }, () => String.fromCharCode(97 + randomInt(26))).join("");
     while (this.views.has(id));
     const view = { id, repo, compare };
     this.views.set(id, view);
 
-    const threads = this.repos.get(repo) ?? new RepoThreads(cwd);
-    this.repos.set(repo, threads);
+    let threads = this.repos.get(repo);
+    if (!threads) {
+      threads = new RepoThreads(cwd);
+      threads.onChange = () => this.saveSoon(repo);
+      this.repos.set(repo, threads);
+    }
     threads.cwd = cwd;
+    const restored = session !== null && session !== threads.parentSession ? this.restore(view, threads, session) : null;
     if (session) threads.parentSession = session;
     if (grouped) this.addReview(view, compare, grouped.focus, grouped.topics);
     this.broadcast("view", { view: id, repo, compare });
-    return view;
+    return { view, restored };
+  }
+
+  // Brings back what an earlier viewer of the session saved for the repository, unless this one already holds comments.
+  private restore(view: View, threads: RepoThreads, session: string): Restored | null {
+    if (threads.threads.length || threads.submissions.length) return null;
+    const saved = loadState(session, view.repo);
+    if (!saved) return null;
+
+    threads.restore(saved.threads, saved.submissions, saved.read);
+    for (const r of saved.reviews) {
+      if (!this.reviews.some(isFor(view.repo, r.compare))) this.reviews.push({ ...r, view: view.id });
+    }
+    this.broadcast("reviews", this.reviews);
+    return { threads: saved.threads.length, unread: saved.submissions.length - saved.read };
+  }
+
+  private saveSoon(repo: string): void {
+    this.unsaved.add(repo);
+    this.saveTimer ??= setTimeout(() => this.save(), SAVE_DELAY_MS);
+  }
+
+  private save(): void {
+    if (this.saveTimer) clearTimeout(this.saveTimer);
+    this.saveTimer = null;
+    for (const repo of this.unsaved) {
+      const { threads, submissions, read, parentSession } = this.repos.get(repo)!;
+      if (!parentSession) continue;
+      saveState(parentSession, repo, { threads, submissions, read, reviews: this.reviews.filter((r) => r.repo === repo) });
+    }
+    this.unsaved.clear();
   }
 
   keepDiff(repo: string, compare: Comparison, loaded: LoadedDiff): void {
@@ -163,6 +215,7 @@ export class ReviewServer {
     if (failed >= 0) this.groupings.splice(failed, 1);
     this.broadcast("reviews", this.reviews);
     this.broadcast("groupings", this.groupings);
+    this.saveSoon(view.repo);
   }
 
   private group(view: View, compare: Comparison, focus: string | null, threads: RepoThreads): void {

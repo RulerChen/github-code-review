@@ -48,3 +48,7 @@ Host devbox
 ```
 
 The `Control` lines make further connections to the host share the first one and its forwards. Without them, each further connection prints a warning for every port the first one already forwards. A session that finds all ten ports taken uses a random port.
+
+## Saved reviews
+
+The comments, submitted reviews and topics of a review are saved in the plugin's data directory, `~/.claude/plugins/data/` followed by the plugin's name, under `reviews`. When a session is resumed and opens the viewer on the same repository again, they come back, and comments on lines of the working tree follow those lines if the files changed in between. Each session keeps its own, and a file not written to for 30 days is deleted. The files hold the lines you commented on, and only your user can read them.
