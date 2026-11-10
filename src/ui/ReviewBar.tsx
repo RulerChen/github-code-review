@@ -1,8 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { describeComparison } from "../shared/comparison";
 import type { Grouping, Review } from "../shared/types";
 import { plural } from "../shared/util";
-import { focusInPlace } from "./anchor";
 import { refLabel } from "./Compare";
 import { useAction, useDismiss } from "./hooks";
 import { CaretIcon, CheckMark } from "./icons";
@@ -19,10 +18,8 @@ interface Props {
 }
 
 export function ReviewBar({ reviews, review, grouping, repoRoot, hasChanges, onPick, onGroup }: Props) {
-  const [regrouping, setRegrouping] = useState(false);
-  useEffect(() => setRegrouping(false), [review?.createdAt]);
   const running = grouping !== null && grouping.error === null;
-  const form = hasChanges && !running && (review === null || regrouping);
+  const { busy, error, run } = useAction(onGroup);
 
   return (
     <div className="review-bar">
@@ -35,8 +32,13 @@ export function ReviewBar({ reviews, review, grouping, repoRoot, hasChanges, onP
             </p>
           )}
           <span className="spacer" />
-          {review && hasChanges && !running && !regrouping && (
-            <button className="button" onClick={() => setRegrouping(true)}>
+          {review && hasChanges && !running && (
+            <button
+              className="button"
+              title="Run this grouping again"
+              disabled={busy}
+              onClick={() => void run(review.focus ?? "")}
+            >
               Group again
             </button>
           )}
@@ -65,17 +67,8 @@ export function ReviewBar({ reviews, review, grouping, repoRoot, hasChanges, onP
           Could not group the changes: {grouping.error}
         </p>
       )}
-      {form && (
-        <GroupForm
-          initial={regrouping ? (review?.focus ?? "") : (grouping?.focus ?? "")}
-          explain={review === null}
-          autoFocus={regrouping}
-          onSubmit={async (focus) => {
-            await onGroup(focus);
-            setRegrouping(false);
-          }}
-          onCancel={review ? () => setRegrouping(false) : null}
-        />
+      {hasChanges && !running && (
+        <GroupForm initial={grouping?.focus ?? ""} explain={review === null} busy={busy} error={error} onSubmit={run} />
       )}
     </div>
   );
@@ -84,20 +77,19 @@ export function ReviewBar({ reviews, review, grouping, repoRoot, hasChanges, onP
 interface FormProps {
   initial: string;
   explain: boolean;
-  autoFocus: boolean;
+  busy: boolean;
+  error: string | null;
   onSubmit: (focus: string) => Promise<void>;
-  onCancel: (() => void) | null;
 }
 
-function GroupForm({ initial, explain, autoFocus, onSubmit, onCancel }: FormProps) {
+function GroupForm({ initial, explain, busy, error, onSubmit }: FormProps) {
   const [focus, setFocus] = useState(initial);
-  const { busy, error, run } = useAction(onSubmit);
   return (
     <form
       className="group-card group-form"
       onSubmit={(e) => {
         e.preventDefault();
-        void run(focus.trim());
+        void onSubmit(focus.trim());
       }}
     >
       {explain && <p>Claude has not grouped this comparison into topics. It can do that now and explain each topic.</p>}
@@ -105,23 +97,14 @@ function GroupForm({ initial, explain, autoFocus, onSubmit, onCancel }: FormProp
         <input
           className="filter"
           type="text"
-          ref={autoFocus ? focusInPlace : undefined}
-          placeholder="Focus, optional: what you want to review"
+          placeholder="What you want to review, or leave empty to group every change"
           aria-label="Focus"
           value={focus}
           onChange={(e) => setFocus(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Escape" && onCancel) onCancel();
-          }}
         />
         <button className="button primary" type="submit" disabled={busy}>
           Group into topics
         </button>
-        {onCancel && (
-          <button className="button" type="button" onClick={onCancel}>
-            Cancel
-          </button>
-        )}
       </div>
       {error && <p className="comment-error">{error}</p>}
     </form>
