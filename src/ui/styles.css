@@ -2067,6 +2067,47 @@ button {
   background: var(--bg-subtle);
 }
 
+.commit.is-current {
+  background: var(--accent-subtle);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.commits > .file-note.inline {
+  margin-bottom: 16px;
+  padding: 0;
+  border: 0;
+}
+
+.commit-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-subtle);
+}
+
+.commit-bar .button {
+  background: var(--bg);
+}
+
+.commit-bar-count {
+  flex: none;
+  margin-left: 4px;
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+
+.commit-bar-subject {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .commit-main {
   flex: 1;
   min-width: 0;

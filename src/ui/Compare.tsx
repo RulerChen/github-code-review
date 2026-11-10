@@ -296,28 +296,76 @@ function RefPicker({ role, value, commit, loadRefs, onPick }: PickerProps) {
   );
 }
 
-interface CommitListProps {
-  diff: DiffResult;
+interface CommitBarProps {
+  commits: CommitInfo[];
+  count: number;
+  index: number;
   onView: (commit: CommitInfo) => void;
+  onAll: () => void;
 }
 
-export function CommitList({ diff, onView }: CommitListProps) {
+export function CommitBar({ commits, count, index, onView, onAll }: CommitBarProps) {
+  const commit = commits[index]!;
+  const step = (to: CommitInfo | undefined, label: string) => (
+    <button className="button" disabled={!to || to.parents.length === 0} onClick={() => to && onView(to)} title={to?.subject}>
+      {label}
+    </button>
+  );
+
+  return (
+    <div className="commit-bar">
+      {step(commits[index - 1], "Previous")}
+      {step(commits[index + 1], "Next")}
+      <span className="commit-bar-count">
+        Commit {(count - commits.length + index + 1).toLocaleString()} of {count.toLocaleString()}
+      </span>
+      <span className="commit-bar-subject" title={commit.subject}>
+        {commit.subject || "(no message)"}
+      </span>
+      <code className="commit-sha" title={commit.sha}>
+        {commit.sha.slice(0, 7)}
+      </code>
+      <span className="spacer" />
+      <button className="button" onClick={onAll}>
+        All changes
+      </button>
+    </div>
+  );
+}
+
+interface CommitListProps {
+  commits: CommitInfo[];
+  count: number;
+  current: string | null;
+  onView: (commit: CommitInfo) => void;
+  onAll: () => void;
+}
+
+export function CommitList({ commits, count, current, onView, onAll }: CommitListProps) {
   const groups = useMemo(() => {
     const out: { day: string; commits: CommitInfo[] }[] = [];
-    for (const c of diff.commits) {
+    for (const c of commits) {
       const day = new Date(c.date).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
       const last = out[out.length - 1];
       if (last?.day === day) last.commits.push(c);
       else out.push({ day, commits: [c] });
     }
     return out;
-  }, [diff.commits]);
+  }, [commits]);
 
   return (
     <div className="commits">
-      {diff.commitCount > diff.commits.length && (
+      {current !== null && (
         <p className="file-note inline">
-          Showing the newest {diff.commits.length.toLocaleString()} of {diff.commitCount.toLocaleString()} commits.
+          The files show the marked commit alone.{" "}
+          <button className="link-button" onClick={onAll}>
+            Show all changes
+          </button>
+        </p>
+      )}
+      {count > commits.length && (
+        <p className="file-note inline">
+          Showing the newest {commits.length.toLocaleString()} of {count.toLocaleString()} commits.
         </p>
       )}
       {groups.map((g) => (
@@ -325,7 +373,7 @@ export function CommitList({ diff, onView }: CommitListProps) {
           <h3 className="commit-day">Commits on {g.day}</h3>
           <ol className="commit-list">
             {g.commits.map((c) => (
-              <li key={`${c.repo ?? ""} ${c.sha}`} className="commit">
+              <li key={`${c.repo ?? ""} ${c.sha}`} className={c.sha === current ? "commit is-current" : "commit"} aria-current={c.sha === current || undefined}>
                 <div className="commit-main">
                   <button
                     className="commit-subject"

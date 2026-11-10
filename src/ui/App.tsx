@@ -20,7 +20,7 @@ import {
   viewUrl,
 } from "./api";
 import { type CommentActions, CommentActionsContext, type CommentsApi, CommentsContext } from "./comments";
-import { CommitList, CompareControls, refLabel, RepoComparisons } from "./Compare";
+import { CommitBar, CommitList, CompareControls, refLabel, RepoComparisons } from "./Compare";
 import { ConversationsButton, ConversationsPanel, type Place, useConversations } from "./Conversations";
 import { FileCard, FileLoader } from "./FileCard";
 import { FileTree } from "./FileTree";
@@ -50,6 +50,16 @@ interface Opened {
   compare: Comparison;
 }
 
+interface CommitRange {
+  compare: Comparison | null;
+  commits: CommitInfo[];
+  count: number;
+}
+
+const savedRange = () => (history.state as { range?: CommitRange } | null)?.range ?? null;
+
+const commitComparison = (c: CommitInfo): Comparison => ({ base: c.parents[0]!, head: c.sha, threeDot: false, overrides: [] });
+
 export function App({ viewId }: Props) {
   const [data, setData] = useState<ViewData | null>(null);
   const [error, setError] = useState<{ message: string; status: number } | null>(null);
@@ -65,6 +75,7 @@ export function App({ viewId }: Props) {
   const [threads, setThreads] = useState<Thread[]>([]);
   const [reviews, setReviews] = useState<Review[]>([]);
   const [groupings, setGroupings] = useState<Grouping[]>([]);
+  const [range, setRange] = useState(savedRange);
 
   const requested = useRef<Comparison | null>(comparisonFromQuery(new URLSearchParams(location.search)));
   const seq = useRef(0);
@@ -72,7 +83,7 @@ export function App({ viewId }: Props) {
   const scrolls = useRef<Partial<Record<Tab, number>>>({});
   const resetScroll = useRef(false);
 
-  const load = useCallback(async (target: Comparison | null, push = false, nextTab?: Tab) => {
+  const load = useCallback(async (target: Comparison | null, push = false, nextTab?: Tab, nextRange: CommitRange | null = null) => {
     if (!viewId) return;
     const n = ++seq.current;
     const other = !sameTarget(target, requested.current);
@@ -87,10 +98,11 @@ export function App({ viewId }: Props) {
       const fresh = other || version.current === null;
       requested.current = target;
       version.current = result.version;
-      if (push && other) history.pushState(null, "", target ? `?${comparisonQuery(target)}` : location.pathname);
+      if (push && other) history.pushState(nextRange && { range: nextRange }, "", target ? `?${comparisonQuery(target)}` : location.pathname);
       if (other) {
         scrolls.current = {};
         resetScroll.current = true;
+        setRange(nextRange);
       }
       if (nextTab || fresh) {
         const mine = isFor(root, result.diff);
@@ -121,7 +133,7 @@ export function App({ viewId }: Props) {
 
   useEffect(() => {
     void load(requested.current);
-    const onPop = () => void load(comparisonFromQuery(new URLSearchParams(location.search)));
+    const onPop = () => void load(comparisonFromQuery(new URLSearchParams(location.search)), false, undefined, savedRange());
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
   }, [load]);
@@ -166,7 +178,17 @@ export function App({ viewId }: Props) {
     if (data) void load(sameComparison(next, data.opened) ? null : next, true, nextTab);
   };
 
-  const viewCommit = (c: CommitInfo) => compareWith({ base: c.parents[0]!, head: c.sha, threeDot: false, overrides: [] }, "files");
+  const shownDiff = data?.diff;
+  const stepIndex = range && shownDiff ? range.commits.findIndex((c) => c.parents.length > 0 && sameComparison(commitComparison(c), shownDiff)) : -1;
+  const stepping = stepIndex >= 0 ? range : null;
+
+  const viewCommit = (c: CommitInfo) => {
+    if (!data) return;
+    const next = commitComparison(c);
+    const outer = stepping ?? { compare: requested.current, commits: data.diff.commits, count: data.diff.commitCount };
+    void load(sameComparison(next, data.opened) ? null : next, true, "files", outer);
+  };
+  const showAllCommits = () => stepping && void load(stepping.compare, true);
 
   const showReview = (r: Opened) => {
     if (!data) return;
@@ -457,7 +479,7 @@ export function App({ viewId }: Props) {
               <ChangeStats files={diff.files} />
               <RefreshButton stale={stale} loading={loading} onClick={() => void load(requested.current)} />
               <span className="spacer" />
-              <ViewTabs view={view} commitCount={diff.commitCount} onSelect={setTab} />
+              <ViewTabs view={view} commitCount={stepping?.count ?? diff.commitCount} onSelect={setTab} />
               <ConversationsButton conv={conv} />
               <KeyboardButton onClick={() => setHelp(true)} />
               <ThemeToggle />
@@ -491,6 +513,9 @@ export function App({ viewId }: Props) {
                     Not compared in {f.dirs.join(", ")}: {f.error}
                   </p>
                 ))}
+                {stepping && view !== "commits" && (
+                  <CommitBar commits={stepping.commits} count={stepping.count} index={stepIndex} onView={viewCommit} onAll={showAllCommits} />
+                )}
                 {view !== "commits" && diff.files.length === 0 && <Notice title="No changes">{noChanges(diff)}</Notice>}
                 {visited.current.has("topics") && (
                   <div className="view" hidden={view !== "topics"}>
@@ -532,7 +557,13 @@ export function App({ viewId }: Props) {
                 )}
                 {visited.current.has("commits") && diff.commits.length > 0 && (
                   <div className="view" hidden={view !== "commits"}>
-                    <CommitList diff={diff} onView={viewCommit} />
+                    <CommitList
+                      commits={stepping?.commits ?? diff.commits}
+                      count={stepping?.count ?? diff.commitCount}
+                      current={stepping ? diff.head : null}
+                      onView={viewCommit}
+                      onAll={showAllCommits}
+                    />
                   </div>
                 )}
               </main>
