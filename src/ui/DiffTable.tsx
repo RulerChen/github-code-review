@@ -5,6 +5,7 @@ import { keepInPlace } from "./anchor";
 import { NewThread, onShownVersion, ThreadView, unmark, useCommentActions } from "./comments";
 import { type Token, type TokenLines, tokensAt } from "./highlight";
 import { type ExpandDir, ExpandIcon } from "./icons";
+import { intraline, type Marks } from "./intraline";
 
 type Side = "old" | "new";
 
@@ -48,13 +49,40 @@ function tokensFor(line: DiffLine, oldTokens: TokenLines | null, newTokens: Toke
   return line.oldNo ? tokensAt(oldTokens, line.oldNo - 1) : undefined;
 }
 
-function Code({ line, tokens }: { line: DiffLine; tokens: Token[] | undefined }) {
+interface Piece extends Token {
+  changed?: boolean;
+}
+
+function cut(parts: Token[], marks: Marks): Piece[] {
+  const out: Piece[] = [];
+  let pos = 0;
+  let m = 0;
+  for (const t of parts) {
+    const end = pos + t.content.length;
+    for (let at = pos; at < end; ) {
+      while (m < marks.length && marks[m + 1]! <= at) m += 2;
+      const from = marks[m] ?? Infinity;
+      const changed = from <= at;
+      const stop = Math.min(end, changed ? marks[m + 1]! : from);
+      out.push({ content: t.content.slice(at - pos, stop - pos), style: t.style, changed });
+      at = stop;
+    }
+    pos = end;
+  }
+  return out;
+}
+
+function Code({ line, tokens, marks }: { line: DiffLine; tokens: Token[] | undefined; marks: Marks | null }) {
   const text = stripCr(line.text);
   const usable = tokens && stripCr(tokens.map((t) => t.content).join("")) === text;
+  const parts: Piece[] | null = usable ? tokens : marks ? [{ content: text }] : null;
+  const pieces = parts && marks ? cut(parts, marks) : parts;
+  const plain = usable ? "tok" : undefined;
+  const marked = usable ? "tok x" : "x";
   return (
     <>
-      {usable ? tokens.map((t, i) => (
-        <span key={i} className="tok" style={t.style}>
+      {pieces ? pieces.map((t, i) => (
+        <span key={i} className={t.changed ? marked : plain} style={t.style}>
           {t.content}
         </span>
       )) : text}
@@ -73,6 +101,7 @@ export const DiffTable = memo(function DiffTable({ path, hunks, oldTokens, newTo
   const [drag, setDrag] = useState<Drag | null>(null);
 
   const rows = useMemo(() => hunks.map((h) => toSplitRows(h.lines)), [hunks]);
+  const marks = useMemo(() => rows.map((list) => list.map(marksOf)), [rows]);
   const threadsAt = useMemo(() => {
     const at = new Map<string, Thread[]>();
     for (const t of threads) {
@@ -151,7 +180,7 @@ export const DiffTable = memo(function DiffTable({ path, hunks, oldTokens, newTo
       <HunkRow key={`h${h.firstId}`} header={h.header} expanders={<HunkExpanders prev={hunks[hi - 1]} hunk={h} expand={expand} />} />,
     );
 
-    for (const row of rows[hi]!) {
+    rows[hi]!.forEach((row, ri) => {
       const oldNo = row.left?.oldNo ?? null;
       const newNo = row.right?.newNo ?? null;
       const key = row.left ? `o${oldNo}` : `n${newNo}`;
@@ -159,6 +188,7 @@ export const DiffTable = memo(function DiffTable({ path, hunks, oldTokens, newTo
         <Row
           key={key}
           row={row}
+          marks={marks[hi]![ri]!}
           oldTokens={oldTokens}
           newTokens={newTokens}
           oldSelected={isSelected("old", oldNo)}
@@ -169,7 +199,7 @@ export const DiffTable = memo(function DiffTable({ path, hunks, oldTokens, newTo
       const left = sideContent("old", oldNo);
       const right = sideContent("new", newNo);
       if (left.length || right.length) body.push(<ThreadRow key={`t${key}`} left={left} right={right} />);
-    }
+    });
   });
 
   if (last && last.hiddenBelow > 0) {
@@ -257,29 +287,36 @@ function lineAt(target: EventTarget, numberOnly: boolean): [Side, number] | null
 
 interface RowProps {
   row: SplitRow;
+  marks: [Marks, Marks] | null;
   oldTokens: TokenLines | null;
   newTokens: TokenLines | null;
   oldSelected: boolean;
   newSelected: boolean;
 }
 
-const Row = memo(function Row({ row, oldTokens, newTokens, oldSelected, newSelected }: RowProps) {
+const Row = memo(function Row({ row, marks, oldTokens, newTokens, oldSelected, newSelected }: RowProps) {
+  const { left, right } = row;
   return (
     <tr>
-      <SplitCell line={row.left} tokens={row.left ? tokensFor(row.left, oldTokens, newTokens) : undefined} side="old" selected={oldSelected} />
-      <SplitCell line={row.right} tokens={row.right ? tokensFor(row.right, oldTokens, newTokens) : undefined} side="new" selected={newSelected} />
+      <SplitCell line={left} tokens={left ? tokensFor(left, oldTokens, newTokens) : undefined} marks={marks?.[0] ?? null} side="old" selected={oldSelected} />
+      <SplitCell line={right} tokens={right ? tokensFor(right, oldTokens, newTokens) : undefined} marks={marks?.[1] ?? null} side="new" selected={newSelected} />
     </tr>
   );
 });
 
+function marksOf({ left, right }: SplitRow): [Marks, Marks] | null {
+  return left?.kind === "del" && right?.kind === "add" ? intraline(stripCr(left.text), stripCr(right.text)) : null;
+}
+
 interface CellProps {
   line: DiffLine | null;
   tokens: Token[] | undefined;
+  marks: Marks | null;
   side: Side;
   selected: boolean;
 }
 
-function SplitCell({ line, tokens, side, selected }: CellProps) {
+function SplitCell({ line, tokens, marks, side, selected }: CellProps) {
   if (!line) {
     return (
       <>
@@ -300,7 +337,7 @@ function SplitCell({ line, tokens, side, selected }: CellProps) {
         title={n ? "Comment on this line. Drag or shift-click to select a range." : undefined}
       />
       <td className={`code ${line.kind}${sel}`} data-mark={MARK[line.kind]}>
-        <Code line={line} tokens={tokens} />
+        <Code line={line} tokens={tokens} marks={marks?.length ? marks : null} />
       </td>
     </>
   );

@@ -16,8 +16,10 @@
   --attention: #9a6700;
   --add-line: #dafbe1;
   --add-num: #aceebb;
+  --add-word: #aceebb;
   --del-line: #ffebe9;
   --del-num: #ffcecb;
+  --del-word: #ffcecb;
   --hunk-line: #ddf4ff;
   --hunk-num: #b6e3ff;
   --empty-cell: #f6f8fa;
@@ -50,8 +52,10 @@
   --attention: #c69026;
   --add-line: #46954a26;
   --add-num: #57ab5a4d;
+  --add-word: #46954a66;
   --del-line: #e5534b1a;
   --del-num: #e5534b4d;
+  --del-word: #e5534b66;
   --hunk-line: #4184e41a;
   --hunk-num: #143d79;
   --empty-cell: #262c36;
@@ -660,6 +664,14 @@ button {
 
 .diff .code.del {
   background: var(--del-line);
+}
+
+.diff .code.add .x {
+  background: var(--add-word);
+}
+
+.diff .code.del .x {
+  background: var(--del-word);
 }
 
 .diff .code + .num,
