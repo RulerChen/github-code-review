@@ -7,7 +7,7 @@ import type { Submission } from "./threads.js";
 
 const DIR = process.env.CLAUDE_PLUGIN_DATA ? path.join(process.env.CLAUDE_PLUGIN_DATA, "reviews") : null;
 const FORMAT = 1;
-const KEEP_MS = 30 * 24 * 60 * 60 * 1000;
+const KEEP_MS = 3 * 24 * 60 * 60 * 1000;
 
 export interface SavedState {
   threads: Thread[];

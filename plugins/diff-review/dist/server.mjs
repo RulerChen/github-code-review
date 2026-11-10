@@ -37592,7 +37592,7 @@ import { mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync,
 import path3 from "node:path";
 var DIR = process.env.CLAUDE_PLUGIN_DATA ? path3.join(process.env.CLAUDE_PLUGIN_DATA, "reviews") : null;
 var FORMAT = 1;
-var KEEP_MS = 30 * 24 * 60 * 60 * 1e3;
+var KEEP_MS = 3 * 24 * 60 * 60 * 1e3;
 function fileFor(session, repo) {
   return path3.join(DIR, `${session}-${createHash2("sha256").update(repo).digest("hex").slice(0, 16)}.json`);
 }
