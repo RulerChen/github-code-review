@@ -96,6 +96,7 @@ export function ask(o: AskOptions): Promise<{ sessionId: string | null; text: st
       finish(new Error(err.code === "ENOENT" ? "The claude command was not found on PATH." : err.message));
     });
     child.on("close", () => finish(null));
+    child.stdin.on("error", () => {});
     child.stdin.end(o.prompt);
   });
 }
