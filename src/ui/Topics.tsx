@@ -155,29 +155,3 @@ export function TopicSection({ topic, viewed, opening, onToggleViewed }: Section
     </section>
   );
 }
-
-interface ListProps {
-  topics: TopicView[];
-  isViewed: (topic: TopicView) => boolean;
-  onSelect: (anchor: string) => void;
-}
-
-export function TopicList({ topics, isViewed, onSelect }: ListProps) {
-  return (
-    <nav className="topic-list" aria-label="Topics">
-      <h2 className="topic-list-title">Topics</h2>
-      <ul>
-        {topics.map((t) => (
-          <li key={t.key}>
-            <button className={`topic-link${isViewed(t) ? " is-viewed" : ""}`} onClick={() => onSelect(t.anchor)}>
-              <span className="topic-link-title">{t.title}</span>
-              <span className="topic-link-meta">
-                {plural(t.changeCount, "change")} in {plural(t.parts.length, "file")}
-              </span>
-            </button>
-          </li>
-        ))}
-      </ul>
-    </nav>
-  );
-}

@@ -9,6 +9,7 @@ import {
   ApiError,
   createThread,
   deleteComment,
+  deleteReview,
   editComment,
   fetchFile,
   fetchRefs,
@@ -32,7 +33,7 @@ import { type Hit, revealLine, searchDiff, SearchResults } from "./Search";
 import { useStoredState, useViewed } from "./storage";
 import { SubmitReview } from "./SubmitReview";
 import { ChangeStats, RefreshButton, SidebarToggle, type Tab, ThemeToggle, ViewTabs } from "./TopBar";
-import { buildTopics, TopicList, TopicSection, topicShows, type TopicView } from "./Topics";
+import { buildTopics, TopicSection, topicShows, type TopicView } from "./Topics";
 
 interface Props {
   viewId: string | null;
@@ -335,6 +336,9 @@ export function App({ viewId }: Props) {
   const group = async (focus: string) => {
     if (viewId && current) setGroupings(await groupTopics(viewId, current, focus));
   };
+  const removeReview = async (r: Review) => {
+    if (viewId) setReviews(await deleteReview(viewId, r));
+  };
 
   const entries = useMemo(
     () =>
@@ -569,8 +573,8 @@ export function App({ viewId }: Props) {
                       hasChanges={diff.files.length > 0}
                       onPick={(r) => showReview(r, r.createdAt)}
                       onGroup={group}
+                      onRemove={removeReview}
                     />
-                    {topics.length > 0 && <TopicList topics={topics} isViewed={isTopicViewed} onSelect={select} />}
                     {topics.map((t) => (
                       <TopicSection
                         key={t.key}

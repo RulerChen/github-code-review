@@ -60,7 +60,7 @@ const MAX_CACHED_CHARS = 64 * 1024 * 1024;
 const PING_MS = 25_000;
 const SAVE_DELAY_MS = 500;
 const PAGE = /^\/v\/[\w-]+$/;
-const API = /^\/api\/views\/([\w-]+)\/(diff|file|events|refs|threads|review|wait|version|topics)(?:\/([\w-]+)\/comments(?:\/([\w-]+))?)?$/;
+const API = /^\/api\/views\/([\w-]+)\/(diff|file|events|refs|threads|review|reviews|wait|version|topics)(?:\/([\w-]+)\/comments(?:\/([\w-]+))?)?$/;
 const SHA = /^[0-9a-f]{40,64}$/;
 
 const sshAddress = process.env.SSH_CONNECTION?.split(" ")[2] ?? "";
@@ -331,6 +331,16 @@ export class ReviewServer {
         if (focus !== undefined && focus !== null && !isText(focus, MAX_FOCUS)) return sendJson(res, 400, { error: "Invalid focus" });
         this.group(view, compare, focus?.trim() || null, threads);
         return sendJson(res, 202, { groupings: this.groupings });
+      }
+      case "DELETE reviews": {
+        const { repo, createdAt } = await readJson(req);
+        const i = this.reviews.findIndex((r) => r.repo === repo && r.createdAt === createdAt);
+        if (i >= 0) {
+          const [removed] = this.reviews.splice(i, 1);
+          this.broadcast("reviews", this.reviews);
+          this.saveSoon(removed!.repo);
+        }
+        return sendJson(res, 200, { reviews: this.reviews });
       }
       case "POST threads": {
         const { anchor, snippet, context, body, single } = await readJson(req);

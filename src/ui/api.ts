@@ -1,5 +1,5 @@
 import { comparisonQuery } from "../shared/comparison";
-import type { Comparison, FileDiff, Grouping, RefList, Thread, ThreadAnchor, ThreadContext, ViewData } from "../shared/types";
+import type { Comparison, FileDiff, Grouping, RefList, Review, Thread, ThreadAnchor, ThreadContext, ViewData } from "../shared/types";
 
 export class ApiError extends Error {
   constructor(
@@ -76,6 +76,11 @@ export function editComment(viewId: string, threadId: string, commentId: string,
 
 export function deleteComment(viewId: string, threadId: string, commentId: string): Promise<Thread> {
   return threadRequest(viewUrl(viewId, "threads", threadId, "comments", commentId), "DELETE", {});
+}
+
+export async function deleteReview(viewId: string, review: Review): Promise<Review[]> {
+  const payload = { repo: review.repo, createdAt: review.createdAt };
+  return (await request<{ reviews: Review[] }>(viewUrl(viewId, "reviews"), (b) => Array.isArray(b.reviews), "DELETE", payload)).reviews;
 }
 
 export async function groupTopics(viewId: string, compare: Comparison, focus: string): Promise<Grouping[]> {

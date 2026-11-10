@@ -4,7 +4,7 @@ import type { Grouping, Review } from "../shared/types";
 import { plural } from "../shared/util";
 import { refLabel } from "./Compare";
 import { useAction, useDismiss } from "./hooks";
-import { CaretIcon, CheckMark } from "./icons";
+import { CaretIcon, CheckMark, TrashIcon } from "./icons";
 import { basename } from "./paths";
 
 interface Props {
@@ -15,17 +15,21 @@ interface Props {
   hasChanges: boolean;
   onPick: (review: Review) => void;
   onGroup: (focus: string) => Promise<void>;
+  onRemove: (review: Review) => Promise<void>;
 }
 
-export function ReviewBar({ reviews, review, grouping, repoRoot, hasChanges, onPick, onGroup }: Props) {
+export function ReviewBar({ reviews, review, grouping, repoRoot, hasChanges, onPick, onGroup, onRemove }: Props) {
   const running = grouping !== null && grouping.error === null;
   const { busy, error, run } = useAction(onGroup);
+  const removing = useAction(onRemove);
 
   return (
     <div className="review-bar">
       {(reviews.length > 0 || review) && (
         <div className="review-bar-row">
-          {reviews.length > 0 && <ReviewPicker reviews={reviews} current={review} repoRoot={repoRoot} onPick={onPick} />}
+          {reviews.length > 0 && (
+            <ReviewPicker reviews={reviews} current={review} repoRoot={repoRoot} onPick={onPick} onRemove={removing.run} />
+          )}
           {review?.focus && (
             <p className="focus" title={review.focus}>
               Focus: <strong>{review.focus}</strong>
@@ -42,8 +46,14 @@ export function ReviewBar({ reviews, review, grouping, repoRoot, hasChanges, onP
               Group again
             </button>
           )}
+          {review && (
+            <button className="button" title="Remove these topics from the Reviews list" disabled={removing.busy} onClick={() => void removing.run(review)}>
+              Remove
+            </button>
+          )}
         </div>
       )}
+      {removing.error && <p className="comment-error">{removing.error}</p>}
       {running && (
         <div className="group-card group-status" role="status">
           <span className="group-spinner" aria-hidden="true" />
@@ -116,9 +126,10 @@ interface PickerProps {
   current: Review | null;
   repoRoot: string;
   onPick: (review: Review) => void;
+  onRemove: (review: Review) => Promise<void>;
 }
 
-function ReviewPicker({ reviews, current, repoRoot, onPick }: PickerProps) {
+function ReviewPicker({ reviews, current, repoRoot, onPick, onRemove }: PickerProps) {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   useDismiss(root, open, () => setOpen(false));
@@ -157,6 +168,9 @@ function ReviewPicker({ reviews, current, repoRoot, onPick }: PickerProps) {
                         <code>{describeComparison(r.compare, refLabel)}</code> · {plural(r.topics.length, "topic")} · {time}
                       </span>
                     </span>
+                  </button>
+                  <button className="icon-button small review-remove" aria-label="Remove these topics" title="Remove" onClick={() => void onRemove(r)}>
+                    <TrashIcon />
                   </button>
                 </li>
               );

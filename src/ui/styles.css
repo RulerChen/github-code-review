@@ -1000,8 +1000,21 @@ button {
   width: 380px;
 }
 
+.review-picker .picker-list li {
+  display: flex;
+  align-items: center;
+}
+
 .picker-list .review-item {
+  flex: 1;
+  min-width: 0;
   align-items: flex-start;
+}
+
+.picker-list .review-remove {
+  justify-content: center;
+  margin-right: 8px;
+  padding: 0;
 }
 
 .review-item:hover {
@@ -1066,64 +1079,6 @@ button {
   margin: 0 0 12px;
   color: var(--attention);
   font-size: 12px;
-}
-
-.topic-list {
-  margin-bottom: 24px;
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-}
-
-.topic-list-title {
-  margin: 0;
-  padding: 8px 16px;
-  border-bottom: 1px solid var(--border-muted);
-  background: var(--bg-subtle);
-  font-size: 14px;
-  font-weight: 600;
-}
-
-.topic-list ul {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.topic-list li + li {
-  border-top: 1px solid var(--border-muted);
-}
-
-.topic-link {
-  display: flex;
-  align-items: baseline;
-  gap: 16px;
-  width: 100%;
-  padding: 8px 16px;
-  border: 0;
-  background: none;
-  text-align: left;
-  cursor: pointer;
-}
-
-.topic-link:hover {
-  background: var(--bg-subtle);
-}
-
-.topic-link.is-viewed .topic-link-title {
-  color: var(--fg-muted);
-}
-
-.topic-link-title {
-  flex: 1;
-  min-width: 0;
-}
-
-.topic-link-meta {
-  flex: none;
-  color: var(--fg-muted);
-  font-size: 12px;
-  white-space: nowrap;
 }
 
 .markdown > :first-child {
