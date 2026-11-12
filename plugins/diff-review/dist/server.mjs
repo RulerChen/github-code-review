@@ -37371,7 +37371,7 @@ function ask(o) {
   const args = [
     "-p",
     "--model",
-    "claude-opus-5-5",
+    "opus",
     "--effort",
     "medium",
     "--output-format",
