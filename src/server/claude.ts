@@ -31,6 +31,8 @@ export function stopAll(): void {
 export function ask(o: AskOptions): Promise<{ sessionId: string | null; text: string }> {
   const args = [
     "-p",
+    "--model", "claude-opus-5-5",
+    "--effort", "medium",
     "--output-format", "stream-json",
     "--verbose",
     "--include-partial-messages",

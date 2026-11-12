@@ -37370,6 +37370,10 @@ function stopAll() {
 function ask(o) {
   const args = [
     "-p",
+    "--model",
+    "claude-opus-5-5",
+    "--effort",
+    "medium",
     "--output-format",
     "stream-json",
     "--verbose",
