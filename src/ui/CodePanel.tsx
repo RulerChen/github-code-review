@@ -17,7 +17,7 @@ export interface Peek {
 }
 
 const WINDOW = 500;
-const FOUND_MS = 1300;
+const FOUND_MS = 2500;
 
 export function addedLines(file: FileDiff | undefined): Set<number> {
   const out = new Set<number>();

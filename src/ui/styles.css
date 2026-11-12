@@ -277,19 +277,18 @@ button {
 .search-scope {
   display: flex;
   flex: none;
-  height: 30px;
+  margin-bottom: 8px;
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: 6px;
 }
 
 .search-scope > button {
-  padding: 0 8px;
+  padding: 0 10px;
   border: 0;
   background: var(--bg);
   color: var(--fg-muted);
   font: inherit;
-  font-size: 12px;
   cursor: pointer;
 }
 
@@ -514,23 +513,23 @@ button {
 }
 
 .diff tr.is-found > .code {
-  animation: line-found 1300ms var(--ease-out);
+  animation: line-found 2500ms var(--ease-out);
 }
 
 .diff tr.is-found > .num {
-  animation: line-found-num 1300ms var(--ease-out);
+  animation: line-found-num 2500ms var(--ease-out);
 }
 
 @keyframes line-found {
   0%,
-  40% {
+  60% {
     background-color: var(--selected);
   }
 }
 
 @keyframes line-found-num {
   0%,
-  40% {
+  60% {
     background-color: var(--selected-num);
   }
 }

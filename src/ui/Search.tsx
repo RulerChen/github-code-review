@@ -7,7 +7,7 @@ import { basename, comparePaths, dirPrefix } from "./paths";
 
 const MAX_HITS = 500;
 const LEAD_CHARS = 16;
-const FOUND_MS = 1300;
+const FOUND_MS = 2500;
 
 export interface Hit {
   path: string;
