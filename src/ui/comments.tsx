@@ -274,8 +274,8 @@ function CommentForm({ placeholder, initial = "", editing = false, lines, onSubm
             show={asking ? 0 : !now ? 3 : listening ? 1 : 2}
             texts={[
               "Claude answers here right away.",
-              "Claude starts on it right away. Mention @claude to only ask a question.",
-              "Claude isn't waiting right now. It gets this the next time it waits for comments.",
+              "Mention @claude to ask instead of changing code.",
+              "Claude isn't waiting now and gets this later.",
               "Claude gets this when you submit the review.",
             ]}
           />

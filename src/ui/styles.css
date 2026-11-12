@@ -1644,6 +1644,10 @@ button {
   background: var(--bg-subtle);
 }
 
+.thread-foot:has(> .comment-form) {
+  background: none;
+}
+
 .thread-reply {
   display: block;
   width: 100%;
@@ -1801,8 +1805,7 @@ button {
   align-items: center;
   gap: 4px 8px;
   padding: 4px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-subtle);
+  border-bottom: 1px solid var(--border-muted);
 }
 
 .comment-tablist {
@@ -1827,9 +1830,8 @@ button {
 }
 
 .comment-tab[aria-selected="true"] {
-  border-color: var(--border);
-  background: var(--bg);
   color: var(--fg);
+  font-weight: 600;
 }
 
 .comment-toolbar {
