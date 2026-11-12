@@ -121,7 +121,7 @@ const FORMAT_KEYS: Record<string, Format> = { b: "bold", i: "italic", e: "code",
 const SHIFT_FORMAT_KEYS: Record<string, Format> = { Digit7: "ordered", Digit8: "unordered", Period: "quote" };
 
 function CommentForm({ placeholder, initial = "", editing = false, lines, onSubmit, onCancel }: FormProps) {
-  const { pending, listening } = useComments();
+  const { pending } = useComments();
   const [text, setText] = useState(initial);
   const [preview, setPreview] = useState<number | null>(null);
   const asking = !editing && MENTION.test(text);
@@ -152,7 +152,6 @@ function CommentForm({ placeholder, initial = "", editing = false, lines, onSubm
   }, [preview]);
 
   const ready = !busy && text.trim() !== "" && !(editing && text.trim() === initial);
-  const now = !pending;
   const submit = (single: boolean) => {
     if (ready) void run(single);
   };
@@ -186,7 +185,7 @@ function CommentForm({ placeholder, initial = "", editing = false, lines, onSubm
     if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
 
     let action: (() => void) | null = null;
-    if (e.key === "Enter" && !e.shiftKey) action = () => submit(now);
+    if (e.key === "Enter" && !e.shiftKey) action = () => submit(false);
     else if (e.shiftKey && e.code === "KeyP") action = togglePreview;
     else if (e.target === input.current) {
       const kind = e.shiftKey ? SHIFT_FORMAT_KEYS[e.code] : FORMAT_KEYS[e.key.toLowerCase()];
@@ -201,9 +200,9 @@ function CommentForm({ placeholder, initial = "", editing = false, lines, onSubm
 
   const otherTitle = asking
     ? "A comment that mentions @claude is answered right away."
-    : now
-      ? "Keep this comment pending and send it with the others when you submit the review."
-      : "Send only this comment to Claude now, without the pending review.";
+    : pending
+      ? "Send only this comment to Claude now, without the pending review."
+      : "Send this comment to Claude now instead of starting a review.";
 
   return (
     <form
@@ -212,7 +211,7 @@ function CommentForm({ placeholder, initial = "", editing = false, lines, onSubm
       onKeyDown={onKeyDown}
       onSubmit={(e: FormEvent) => {
         e.preventDefault();
-        submit(now);
+        submit(false);
       }}
     >
       <div className="comment-box" ref={box}>
@@ -271,13 +270,8 @@ function CommentForm({ placeholder, initial = "", editing = false, lines, onSubm
         ) : (
           <Either
             className="comment-hint"
-            show={asking ? 0 : !now ? 3 : listening ? 1 : 2}
-            texts={[
-              "Claude answers here right away.",
-              "Mention @claude to ask instead of changing code.",
-              "Claude isn't waiting now and gets this later.",
-              "Claude gets this when you submit the review.",
-            ]}
+            show={asking ? 0 : 1}
+            texts={["Claude answers here right away.", "Mention @claude to ask instead of changing code."]}
           />
         )}
         <span className="comment-form-buttons">
@@ -285,12 +279,12 @@ function CommentForm({ placeholder, initial = "", editing = false, lines, onSubm
             Cancel
           </button>
           {!editing && (
-            <button type="button" className="button" onClick={() => submit(!now)} disabled={!ready || asking} title={otherTitle}>
-              <Either show={now ? 0 : 1} texts={["Start a review", "Send now"]} />
+            <button type="button" className="button" onClick={() => submit(true)} disabled={!ready || asking} title={otherTitle}>
+              Send now
             </button>
           )}
           <button type="submit" className="button primary" disabled={!ready}>
-            {editing ? "Save" : <Either show={asking ? 0 : now ? 1 : 2} texts={["Ask Claude", "Send to Claude", "Add review comment"]} />}
+            {editing ? "Save" : <Either show={asking ? 0 : pending ? 2 : 1} texts={["Ask Claude", "Start a review", "Add review comment"]} />}
           </button>
         </span>
       </div>

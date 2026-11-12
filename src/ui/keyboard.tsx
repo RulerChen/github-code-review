@@ -86,7 +86,7 @@ export function KeyboardButton({ onClick }: { onClick: () => void }) {
 const KEYS: [string[], string][] = [
   [["j", "k"], "Next or previous file or topic"],
   [["u"], "Next conversation with a new answer"],
-  [["Ctrl+Enter"], "Send the comment or review being written"],
+  [["Ctrl+Enter"], "Add the comment to your review, or submit the review being written"],
   [["Esc"], "Cancel a comment, or close this list or the conversations"],
 ];
 
