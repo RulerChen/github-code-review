@@ -37422,6 +37422,10 @@ import { gzip } from "node:zlib";
 
 // src/shared/comments.ts
 var MENTION = /(^|\s)@claude\b/i;
+var CONTEXT_LINES2 = 3;
+function contextOf(lines, start, end) {
+  return { before: lines.slice(Math.max(0, start - 1 - CONTEXT_LINES2), start - 1), after: lines.slice(end, end + CONTEXT_LINES2) };
+}
 var lineNumbers = ({ start, end }) => start === end ? `${start}` : `${start}\u2013${end}`;
 var lineRange = (lines) => `${lines.start === lines.end ? "line" : "lines"} ${lineNumbers(lines)}`;
 
@@ -37474,7 +37478,9 @@ function formatReviewComments(threads, submissions, after, read) {
   const numbers = new Set(reviews.map((s) => s.n));
   const submitted = threads.filter((t) => t.comments.some((c) => c.review !== null && numbers.has(c.review)));
   const drafts = withDrafts ? threads.filter((t) => !submitted.includes(t) && t.comments.some((c) => c.draft)) : [];
-  const asked = withDrafts ? threads.filter((t) => t.comments.every((c) => c.author !== "user" || !c.draft && c.review === null)) : [];
+  const asked = withDrafts ? threads.filter(
+    (t) => t.comments.some((c) => c.author === "user") && t.comments.every((c) => c.author !== "user" || !c.draft && c.review === null)
+  ) : [];
   if (!reviews.length && !drafts.length && !asked.length) return null;
   const out = [];
   const section = (title, list, showDrafts) => out.push(title, ...list.flatMap((t) => ["", formatThread(t, showDrafts)]));
@@ -37508,17 +37514,42 @@ function formatThread(t, withDrafts) {
 function checkTopics(diff, topics) {
   const known = new Set(diff.files.flatMap(changeIds));
   const used = new Set(topics.flatMap((t) => t.ids));
+  const noted = topics.flatMap((t) => t.notes?.map((n) => n.id) ?? []);
   return {
-    unknown: [...used].filter((id) => !known.has(id)),
+    unknown: [.../* @__PURE__ */ new Set([...used, ...noted])].filter((id) => !known.has(id)),
     unassigned: [...known].filter((id) => !used.has(id))
   };
+}
+function placeNote(diff, note) {
+  for (const f of diff.files) {
+    const wholeFile = { anchor: { path: f.path, side: null, start: null, end: null, commit: null }, snippet: "", context: null };
+    if (!f.blocks.length && note.id === `file:${f.path}`) return wholeFile;
+    const b = f.blocks.find((x) => x.id === note.id);
+    if (!b) continue;
+    const side = b.add.length ? "new" : "old";
+    const lines = side === "new" ? b.add : b.del;
+    if (!lines.length) return wholeFile;
+    const first = (side === "new" ? b.newStart : b.oldStart) + 1;
+    const pinned = note.line !== null && note.line >= first && note.line < first + lines.length;
+    const start = pinned ? note.line : first;
+    const end = pinned ? note.line : first + lines.length - 1;
+    const repo = diff.repos.find((r) => r.dir === "" || f.path.startsWith(`${r.dir}/`));
+    const commit = (side === "new" ? repo?.headCommit : repo?.oldCommit) ?? null;
+    const content = side === "new" && commit === null && f.newContent !== null ? splitLines(f.newContent) : null;
+    return {
+      anchor: { path: f.path, side, start, end, commit },
+      snippet: lines.slice(start - first, end - first + 1).map((l) => `${side === "new" ? "+" : "-"}${l}`).join("\n"),
+      context: content ? contextOf(content, start, end) : null
+    };
+  }
+  return null;
 }
 
 // src/server/group.ts
 async function groupChanges(o) {
   const run = (resume, fork, prompt2) => ask({ cwd: o.cwd, resume, fork, prompt: prompt2, onText: () => {
   }, onActivity: o.onActivity });
-  const prompt = buildPrompt(o.diff, o.focus);
+  const prompt = buildPrompt(o.diff, o.focus, o.names);
   let res;
   try {
     res = await run(o.session, true, prompt);
@@ -37526,7 +37557,7 @@ async function groupChanges(o) {
     if (o.session === null) throw err;
     res = await run(null, false, prompt);
   }
-  const focused = o.focus !== null;
+  const focused = o.focus !== null || o.names !== null;
   let topics = parseTopics(res.text, focused);
   const problem = typeof topics === "string" ? topics : unknownIds(o.diff, topics);
   if (problem && res.sessionId) {
@@ -37538,11 +37569,15 @@ async function groupChanges(o) {
   const known = new Set(o.diff.files.flatMap(changeIds));
   const kept = topics.map((t) => ({ ...t, ids: t.ids.filter((id) => known.has(id)) })).filter((t) => t.ids.length > 0);
   if (!kept.length) {
-    throw new Error(focused ? "No change matches the focus." : "Claude's answer put no change of this comparison in a topic.");
+    throw new Error(
+      o.names ? "No change belongs to these topics." : focused ? "No change matches the focus." : "Claude's answer put no change of this comparison in a topic."
+    );
   }
   return kept;
 }
-function buildPrompt(diff, focus) {
+function buildPrompt(diff, focus, names) {
+  const empty = ' If no change fits, reply with {"topics": []}.';
+  const scope = names ? `Use exactly these topics, in this order and with these titles: ${names.map((n) => JSON.stringify(n)).join(", ")}. Do not add topics of your own. Put each change in the topic it belongs to, leave out the changes that fit none of them, and leave out a topic that no change belongs to.${empty}` : focus ? `Make topics only for the changes the focus asks for. Leave every other change out of your answer, and do not make a topic for changes that have nothing to do with the focus. The reviewer still finds those in the list of all files.${empty}` : "Put every id in a topic.";
   return [
     `The user is reviewing code changes in a diff viewer and asked, from the page, for them to be grouped into topics${focus ? `, with this focus: ${JSON.stringify(focus)}` : ""}.`,
     "A topic is one feature, fix or purpose, and can span files. Use what you know about why the changes were made, and the commit messages for the why. You can read files to check details, but do not change anything.",
@@ -37550,9 +37585,10 @@ function buildPrompt(diff, focus) {
     '- "title": a few words.',
     '- "summary": two to six sentences of Markdown on what changed and why, naming the files and functions involved and anything the reviewer should check closely.',
     '- "ids": the ids of all changes in the topic, exactly as listed below.',
-    focus ? 'Make topics only for the changes the focus asks for. Leave every other change out of your answer, and do not make a topic for changes that have nothing to do with the focus. The reviewer still finds those in the list of all files. If no change matches the focus, reply with {"topics": []}.' : "Put every id in a topic.",
-    "Order the topics the way a reviewer should read them. Write titles and summaries in the language the user writes in.",
-    'Reply with only a JSON object and no other text: {"topics": [{"title": "...", "summary": "...", "ids": ["..."]}]}',
+    `- "notes": comments you leave on the lines a reviewer most needs explained, such as a subtle invariant, a non-obvious reason, an edge case or a risk to check. Each is {"id": a change id, "line": a line number inside that change or null for the whole change, "body": one to four sentences of Markdown}. A change's added lines are numbered from the + number in its @@ header, and its removed lines from the - number; use a removed line only when the change adds none. Leave a note only where it says something the summary and the code do not, at most three in a topic, and give an empty array when nothing needs one.`,
+    scope,
+    "Order the topics the way a reviewer should read them. Write titles, summaries and notes in the language the user writes in.",
+    'Reply with only a JSON object and no other text: {"topics": [{"title": "...", "summary": "...", "ids": ["..."], "notes": [{"id": "...", "line": 12, "body": "..."}]}]}',
     "",
     formatChanges(diff)
   ].join("\n");
@@ -37570,10 +37606,15 @@ function parseTopics(text, allowEmpty) {
 }
 function toTopic(t) {
   if (!isRecord(t)) return null;
-  const { title, summary, ids } = t;
+  const { title, summary, ids, notes } = t;
   if (typeof title !== "string" || !title.trim() || typeof summary !== "string") return null;
   if (!Array.isArray(ids) || !ids.every((id) => typeof id === "string")) return null;
-  return { title: title.trim(), summary: summary.trim(), ids };
+  return { title: title.trim(), summary: summary.trim(), ids, notes: Array.isArray(notes) ? notes.flatMap(toNote) : [] };
+}
+function toNote(n) {
+  if (!isRecord(n) || typeof n.id !== "string" || typeof n.body !== "string" || !n.body.trim()) return [];
+  const line = typeof n.line === "number" && Number.isInteger(n.line) && n.line > 0 ? n.line : null;
+  return [{ id: n.id, line, body: n.body.trim() }];
 }
 function parseJson(text) {
   const fenced = /```(?:json)?[ \t]*\n([\s\S]*?)\n[ \t]*```/.exec(text)?.[1];
@@ -37688,6 +37729,18 @@ var RepoThreads = class {
     this.threads.push(thread);
     this.addComment(thread, body, single);
     return thread;
+  }
+  addNote(anchor2, snippet, context, body, noteOf) {
+    const thread = { id: newId(), rev: 0, anchor: anchor2, snippet, context, comments: [comment("claude", body, "done")], noteOf };
+    this.threads.push(thread);
+    this.emit(thread);
+  }
+  removeNotes(noteOf) {
+    for (const thread of this.threads.filter((t) => t.noteOf === noteOf && t.comments.every((c) => c.author === "claude"))) {
+      this.threads.splice(this.threads.indexOf(thread), 1);
+      thread.comments = [];
+      this.emit(thread);
+    }
   }
   reply(threadId, body, single) {
     const thread = this.find(threadId);
@@ -37883,6 +37936,8 @@ var MAX_COMMENT = 20 * 1024;
 var MAX_SNIPPET = 64 * 1024;
 var MAX_CONTEXT_LINES = 3;
 var MAX_FOCUS = 2e3;
+var MAX_TOPICS = 50;
+var MAX_TITLE = 200;
 var MAX_REF = 1024;
 var MAX_OVERRIDES = 1e3;
 var MAX_PATH = 4096;
@@ -37952,9 +38007,9 @@ var ReviewServer = class {
     threads.cwd = cwd;
     const restored = session !== null && session !== threads.parentSession ? this.restore(view, threads, session) : null;
     if (session) threads.parentSession = session;
-    if (grouped) this.addReview(view, compare, grouped.focus, grouped.topics);
+    const dropped = grouped ? this.addReview(view, compare, grouped.focus, grouped.topics, grouped.diff, null) : 0;
     this.broadcast("view", { view: id, repo, compare });
-    return { view, restored };
+    return { view, restored, dropped };
   }
   restore(view, threads, session) {
     if (threads.threads.length || threads.submissions.length) return null;
@@ -38010,33 +38065,52 @@ var ReviewServer = class {
     const after = this.repos.get(view.repo)?.submissions.length ?? 0;
     return `curl -sSf "http://127.0.0.1:${this.port}/api/views/${view.id}/wait?after=${after}&token=${this.token}"`;
   }
-  addReview(view, compare, focus, topics) {
+  addReview(view, compare, focus, topics, diff, replaces) {
     const same = isFor(view.repo, compare);
-    this.reviews.push({ repo: view.repo, compare, focus, topics, createdAt: (/* @__PURE__ */ new Date()).toISOString(), view: view.id });
+    const threads = this.repos.get(view.repo);
+    if (replaces !== null) this.removeReview(view.repo, replaces);
+    const createdAt = (/* @__PURE__ */ new Date()).toISOString();
+    const stored = topics.map(({ title, summary, ids }) => ({ title, summary, ids }));
+    this.reviews.push({ repo: view.repo, compare, focus, topics: stored, createdAt, view: view.id });
+    let dropped = 0;
+    for (const note of topics.flatMap((t) => t.notes)) {
+      const placed = placeNote(diff, note);
+      if (placed) threads.addNote(placed.anchor, placed.snippet, placed.context, note.body, createdAt);
+      else dropped++;
+    }
     const failed = this.groupings.findIndex((g) => same(g) && g.error !== null);
     if (failed >= 0) this.groupings.splice(failed, 1);
     this.broadcast("reviews", this.reviews);
     this.broadcast("groupings", this.groupings);
     this.saveSoon(view.repo);
+    return dropped;
   }
-  group(view, compare, focus, threads) {
+  removeReview(repo, createdAt) {
+    const i = this.reviews.findIndex((r) => r.repo === repo && r.createdAt === createdAt);
+    if (i < 0) return;
+    this.reviews.splice(i, 1);
+    this.repos.get(repo)?.removeNotes(createdAt);
+    this.broadcast("reviews", this.reviews);
+    this.saveSoon(repo);
+  }
+  group(view, compare, focus, names, replaces, threads) {
     const i = this.groupings.findIndex(isFor(view.repo, compare));
     if (i >= 0 && this.groupings[i].error === null) return;
     if (i >= 0) this.groupings.splice(i, 1);
-    const job = { repo: view.repo, compare, focus, activity: "Starting", error: null };
+    const job = { repo: view.repo, compare, focus, topics: names, replaces, activity: "Starting", error: null };
     this.groupings.push(job);
     this.broadcast("groupings", this.groupings);
     void (async () => {
       try {
         const { diff } = await this.loadDiff(view.repo, compare);
-        if (!diff.files.length) throw new Error("This comparison has no changes to group.");
+        if (!diff.files.length) throw new Error("This comparison has no changes to make topics for.");
         const onActivity = (activity) => {
           job.activity = activity;
           this.broadcast("groupings", this.groupings);
         };
-        const topics = await groupChanges({ diff, focus, cwd: threads.cwd, session: threads.parentSession, onActivity });
+        const topics = await groupChanges({ diff, focus, names, cwd: threads.cwd, session: threads.parentSession, onActivity });
         this.groupings.splice(this.groupings.indexOf(job), 1);
-        this.addReview(view, compare, focus, topics);
+        this.addReview(view, compare, focus, topics, diff, replaces);
       } catch (err) {
         job.activity = null;
         job.error = errorMessage(err);
@@ -38118,19 +38192,20 @@ var ReviewServer = class {
       case "GET wait":
         return wait(res, query, view, threads);
       case "POST topics": {
-        const { focus } = await readJson(req);
+        const { focus, topics, replaces } = await readJson(req);
         if (focus !== void 0 && focus !== null && !isText(focus, MAX_FOCUS)) return sendJson(res, 400, { error: "Invalid focus" });
-        this.group(view, compare, focus?.trim() || null, threads);
+        const names = topics === void 0 || topics === null ? null : topics;
+        if (names !== null && !(Array.isArray(names) && names.length <= MAX_TOPICS && names.every((n) => isText(n, MAX_TITLE, true)))) {
+          return sendJson(res, 400, { error: "Invalid topics" });
+        }
+        if (replaces !== void 0 && replaces !== null && !isText(replaces, MAX_REF, true)) return sendJson(res, 400, { error: "Invalid topics" });
+        const titles = names?.map((n) => n.trim()) ?? [];
+        this.group(view, compare, focus?.trim() || null, titles.length ? titles : null, replaces ?? null, threads);
         return sendJson(res, 202, { groupings: this.groupings });
       }
       case "DELETE reviews": {
         const { repo, createdAt } = await readJson(req);
-        const i = this.reviews.findIndex((r) => r.repo === repo && r.createdAt === createdAt);
-        if (i >= 0) {
-          const [removed] = this.reviews.splice(i, 1);
-          this.broadcast("reviews", this.reviews);
-          this.saveSoon(removed.repo);
-        }
+        if (typeof repo === "string" && typeof createdAt === "string") this.removeReview(repo, createdAt);
         return sendJson(res, 200, { reviews: this.reviews });
       }
       case "POST threads": {
@@ -38356,11 +38431,13 @@ async function openViewer(repo, compare, focus, topics, session) {
       note = `
 ${unassigned.length} change(s) are in no topic, so they appear only in the Files tab: ${unassigned.join(", ")}`;
     }
-    grouped = { focus: focus?.trim() || null, topics };
+    grouped = { focus: focus?.trim() || null, topics, diff };
   }
   const server = await getServer();
   server.keepDiff(diff.repoRoot, compare, { version: probe.version, diff });
-  const { view, restored } = server.addView(diff.repoRoot, compare, grouped, repo, session && SESSION_ID.test(session) ? session : null);
+  const { view, restored, dropped } = server.addView(diff.repoRoot, compare, grouped, repo, session && SESSION_ID.test(session) ? session : null);
+  if (dropped) note += `
+${plural2(dropped, "note")} could not be placed on a line of the diff.`;
   if (restored?.threads) note += `
 Brought back ${plural2(restored.threads, "comment thread")} from the viewer this session had open before.`;
   if (restored?.unread) {
@@ -38437,7 +38514,18 @@ async function runMcp() {
           external_exports.object({
             title: external_exports.string().describe("A few words naming the topic."),
             summary: external_exports.string().describe("Markdown explaining what changed in this topic and why."),
-            ids: external_exports.array(external_exports.string()).describe("Ids from list_changes of the changes in this topic.")
+            ids: external_exports.array(external_exports.string()).describe("Ids from list_changes of the changes in this topic."),
+            notes: external_exports.array(
+              external_exports.object({
+                id: external_exports.string().describe("Id from list_changes of the change the note is on."),
+                line: external_exports.number().int().positive().optional().describe(
+                  "A line number inside that change: of an added line, counted from the + number in its @@ header, or of a removed line, counted from the - number, when the change adds none. Omit it for the whole change."
+                ),
+                body: external_exports.string().min(1).describe("Markdown: what the reviewer should know about these lines.")
+              })
+            ).optional().describe(
+              "Your comments on the lines a reviewer most needs explained, such as a subtle invariant, a non-obvious reason or a risk to check, at most three in a topic. They show on those lines as comments from Claude that the user can reply to."
+            )
           })
         ).optional().describe(
           "The topics the user asked for, in the order the reviewer should read them. The Topics tab shows only these, and changes in no topic stay in the Files tab."
@@ -38447,7 +38535,13 @@ async function runMcp() {
     },
     (args) => attempt(
       "Could not open the diff viewer",
-      () => openViewer(args.repo ?? process.cwd(), comparison(args), args.focus, args.topics, args.session)
+      () => openViewer(
+        args.repo ?? process.cwd(),
+        comparison(args),
+        args.focus,
+        args.topics?.map((t) => ({ ...t, notes: (t.notes ?? []).map((n) => ({ id: n.id, line: n.line ?? null, body: n.body.trim() })) })),
+        args.session
+      )
     )
   );
   mcp.registerTool(

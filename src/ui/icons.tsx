@@ -155,6 +155,17 @@ const EXPAND: Record<ExpandDir, string> = {
 
 export const ExpandIcon = ({ dir }: { dir: ExpandDir }) => <Octicon d={EXPAND[dir]} />;
 
+const FOLD = {
+  fold: "M8 1.75v4M5.5 3.25 8 5.75l2.5-2.5M8 14.25v-4M5.5 12.75 8 10.25l2.5 2.5M2.75 8h10.5",
+  unfold: "M8 5.75v-4M5.5 4.25 8 1.75l2.5 2.5M8 10.25v4M5.5 11.75 8 14.25l2.5-2.5M2.75 8h10.5",
+};
+
+export const FoldIcon = ({ fold }: { fold: boolean }) => (
+  <Svg>
+    <path d={fold ? FOLD.fold : FOLD.unfold} fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+  </Svg>
+);
+
 export const FileIcon = ({ className }: { className: string }) => (
   <Octicon
     className={className}

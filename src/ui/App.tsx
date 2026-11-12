@@ -1,4 +1,5 @@
 import { type ReactNode, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { contextOf } from "../shared/comments";
 import { comparisonFromQuery, comparisonQuery, isFor, repoFailures, sameComparison } from "../shared/comparison";
 import { splitLines } from "../shared/hunks";
 import type { CommitInfo, Comparison, DiffResult, FileDiff, Grouping, Review, Thread, ThreadAnchor, ViewData } from "../shared/types";
@@ -18,15 +19,17 @@ import {
   groupTopics,
   replyToThread,
   submitReview,
+  type TopicRequest,
   viewUrl,
 } from "./api";
 import { type CommentActions, CommentActionsContext, type CommentsApi, CommentsContext } from "./comments";
 import { CommitBar, CommitList, CompareControls, refLabel, RepoComparisons } from "./Compare";
 import { ConversationsButton, ConversationsPanel, type Place, useConversations } from "./Conversations";
 import { FileCard, FileLoader } from "./FileCard";
-import { FileTree } from "./FileTree";
+import { dirPaths, FileTree } from "./FileTree";
+import { FoldIcon } from "./icons";
 import { go, KeyboardButton, ShortcutHelp, stepSection, useShortcuts } from "./keyboard";
-import { contextOf, locate } from "./locate";
+import { locate } from "./locate";
 import { comparePaths } from "./paths";
 import { ReviewBar } from "./ReviewBar";
 import { type Hit, revealLine, searchDiff, SearchResults } from "./Search";
@@ -73,6 +76,7 @@ export function App({ viewId }: Props) {
   const [tab, setTab] = useState<Tab>("topics");
   const [sidebarOpen, setSidebarOpen] = useStoredState("diff-review:sidebar", true);
   const [filter, setFilter] = useState("");
+  const [foldedDirs, setFoldedDirs] = useState<ReadonlySet<string>>(new Set());
   const [query, setQuery] = useState("");
   const [hit, setHit] = useState<Hit | null>(null);
 
@@ -333,8 +337,8 @@ export function App({ viewId }: Props) {
     return mine.find((r) => r.createdAt === pickedAt) ?? mine.at(-1) ?? null;
   }, [reviews, diff, pickedAt]);
   const grouping = diff ? (groupings.find(isFor(diff.repoRoot, diff)) ?? null) : null;
-  const group = async (focus: string) => {
-    if (viewId && current) setGroupings(await groupTopics(viewId, current, focus));
+  const group = async (ask: TopicRequest) => {
+    if (viewId && current) setGroupings(await groupTopics(viewId, current, ask));
   };
   const removeReview = async (r: Review) => {
     if (viewId) setReviews(await deleteReview(viewId, r));
@@ -472,6 +476,17 @@ export function App({ viewId }: Props) {
   latestSelect.current = select;
   const onSelect = useCallback((anchor: string) => latestSelect.current(anchor), []);
   const treeEntries = useMemo(() => (topicTab ? matching(topicFiles, filter) : shown), [topicTab, topicFiles, filter, shown]);
+  const toggleDir = useCallback(
+    (path: string) =>
+      setFoldedDirs((prev) => {
+        const next = new Set(prev);
+        if (!next.delete(path)) next.add(path);
+        return next;
+      }),
+    [],
+  );
+  const shownDirs = useMemo(() => dirPaths(treeEntries, foldedDirs), [treeEntries, foldedDirs]);
+  const anyDirOpen = shownDirs.some((d) => !foldedDirs.has(d));
 
   if (!viewId) {
     return <Notice title="This link is incomplete">Open the exact link Claude gave you.</Notice>;
@@ -520,14 +535,26 @@ export function App({ viewId }: Props) {
             <div className={`layout${conv.open ? " with-conversations" : ""}${sidebarOpen ? "" : " no-sidebar"}`}>
               <aside className="sidebar" hidden={!sidebarOpen}>
                 <div className="view">
-                  <input
-                    className="filter"
-                    type="search"
-                    placeholder="Filter files"
-                    value={filter}
-                    onChange={(e) => setFilter(e.target.value)}
-                    aria-label="Filter files"
-                  />
+                  <div className="filter-row">
+                    <input
+                      className="filter"
+                      type="search"
+                      placeholder="Filter files"
+                      value={filter}
+                      onChange={(e) => setFilter(e.target.value)}
+                      aria-label="Filter files"
+                    />
+                    {shownDirs.length > 0 && !searched.trim() && (
+                      <button
+                        className="icon-button"
+                        aria-label={anyDirOpen ? "Collapse all folders" : "Expand all folders"}
+                        title={anyDirOpen ? "Collapse all folders" : "Expand all folders"}
+                        onClick={() => setFoldedDirs(anyDirOpen ? new Set(dirPaths(treeEntries)) : new Set())}
+                      >
+                        <FoldIcon fold={anyDirOpen} />
+                      </button>
+                    )}
+                  </div>
                   <input
                     className="filter"
                     type="search"
@@ -548,7 +575,13 @@ export function App({ viewId }: Props) {
                   {searched.trim() ? (
                     <SearchResults found={found} query={searched} current={hit} onOpen={openHit} />
                   ) : (
-                    <FileTree entries={treeEntries} isViewed={topicTab ? isTopicFileViewed : isViewed} onSelect={onSelect} />
+                    <FileTree
+                      entries={treeEntries}
+                      isViewed={topicTab ? isTopicFileViewed : isViewed}
+                      onSelect={onSelect}
+                      collapsed={foldedDirs}
+                      onToggle={toggleDir}
+                    />
                   )}
                 </div>
               </aside>

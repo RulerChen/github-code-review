@@ -1,4 +1,4 @@
-import { type CSSProperties, memo, useEffect, useMemo, useRef, useState } from "react";
+import { type CSSProperties, memo, useEffect, useMemo, useRef } from "react";
 import type { FileDiff } from "../shared/types";
 import { useIsActiveFile } from "./active";
 import { ChevronIcon, DirIcon, FileIcon, StatusIcon } from "./icons";
@@ -41,26 +41,34 @@ function compress(node: DirNode): DirNode {
   return node;
 }
 
+export function dirPaths(entries: { file: FileDiff; anchor: string }[], skipInside: ReadonlySet<string> = new Set()): string[] {
+  const out: string[] = [];
+  const walk = (node: DirNode, path: string) => {
+    for (const dir of node.dirs.values()) {
+      const dirPath = path ? `${path}/${dir.name}` : dir.name;
+      out.push(dirPath);
+      if (!skipInside.has(dirPath)) walk(dir, dirPath);
+    }
+  };
+  walk(buildTree(entries), "");
+  return out;
+}
+
 interface Props {
   entries: { file: FileDiff; anchor: string }[];
   isViewed: (file: FileDiff) => boolean;
   onSelect: (anchor: string) => void;
+  collapsed: ReadonlySet<string>;
+  onToggle: (path: string) => void;
 }
 
-export const FileTree = memo(function FileTree({ entries, isViewed, onSelect }: Props) {
-  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
-  const toggle = (path: string) =>
-    setCollapsed((prev) => {
-      const next = new Set(prev);
-      if (!next.delete(path)) next.add(path);
-      return next;
-    });
+export const FileTree = memo(function FileTree({ entries, isViewed, onSelect, collapsed, onToggle }: Props) {
   const tree = useMemo(() => buildTree(entries), [entries]);
   if (entries.length === 0) return <p className="tree-empty">No matching files.</p>;
 
   return (
     <ul className="tree" role="tree">
-      <TreeLevel node={tree} path="" depth={0} isViewed={isViewed} onSelect={onSelect} collapsed={collapsed} onToggle={toggle} />
+      <TreeLevel node={tree} path="" depth={0} isViewed={isViewed} onSelect={onSelect} collapsed={collapsed} onToggle={onToggle} />
     </ul>
   );
 });

@@ -1,7 +1,7 @@
 import { type SetStateAction, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { lineNumbers } from "../shared/comments";
 import type { Thread, ThreadAnchor } from "../shared/types";
-import { anchorLabel, authorName, type CommentsApi, readableCount, ThreadView } from "./comments";
+import { anchorLabel, authorName, type CommentsApi, preview, readableCount, ThreadView } from "./comments";
 import { CloseIcon, ConversationIcon } from "./icons";
 import { isOutdated } from "./locate";
 import { basename, comparePaths, dirPrefix } from "./paths";
@@ -21,7 +21,7 @@ interface Options {
 }
 
 export interface Conversations {
-  api: Pick<CommentsApi, "unread" | "markRead" | "revealSeq" | "peekReveal" | "takeReveal">;
+  api: Pick<CommentsApi, "unread" | "markRead" | "isFolded" | "setFolded" | "revealSeq" | "peekReveal" | "takeReveal">;
   current: string | null;
   ordered: Thread[];
   placeOf: Map<string, Place | null>;
@@ -55,7 +55,9 @@ function byPlace(placeOf: Map<string, Place | null>) {
 
 export function useConversations({ repoRoot, threads, place, show }: Options): Conversations {
   const key = repoRoot ? `diff-review:read:${repoRoot}` : null;
+  const foldKey = repoRoot ? `diff-review:folded:${repoRoot}` : null;
   const [seen, setSeen] = useState<Record<string, number>>({});
+  const [folded, setFoldedIds] = useState<Record<string, true>>({});
   const [current, setCurrent] = useState<string | null>(null);
   const [open, setOpen] = useStoredState("diff-review:conversations", false);
   const [revealSeq, setRevealSeq] = useState(0);
@@ -65,6 +67,27 @@ export function useConversations({ repoRoot, threads, place, show }: Options): C
   useEffect(() => {
     if (key) setSeen(readStorage(key, {}));
   }, [key]);
+  useEffect(() => {
+    if (foldKey) setFoldedIds(readStorage(foldKey, {}));
+  }, [foldKey]);
+
+  const threadIds = useRef(new Set<string>());
+  threadIds.current = new Set(threads.map((t) => t.id));
+  const isFolded = useCallback((threadId: string) => folded[threadId] === true, [folded]);
+  const setFolded = useCallback(
+    (threadId: string, fold: boolean) => {
+      if (!foldKey) return;
+      setFoldedIds((prev) => {
+        if ((prev[threadId] === true) === fold) return prev;
+        const next: Record<string, true> = {};
+        for (const id of Object.keys(prev)) if (id !== threadId && threadIds.current.has(id)) next[id] = true;
+        if (fold) next[threadId] = true;
+        writeStorage(foldKey, next);
+        return next;
+      });
+    },
+    [foldKey],
+  );
 
   const markRead = useCallback(
     (thread: Thread) => {
@@ -126,7 +149,10 @@ export function useConversations({ repoRoot, threads, place, show }: Options): C
     setSeen(next);
   };
 
-  const api = useMemo(() => ({ unread, markRead, revealSeq, peekReveal, takeReveal }), [unread, markRead, revealSeq, peekReveal, takeReveal]);
+  const api = useMemo(
+    () => ({ unread, markRead, isFolded, setFolded, revealSeq, peekReveal, takeReveal }),
+    [unread, markRead, isFolded, setFolded, revealSeq, peekReveal, takeReveal],
+  );
 
   return { api, current, ordered, placeOf, unreadThreads, open, setOpen, reveal, nextUnread, markAllRead };
 }
@@ -137,13 +163,6 @@ function lineLabel(anchor: ThreadAnchor): string {
   const lines = `L${lineNumbers(anchor)}`;
   return anchor.side === "old" ? `old ${lines}` : lines;
 }
-
-const preview = (text: string) =>
-  text
-    .replace(/```[^\n]*\n?/g, " ")
-    .replace(/\*\*|`/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
 
 export function ConversationsButton({ conv }: { conv: Conversations }) {
   const n = conv.unreadThreads;
@@ -183,8 +202,8 @@ export function ConversationsPanel({ conv }: { conv: Conversations }) {
       {ordered.length === 0 ? (
         <p className="conversations-empty">
           No conversations yet. Click a line number to comment on lines, or the comment button in a file's or topic's
-          header to comment on all of it. Mention @claude to ask a question, or leave comments for Claude to address and
-          press Submit review.
+          header to comment on all of it. Mention @claude to ask a question. Other comments go to Claude, which changes
+          the code the way they ask.
         </p>
       ) : (
         <ul className="conversations-list">

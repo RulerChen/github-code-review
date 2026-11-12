@@ -2,6 +2,8 @@ import { useRef, useState } from "react";
 import { describeComparison } from "../shared/comparison";
 import type { Grouping, Review } from "../shared/types";
 import { plural } from "../shared/util";
+import { focusInPlace } from "./anchor";
+import type { TopicRequest } from "./api";
 import { refLabel } from "./Compare";
 import { useAction, useDismiss } from "./hooks";
 import { CaretIcon, CheckMark, TrashIcon } from "./icons";
@@ -14,14 +16,19 @@ interface Props {
   repoRoot: string;
   hasChanges: boolean;
   onPick: (review: Review) => void;
-  onGroup: (focus: string) => Promise<void>;
+  onGroup: (ask: TopicRequest) => Promise<void>;
   onRemove: (review: Review) => Promise<void>;
 }
 
 export function ReviewBar({ reviews, review, grouping, repoRoot, hasChanges, onPick, onGroup, onRemove }: Props) {
   const running = grouping !== null && grouping.error === null;
-  const { busy, error, run } = useAction(onGroup);
+  const [editing, setEditing] = useState(false);
+  const { busy, error, run } = useAction(async (ask: TopicRequest) => {
+    await onGroup(ask);
+    setEditing(false);
+  });
   const removing = useAction(onRemove);
+  const failedEdit = grouping?.error && review && grouping.replaces === review.createdAt ? grouping : null;
 
   return (
     <div className="review-bar">
@@ -36,18 +43,13 @@ export function ReviewBar({ reviews, review, grouping, repoRoot, hasChanges, onP
             </p>
           )}
           <span className="spacer" />
-          {review && hasChanges && !running && (
-            <button
-              className="button"
-              title="Run this grouping again"
-              disabled={busy}
-              onClick={() => void run(review.focus ?? "")}
-            >
-              Group again
+          {review && hasChanges && !running && !editing && (
+            <button className="button" title="Change these topics and have Claude redo them" onClick={() => setEditing(true)}>
+              Edit topics
             </button>
           )}
           {review && (
-            <button className="button" title="Remove these topics from the Reviews list" disabled={removing.busy} onClick={() => void removing.run(review)}>
+            <button className="button" title="Remove these topics and Claude's notes on their lines" disabled={removing.busy} onClick={() => void removing.run(review)}>
               Remove
             </button>
           )}
@@ -59,7 +61,7 @@ export function ReviewBar({ reviews, review, grouping, repoRoot, hasChanges, onP
           <span className="group-spinner" aria-hidden="true" />
           <div>
             <p>
-              Claude is grouping the changes into topics
+              {grouping.replaces ? "Claude is updating the topics" : "Claude is making topics"}
               {grouping.focus && (
                 <>
                   {" "}
@@ -74,17 +76,34 @@ export function ReviewBar({ reviews, review, grouping, repoRoot, hasChanges, onP
       )}
       {grouping?.error && !running && (
         <p className="group-card group-error" role="alert">
-          Could not group the changes: {grouping.error}
+          {grouping.replaces ? "Could not update the topics" : "Could not make topics"}: {grouping.error}
         </p>
       )}
-      {hasChanges && !running && (
-        <GroupForm initial={grouping?.focus ?? ""} explain={review === null} busy={busy} error={error} onSubmit={run} />
+      {hasChanges && !running && review && editing && (
+        <EditForm
+          key={review.createdAt}
+          review={review}
+          retry={failedEdit}
+          busy={busy}
+          error={error}
+          onSubmit={run}
+          onCancel={() => setEditing(false)}
+        />
+      )}
+      {hasChanges && !running && !editing && (
+        <CreateForm
+          initial={grouping?.replaces === null ? (grouping.focus ?? "") : ""}
+          explain={review === null}
+          busy={busy}
+          error={error}
+          onSubmit={(focus) => run({ focus, topics: null, replaces: null })}
+        />
       )}
     </div>
   );
 }
 
-interface FormProps {
+interface CreateProps {
   initial: string;
   explain: boolean;
   busy: boolean;
@@ -92,7 +111,7 @@ interface FormProps {
   onSubmit: (focus: string) => Promise<void>;
 }
 
-function GroupForm({ initial, explain, busy, error, onSubmit }: FormProps) {
+function CreateForm({ initial, explain, busy, error, onSubmit }: CreateProps) {
   const [focus, setFocus] = useState(initial);
   return (
     <form
@@ -102,18 +121,78 @@ function GroupForm({ initial, explain, busy, error, onSubmit }: FormProps) {
         void onSubmit(focus.trim());
       }}
     >
-      {explain && <p>Claude has not grouped this comparison into topics. It can do that now and explain each topic.</p>}
+      {explain && <p>There are no topics for this comparison yet. Claude can make them now and explain each one.</p>}
       <div className="group-form-row">
         <input
           className="filter"
           type="text"
-          placeholder="What you want to review, or leave empty to group every change"
+          placeholder="What you want to review, or leave empty for every change"
           aria-label="Focus"
           value={focus}
           onChange={(e) => setFocus(e.target.value)}
         />
         <button className="button primary" type="submit" disabled={busy}>
-          Group into topics
+          Create topics
+        </button>
+      </div>
+      {error && <p className="comment-error">{error}</p>}
+    </form>
+  );
+}
+
+interface EditProps {
+  review: Review;
+  retry: Grouping | null;
+  busy: boolean;
+  error: string | null;
+  onSubmit: (ask: TopicRequest) => Promise<void>;
+  onCancel: () => void;
+}
+
+function EditForm({ review, retry, busy, error, onSubmit, onCancel }: EditProps) {
+  const [focus, setFocus] = useState(retry ? (retry.focus ?? "") : (review.focus ?? ""));
+  const [titles, setTitles] = useState((retry?.topics ?? review.topics.map((t) => t.title)).join("\n"));
+  const rows = Math.min(12, Math.max(3, titles.split("\n").length + 1));
+
+  return (
+    <form
+      className="group-card group-form"
+      onKeyDown={(e) => {
+        if (e.key === "Escape") onCancel();
+      }}
+      onSubmit={(e) => {
+        e.preventDefault();
+        const topics = titles
+          .split("\n")
+          .map((t) => t.trim())
+          .filter(Boolean);
+        void onSubmit({ focus: focus.trim(), topics, replaces: review.createdAt });
+      }}
+    >
+      <p>
+        Rename, add, remove or reorder the topics, one per line, and Claude redoes them in place of these. Leave the list
+        empty to let Claude choose the topics.
+      </p>
+      <label className="group-field">
+        <span>Focus</span>
+        <input
+          className="filter"
+          type="text"
+          placeholder="What you want to review, or leave empty for every change"
+          value={focus}
+          onChange={(e) => setFocus(e.target.value)}
+        />
+      </label>
+      <label className="group-field">
+        <span>Topics</span>
+        <textarea className="filter" rows={rows} value={titles} onChange={(e) => setTitles(e.target.value)} ref={focusInPlace} />
+      </label>
+      <div className="group-form-actions">
+        <button type="button" className="button" onClick={onCancel}>
+          Cancel
+        </button>
+        <button className="button primary" type="submit" disabled={busy}>
+          Update topics
         </button>
       </div>
       {error && <p className="comment-error">{error}</p>}

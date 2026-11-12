@@ -7,9 +7,10 @@ import { promisify } from "node:util";
 import { gzip } from "node:zlib";
 import { computeDiff, listRefs, probeDiff } from "../engine/diff.js";
 import { comparisonFromQuery, comparisonQuery, isFor } from "../shared/comparison.js";
-import type { Comparison, DiffResult, FileDiff, Grouping, Review, Thread, ThreadAnchor, ThreadContext, Topic, ViewData } from "../shared/types.js";
+import type { Comparison, DiffResult, FileDiff, Grouping, NotedTopic, Review, Thread, ThreadAnchor, ThreadContext, ViewData } from "../shared/types.js";
 import { errorMessage, isRecord, sum } from "../shared/util.js";
 import { groupChanges } from "./group.js";
+import { placeNote } from "./review.js";
 import { dropOldStates, loadState, saveState } from "./store.js";
 import { RepoThreads } from "./threads.js";
 
@@ -51,6 +52,8 @@ const MAX_COMMENT = 20 * 1024;
 const MAX_SNIPPET = 64 * 1024;
 const MAX_CONTEXT_LINES = 3;
 const MAX_FOCUS = 2000;
+const MAX_TOPICS = 50;
+const MAX_TITLE = 200;
 const MAX_REF = 1024;
 const MAX_OVERRIDES = 1000;
 const MAX_PATH = 4096;
@@ -119,10 +122,10 @@ export class ReviewServer {
   addView(
     repo: string,
     compare: Comparison,
-    grouped: { focus: string | null; topics: Topic[] } | null,
+    grouped: { focus: string | null; topics: NotedTopic[]; diff: DiffResult } | null,
     cwd: string,
     session: string | null,
-  ): { view: View; restored: Restored | null } {
+  ): { view: View; restored: Restored | null; dropped: number } {
     let id: string;
     do id = Array.from({ length: 8 }, () => String.fromCharCode(97 + randomInt(26))).join("");
     while (this.views.has(id));
@@ -138,9 +141,9 @@ export class ReviewServer {
     threads.cwd = cwd;
     const restored = session !== null && session !== threads.parentSession ? this.restore(view, threads, session) : null;
     if (session) threads.parentSession = session;
-    if (grouped) this.addReview(view, compare, grouped.focus, grouped.topics);
+    const dropped = grouped ? this.addReview(view, compare, grouped.focus, grouped.topics, grouped.diff, null) : 0;
     this.broadcast("view", { view: id, repo, compare });
-    return { view, restored };
+    return { view, restored, dropped };
   }
 
   private restore(view: View, threads: RepoThreads, session: string): Restored | null {
@@ -206,36 +209,59 @@ export class ReviewServer {
     return `curl -sSf "http://127.0.0.1:${this.port}/api/views/${view.id}/wait?after=${after}&token=${this.token}"`;
   }
 
-  private addReview(view: View, compare: Comparison, focus: string | null, topics: Topic[]): void {
+  private addReview(view: View, compare: Comparison, focus: string | null, topics: NotedTopic[], diff: DiffResult, replaces: string | null): number {
     const same = isFor(view.repo, compare);
-    this.reviews.push({ repo: view.repo, compare, focus, topics, createdAt: new Date().toISOString(), view: view.id });
+    const threads = this.repos.get(view.repo)!;
+    if (replaces !== null) this.removeReview(view.repo, replaces);
+
+    const createdAt = new Date().toISOString();
+    const stored = topics.map(({ title, summary, ids }) => ({ title, summary, ids }));
+    this.reviews.push({ repo: view.repo, compare, focus, topics: stored, createdAt, view: view.id });
+
+    let dropped = 0;
+    for (const note of topics.flatMap((t) => t.notes)) {
+      const placed = placeNote(diff, note);
+      if (placed) threads.addNote(placed.anchor, placed.snippet, placed.context, note.body, createdAt);
+      else dropped++;
+    }
+
     const failed = this.groupings.findIndex((g) => same(g) && g.error !== null);
     if (failed >= 0) this.groupings.splice(failed, 1);
     this.broadcast("reviews", this.reviews);
     this.broadcast("groupings", this.groupings);
     this.saveSoon(view.repo);
+    return dropped;
   }
 
-  private group(view: View, compare: Comparison, focus: string | null, threads: RepoThreads): void {
+  private removeReview(repo: string, createdAt: string): void {
+    const i = this.reviews.findIndex((r) => r.repo === repo && r.createdAt === createdAt);
+    if (i < 0) return;
+    this.reviews.splice(i, 1);
+    this.repos.get(repo)?.removeNotes(createdAt);
+    this.broadcast("reviews", this.reviews);
+    this.saveSoon(repo);
+  }
+
+  private group(view: View, compare: Comparison, focus: string | null, names: string[] | null, replaces: string | null, threads: RepoThreads): void {
     const i = this.groupings.findIndex(isFor(view.repo, compare));
     if (i >= 0 && this.groupings[i]!.error === null) return;
     if (i >= 0) this.groupings.splice(i, 1);
 
-    const job: Grouping = { repo: view.repo, compare, focus, activity: "Starting", error: null };
+    const job: Grouping = { repo: view.repo, compare, focus, topics: names, replaces, activity: "Starting", error: null };
     this.groupings.push(job);
     this.broadcast("groupings", this.groupings);
 
     void (async () => {
       try {
         const { diff } = await this.loadDiff(view.repo, compare);
-        if (!diff.files.length) throw new Error("This comparison has no changes to group.");
+        if (!diff.files.length) throw new Error("This comparison has no changes to make topics for.");
         const onActivity = (activity: string) => {
           job.activity = activity;
           this.broadcast("groupings", this.groupings);
         };
-        const topics = await groupChanges({ diff, focus, cwd: threads.cwd, session: threads.parentSession, onActivity });
+        const topics = await groupChanges({ diff, focus, names, cwd: threads.cwd, session: threads.parentSession, onActivity });
         this.groupings.splice(this.groupings.indexOf(job), 1);
-        this.addReview(view, compare, focus, topics);
+        this.addReview(view, compare, focus, topics, diff, replaces);
       } catch (err) {
         job.activity = null;
         job.error = errorMessage(err);
@@ -327,19 +353,20 @@ export class ReviewServer {
       case "GET wait":
         return wait(res, query, view, threads);
       case "POST topics": {
-        const { focus } = await readJson(req);
+        const { focus, topics, replaces } = await readJson(req);
         if (focus !== undefined && focus !== null && !isText(focus, MAX_FOCUS)) return sendJson(res, 400, { error: "Invalid focus" });
-        this.group(view, compare, focus?.trim() || null, threads);
+        const names = topics === undefined || topics === null ? null : topics;
+        if (names !== null && !(Array.isArray(names) && names.length <= MAX_TOPICS && names.every((n) => isText(n, MAX_TITLE, true)))) {
+          return sendJson(res, 400, { error: "Invalid topics" });
+        }
+        if (replaces !== undefined && replaces !== null && !isText(replaces, MAX_REF, true)) return sendJson(res, 400, { error: "Invalid topics" });
+        const titles = names?.map((n: string) => n.trim()) ?? [];
+        this.group(view, compare, focus?.trim() || null, titles.length ? titles : null, replaces ?? null, threads);
         return sendJson(res, 202, { groupings: this.groupings });
       }
       case "DELETE reviews": {
         const { repo, createdAt } = await readJson(req);
-        const i = this.reviews.findIndex((r) => r.repo === repo && r.createdAt === createdAt);
-        if (i >= 0) {
-          const [removed] = this.reviews.splice(i, 1);
-          this.broadcast("reviews", this.reviews);
-          this.saveSoon(removed!.repo);
-        }
+        if (typeof repo === "string" && typeof createdAt === "string") this.removeReview(repo, createdAt);
         return sendJson(res, 200, { reviews: this.reviews });
       }
       case "POST threads": {

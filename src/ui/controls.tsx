@@ -33,16 +33,40 @@ export function ViewedToggle({ viewed, onChange }: { viewed: boolean; onChange: 
   );
 }
 
+async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {}
+
+  const area = document.createElement("textarea");
+  area.value = text;
+  area.readOnly = true;
+  area.style.position = "fixed";
+  area.style.top = "0";
+  area.style.left = "0";
+  area.style.opacity = "0";
+  const focused = document.activeElement;
+  document.body.append(area);
+  area.focus({ preventScroll: true });
+  area.select();
+  let copied = false;
+  try {
+    copied = document.execCommand("copy");
+  } catch {}
+  area.remove();
+  if (focused instanceof HTMLElement) focused.focus({ preventScroll: true });
+  return copied;
+}
+
 export function CopyButton({ text, label = "Copy file path" }: { text: string; label?: string }) {
   const [copied, setCopied] = useState(false);
   const copy = () => {
-    navigator.clipboard
-      ?.writeText(text)
-      .then(() => {
-        setCopied(true);
-        setTimeout(() => setCopied(false), COPIED_MS);
-      })
-      .catch(() => undefined);
+    void copyText(text).then((ok) => {
+      if (!ok) return;
+      setCopied(true);
+      setTimeout(() => setCopied(false), COPIED_MS);
+    });
   };
 
   return (

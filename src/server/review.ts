@@ -1,8 +1,8 @@
 import { describeFailures, summarize } from "../engine/diff.js";
-import { lineRange } from "../shared/comments.js";
+import { contextOf, lineRange } from "../shared/comments.js";
 import { describeComparison } from "../shared/comparison.js";
-import { changeIds, hunkHeader } from "../shared/hunks.js";
-import type { DiffResult, Thread, Topic } from "../shared/types.js";
+import { changeIds, hunkHeader, splitLines } from "../shared/hunks.js";
+import type { DiffResult, FileAnchor, LineAnchor, Thread, ThreadContext, Topic, TopicNote } from "../shared/types.js";
 import { plural, sum } from "../shared/util.js";
 import type { Submission } from "./threads.js";
 
@@ -60,7 +60,11 @@ export function formatReviewComments(threads: Thread[], submissions: Submission[
   const numbers = new Set(reviews.map((s) => s.n));
   const submitted = threads.filter((t) => t.comments.some((c) => c.review !== null && numbers.has(c.review)));
   const drafts = withDrafts ? threads.filter((t) => !submitted.includes(t) && t.comments.some((c) => c.draft)) : [];
-  const asked = withDrafts ? threads.filter((t) => t.comments.every((c) => c.author !== "user" || (!c.draft && c.review === null))) : [];
+  const asked = withDrafts
+    ? threads.filter(
+        (t) => t.comments.some((c) => c.author === "user") && t.comments.every((c) => c.author !== "user" || (!c.draft && c.review === null)),
+      )
+    : [];
   if (!reviews.length && !drafts.length && !asked.length) return null;
 
   const out: string[] = [];
@@ -99,11 +103,44 @@ function formatThread(t: Thread, withDrafts: boolean): string {
   return [`Thread ${t.id}: ${anchor.path}, ${where}${version}`, ...snippet, ...comments].join("\n");
 }
 
-export function checkTopics(diff: DiffResult, topics: Topic[]): { unknown: string[]; unassigned: string[] } {
+export function checkTopics(diff: DiffResult, topics: (Topic & { notes?: TopicNote[] })[]): { unknown: string[]; unassigned: string[] } {
   const known = new Set(diff.files.flatMap(changeIds));
   const used = new Set(topics.flatMap((t) => t.ids));
+  const noted = topics.flatMap((t) => t.notes?.map((n) => n.id) ?? []);
   return {
-    unknown: [...used].filter((id) => !known.has(id)),
+    unknown: [...new Set([...used, ...noted])].filter((id) => !known.has(id)),
     unassigned: [...known].filter((id) => !used.has(id)),
   };
+}
+
+export interface PlacedNote {
+  anchor: LineAnchor | FileAnchor;
+  snippet: string;
+  context: ThreadContext | null;
+}
+
+export function placeNote(diff: DiffResult, note: TopicNote): PlacedNote | null {
+  for (const f of diff.files) {
+    const wholeFile: PlacedNote = { anchor: { path: f.path, side: null, start: null, end: null, commit: null }, snippet: "", context: null };
+    if (!f.blocks.length && note.id === `file:${f.path}`) return wholeFile;
+    const b = f.blocks.find((x) => x.id === note.id);
+    if (!b) continue;
+
+    const side = b.add.length ? "new" : "old";
+    const lines = side === "new" ? b.add : b.del;
+    if (!lines.length) return wholeFile;
+    const first = (side === "new" ? b.newStart : b.oldStart) + 1;
+    const pinned = note.line !== null && note.line >= first && note.line < first + lines.length;
+    const start = pinned ? note.line! : first;
+    const end = pinned ? note.line! : first + lines.length - 1;
+    const repo = diff.repos.find((r) => r.dir === "" || f.path.startsWith(`${r.dir}/`));
+    const commit = (side === "new" ? repo?.headCommit : repo?.oldCommit) ?? null;
+    const content = side === "new" && commit === null && f.newContent !== null ? splitLines(f.newContent) : null;
+    return {
+      anchor: { path: f.path, side, start, end, commit },
+      snippet: lines.slice(start - first, end - first + 1).map((l) => `${side === "new" ? "+" : "-"}${l}`).join("\n"),
+      context: content ? contextOf(content, start, end) : null,
+    };
+  }
+  return null;
 }

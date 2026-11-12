@@ -1,15 +1,10 @@
 import { stripCr } from "../shared/hunks";
-import type { Thread, ThreadContext } from "../shared/types";
+import type { Thread } from "../shared/types";
 
-const CONTEXT_LINES = 3;
 const WORD = /[\p{L}\p{N}]/u;
 const outdated = new WeakSet<Thread>();
 
 export const isOutdated = (thread: Thread) => outdated.has(thread);
-
-export function contextOf(lines: string[], start: number, end: number): ThreadContext {
-  return { before: lines.slice(Math.max(0, start - 1 - CONTEXT_LINES), start - 1), after: lines.slice(end, end + CONTEXT_LINES) };
-}
 
 const same = (a: string | undefined, b: string) => a !== undefined && stripCr(a) === stripCr(b);
 

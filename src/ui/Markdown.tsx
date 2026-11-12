@@ -1,96 +1,119 @@
+import { lexer, type MarkedToken, type Token } from "marked";
 import { Fragment, memo, type ReactNode } from "react";
 
-const LIST_ITEM = /^\s*([-*]|\d+\.)\s+/;
-const TASK = /^\[([ xX])\]\s+/;
-const FENCE = /^\s*```/;
-const HEADING = /^#{1,6}\s+/;
-const QUOTE = /^\s*>\s?/;
 const SAFE_URL = /^(https?:\/\/|mailto:)/i;
 
 export const Markdown = memo(function Markdown({ text, className, base }: { text: string; className?: string; base?: string }) {
-  return <div className={className ? `markdown ${className}` : "markdown"}>{blocks(text, base)}</div>;
+  return <div className={className ? `markdown ${className}` : "markdown"}>{blocks(lexer(text, { gfm: true, breaks: true }), base)}</div>;
 });
 
-function blocks(text: string, base: string | undefined): ReactNode[] {
-  const lines = text.replace(/\r\n/g, "\n").split("\n");
-  const out: ReactNode[] = [];
-  let i = 0;
-
-  while (i < lines.length) {
-    const line = lines[i]!;
-
-    if (FENCE.test(line)) {
-      const info = line.trim().slice(3).trim();
-      const code: string[] = [];
-      i++;
-      while (i < lines.length && !FENCE.test(lines[i]!)) code.push(lines[i++]!);
-      i++;
-      out.push(
-        info === "suggestion" ? (
-          <Suggestion key={out.length} base={base} lines={code} />
+function blocks(tokens: Token[], base: string | undefined): ReactNode[] {
+  return tokens.map((token, k) => {
+    const t = token as MarkedToken;
+    switch (t.type) {
+      case "space":
+      case "def":
+        return null;
+      case "paragraph":
+        return <p key={k}>{inline(t.tokens)}</p>;
+      case "heading": {
+        const Heading = `h${Math.min(6, Math.max(1, t.depth))}` as "h1";
+        return <Heading key={k}>{inline(t.tokens)}</Heading>;
+      }
+      case "code":
+        return t.lang === "suggestion" ? (
+          <Suggestion key={k} base={base} lines={t.text === "" ? [] : t.text.split("\n")} />
         ) : (
-          <pre key={out.length}>
-            <code>{code.join("\n")}</code>
+          <pre key={k}>
+            <code>{t.text}</code>
           </pre>
-        ),
-      );
-      continue;
-    }
-
-    if (QUOTE.test(line)) {
-      const quoted: string[] = [];
-      while (i < lines.length && QUOTE.test(lines[i]!)) quoted.push(lines[i++]!.replace(QUOTE, ""));
-      out.push(<blockquote key={out.length}>{blocks(quoted.join("\n"), base)}</blockquote>);
-      continue;
-    }
-
-    if (LIST_ITEM.test(line)) {
-      const ordered = /^\s*\d+\./.test(line);
-      const items: string[] = [];
-      while (i < lines.length && LIST_ITEM.test(lines[i]!)) items.push(lines[i++]!.replace(LIST_ITEM, ""));
-      const children = items.map((item, k) => {
-        const task = TASK.exec(item);
-        if (!task) return <li key={k}>{inline(item)}</li>;
-        return (
-          <li key={k} className="task">
-            <input type="checkbox" checked={task[1] !== " "} disabled />
-            {inline(item.slice(task[0].length))}
-          </li>
         );
-      });
-      out.push(ordered ? <ol key={out.length}>{children}</ol> : <ul key={out.length}>{children}</ul>);
-      continue;
+      case "blockquote":
+        return <blockquote key={k}>{blocks(t.tokens, base)}</blockquote>;
+      case "list": {
+        const items = t.items.map((item, i) => (
+          <li key={i} className={item.task ? "task" : undefined}>
+            {blocks(item.tokens, base)}
+          </li>
+        ));
+        if (!t.ordered) return <ul key={k}>{items}</ul>;
+        return (
+          <ol key={k} start={typeof t.start === "number" && t.start !== 1 ? t.start : undefined}>
+            {items}
+          </ol>
+        );
+      }
+      case "table":
+        return (
+          <div key={k} className="markdown-table">
+            <table>
+              <thead>
+                <tr>
+                  {t.header.map((cell, i) => (
+                    <th key={i} style={cell.align ? { textAlign: cell.align } : undefined}>
+                      {inline(cell.tokens)}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {t.rows.map((row, r) => (
+                  <tr key={r}>
+                    {row.map((cell, i) => (
+                      <td key={i} style={cell.align ? { textAlign: cell.align } : undefined}>
+                        {inline(cell.tokens)}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        );
+      case "hr":
+        return <hr key={k} />;
+      case "html":
+        return <p key={k}>{t.text}</p>;
+      default:
+        return <Fragment key={k}>{inline([t])}</Fragment>;
     }
+  });
+}
 
-    if (HEADING.test(line)) {
-      out.push(
-        <p key={out.length}>
-          <strong>{inline(line.replace(HEADING, ""))}</strong>
-        </p>,
-      );
-      i++;
-      continue;
+function inline(tokens: Token[] | undefined): ReactNode[] {
+  return (tokens ?? []).map((token, k) => {
+    const t = token as MarkedToken;
+    switch (t.type) {
+      case "text":
+        return <Fragment key={k}>{t.tokens ? inline(t.tokens) : t.text}</Fragment>;
+      case "escape":
+      case "html":
+        return <Fragment key={k}>{t.text}</Fragment>;
+      case "codespan":
+        return <code key={k}>{t.text}</code>;
+      case "strong":
+        return <strong key={k}>{inline(t.tokens)}</strong>;
+      case "em":
+        return <em key={k}>{inline(t.tokens)}</em>;
+      case "del":
+        return <del key={k}>{inline(t.tokens)}</del>;
+      case "br":
+        return <br key={k} />;
+      case "checkbox":
+        return <input key={k} type="checkbox" checked={t.checked} disabled />;
+      case "link":
+        if (!SAFE_URL.test(t.href)) return <Fragment key={k}>{inline(t.tokens)}</Fragment>;
+        return (
+          <a key={k} href={t.href} target="_blank" rel="noreferrer">
+            {inline(t.tokens)}
+          </a>
+        );
+      case "image":
+        return <Fragment key={k}>{t.text}</Fragment>;
+      default:
+        return <Fragment key={k}>{"tokens" in t && t.tokens ? inline(t.tokens) : t.raw}</Fragment>;
     }
-
-    if (line.trim() === "") {
-      i++;
-      continue;
-    }
-
-    const para: string[] = [];
-    while (
-      i < lines.length &&
-      lines[i]!.trim() !== "" &&
-      !FENCE.test(lines[i]!) &&
-      !LIST_ITEM.test(lines[i]!) &&
-      !HEADING.test(lines[i]!) &&
-      !QUOTE.test(lines[i]!)
-    ) {
-      para.push(lines[i++]!.trim());
-    }
-    out.push(<p key={out.length}>{inline(para.join(" "))}</p>);
-  }
-  return out;
+  });
 }
 
 function Suggestion({ base, lines }: { base: string | undefined; lines: string[] }) {
@@ -112,25 +135,4 @@ function Suggestion({ base, lines }: { base: string | undefined; lines: string[]
       </div>
     </div>
   );
-}
-
-const INLINE =
-  /(`[^`]+`|\[[^\]\n]+\]\([^)\s]+\)|\*\*[^*]+\*\*|(?<![\w*])\*[^*\s](?:[^*]*[^*\s])?\*(?![\w*])|(?<!\w)_[^_\s](?:[^_]*[^_\s])?_(?!\w))/g;
-const LINK = /^\[([^\]]+)\]\(([^)\s]+)\)$/;
-
-function inline(text: string): ReactNode[] {
-  return text.split(INLINE).map((part, k) => {
-    if (k % 2 === 0) return <Fragment key={k}>{part}</Fragment>;
-    if (part.startsWith("`")) return <code key={k}>{part.slice(1, -1)}</code>;
-    if (part.startsWith("**")) return <strong key={k}>{inline(part.slice(2, -2))}</strong>;
-    const link = LINK.exec(part);
-    if (!link) return <em key={k}>{inline(part.slice(1, -1))}</em>;
-    const [, label, url] = link;
-    if (!SAFE_URL.test(url!)) return <Fragment key={k}>{inline(label!)}</Fragment>;
-    return (
-      <a key={k} href={url} target="_blank" rel="noreferrer">
-        {inline(label!)}
-      </a>
-    );
-  });
 }

@@ -61,6 +61,16 @@ export interface Topic {
   ids: string[];
 }
 
+export interface TopicNote {
+  id: string;
+  line: number | null;
+  body: string;
+}
+
+export interface NotedTopic extends Topic {
+  notes: TopicNote[];
+}
+
 export interface Review {
   repo: string;
   compare: Comparison;
@@ -74,6 +84,8 @@ export interface Grouping {
   repo: string;
   compare: Comparison;
   focus: string | null;
+  topics: string[] | null;
+  replaces: string | null;
   activity: string | null;
   error: string | null;
 }
@@ -130,6 +142,7 @@ export interface Thread {
   snippet: string;
   context: ThreadContext | null;
   comments: ThreadComment[];
+  noteOf?: string;
 }
 
 export interface ViewData {

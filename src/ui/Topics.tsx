@@ -143,8 +143,8 @@ export function TopicSection({ topic, viewed, opening, onToggleViewed }: Section
           />
           {topic.stale > 0 && (
             <p className="topic-note">
-              {plural(topic.stale, "change")} {topic.stale === 1 ? "was" : "were"} edited after Claude grouped them and left
-              this topic. Group again to bring {topic.stale === 1 ? "it" : "them"} back.
+              {plural(topic.stale, "change")} {topic.stale === 1 ? "was" : "were"} edited after Claude made these topics and
+              left this topic. Edit topics and update them to bring {topic.stale === 1 ? "it" : "them"} back.
             </p>
           )}
           {topic.parts.map((p) => (

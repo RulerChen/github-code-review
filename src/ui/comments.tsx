@@ -1,10 +1,11 @@
-import { createContext, type FormEvent, type KeyboardEvent, memo, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createContext, type FormEvent, type KeyboardEvent, memo, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { lineRange, MENTION } from "../shared/comments";
 import type { FileAnchor, LineAnchor, Thread, ThreadAnchor, ThreadComment, TopicAnchor } from "../shared/types";
-import { pin } from "./anchor";
+import { plural } from "../shared/util";
+import { keepInPlace, pin } from "./anchor";
 import { type Format, format, suggestion, type TextEdit } from "./format";
 import { useAction } from "./hooks";
-import { Octicon, PencilIcon, TrashIcon } from "./icons";
+import { ChevronIcon, Octicon, PencilIcon, TrashIcon } from "./icons";
 import { isOutdated } from "./locate";
 import { Markdown } from "./Markdown";
 
@@ -20,6 +21,8 @@ export interface CommentsApi {
   remove: (threadId: string, commentId: string) => Promise<void>;
   unread: (thread: Thread) => number;
   markRead: (thread: Thread) => void;
+  isFolded: (threadId: string) => boolean;
+  setFolded: (threadId: string, folded: boolean) => void;
   pending: boolean;
   listening: boolean;
   revealSeq: number;
@@ -36,6 +39,16 @@ export const useComments = () => useContext(CommentsContext)!;
 export const useCommentActions = () => useContext(CommentActionsContext)!;
 
 export const authorName = (c: ThreadComment) => (c.author === "claude" ? "Claude" : "You");
+
+export const preview = (text: string) =>
+  text
+    .replace(/```[^\n]*\n?/g, " ")
+    .replace(/^[\s|:-]*-{3,}[\s|:-]*$/gm, " ")
+    .replace(/^ {0,3}(#{1,6}|>|[-*+]|\d+[.)])\s+/gm, "")
+    .replace(/\*\*|`/g, "")
+    .replace(/\|/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 
 export function anchorLabel(anchor: ThreadAnchor, withVersion = false): string {
   if (anchor.path === null) return `Topic “${anchor.topic}”`;
@@ -139,6 +152,7 @@ function CommentForm({ placeholder, initial = "", editing = false, lines, onSubm
   }, [preview]);
 
   const ready = !busy && text.trim() !== "" && !(editing && text.trim() === initial);
+  const now = !pending;
   const submit = (single: boolean) => {
     if (ready) void run(single);
   };
@@ -172,7 +186,7 @@ function CommentForm({ placeholder, initial = "", editing = false, lines, onSubm
     if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
 
     let action: (() => void) | null = null;
-    if (e.key === "Enter" && !e.shiftKey) action = () => submit(false);
+    if (e.key === "Enter" && !e.shiftKey) action = () => submit(now);
     else if (e.shiftKey && e.code === "KeyP") action = togglePreview;
     else if (e.target === input.current) {
       const kind = e.shiftKey ? SHIFT_FORMAT_KEYS[e.code] : FORMAT_KEYS[e.key.toLowerCase()];
@@ -185,11 +199,11 @@ function CommentForm({ placeholder, initial = "", editing = false, lines, onSubm
     action();
   };
 
-  const singleTitle = asking
+  const otherTitle = asking
     ? "A comment that mentions @claude is answered right away."
-    : listening
-      ? "Send only this comment to Claude now, without a review. Claude is waiting and starts on it at once."
-      : "Send only this comment to Claude now, without a review. Claude isn't waiting, so ask it in the terminal to address your review comments.";
+    : now
+      ? "Keep this comment pending and send it with the others when you submit the review."
+      : "Send only this comment to Claude now, without the pending review.";
 
   return (
     <form
@@ -198,7 +212,7 @@ function CommentForm({ placeholder, initial = "", editing = false, lines, onSubm
       onKeyDown={onKeyDown}
       onSubmit={(e: FormEvent) => {
         e.preventDefault();
-        submit(false);
+        submit(now);
       }}
     >
       <div className="comment-box" ref={box}>
@@ -257,8 +271,13 @@ function CommentForm({ placeholder, initial = "", editing = false, lines, onSubm
         ) : (
           <Either
             className="comment-hint"
-            show={asking ? 0 : 1}
-            texts={["Claude answers here right away.", "Mention @claude to get an answer right away."]}
+            show={asking ? 0 : !now ? 3 : listening ? 1 : 2}
+            texts={[
+              "Claude answers here right away.",
+              "Claude starts on it right away. Mention @claude to only ask a question.",
+              "Claude isn't waiting right now. It gets this the next time it waits for comments.",
+              "Claude gets this when you submit the review.",
+            ]}
           />
         )}
         <span className="comment-form-buttons">
@@ -266,12 +285,12 @@ function CommentForm({ placeholder, initial = "", editing = false, lines, onSubm
             Cancel
           </button>
           {!editing && (
-            <button type="button" className="button" onClick={() => submit(true)} disabled={!ready || asking} title={singleTitle}>
-              Add single comment
+            <button type="button" className="button" onClick={() => submit(!now)} disabled={!ready || asking} title={otherTitle}>
+              <Either show={now ? 0 : 1} texts={["Start a review", "Send now"]} />
             </button>
           )}
           <button type="submit" className="button primary" disabled={!ready}>
-            {editing ? "Save" : <Either show={asking ? 0 : pending ? 2 : 1} texts={["Ask Claude", "Start a review", "Add review comment"]} />}
+            {editing ? "Save" : <Either show={asking ? 0 : now ? 1 : 2} texts={["Ask Claude", "Send to Claude", "Add review comment"]} />}
           </button>
         </span>
       </div>
@@ -348,22 +367,29 @@ function flash(el: HTMLElement): void {
 }
 
 export function ThreadView({ thread, withVersion = false }: { thread: Thread; withVersion?: boolean }) {
-  const { reply, unread, markRead, revealSeq, takeReveal } = useComments();
+  const { reply, unread, markRead, revealSeq, peekReveal, takeReveal, isFolded, setFolded } = useComments();
   const [replying, setReplying] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const unreadCount = unread(thread);
+  const folded = isFolded(thread.id);
+  const fold = useCallback((next: boolean) => keepInPlace(ref.current, () => setFolded(thread.id, next)), [setFolded, thread.id]);
 
   useEffect(() => {
     const el = ref.current;
-    if (!el || el.getClientRects().length === 0 || !takeReveal(thread.id)) return;
+    if (!el || el.getClientRects().length === 0) return;
+    if (folded) {
+      if (peekReveal()?.id === thread.id) setFolded(thread.id, false);
+      return;
+    }
+    if (!takeReveal(thread.id)) return;
     el.scrollIntoView({ block: "center" });
     flash(el);
     return pin(el);
-  }, [revealSeq]);
+  }, [revealSeq, folded]);
 
   useEffect(() => {
     const el = ref.current;
-    if (!el || unreadCount === 0) return;
+    if (!el || unreadCount === 0 || folded) return;
     let inView = false;
     const check = () => {
       if (inView && document.visibilityState === "visible") markRead(thread);
@@ -378,15 +404,32 @@ export function ThreadView({ thread, withVersion = false }: { thread: Thread; wi
       observer.disconnect();
       document.removeEventListener("visibilitychange", check);
     };
-  }, [thread, unreadCount, markRead]);
+  }, [thread, unreadCount, markRead, folded]);
 
   const gone = isOutdated(thread);
   const where = gone ? null : whereText(thread.anchor, withVersion);
+  const first = thread.comments[0];
+  if (folded && first) {
+    return (
+      <div ref={ref} className="thread is-folded" data-thread={thread.id}>
+        <button className="thread-unfold" aria-expanded={false} aria-label="Expand conversation" onClick={() => fold(false)}>
+          <ChevronIcon />
+          <span className={`comment-author comment-author-${first.author}`}>{authorName(first)}</span>
+          <span className="thread-unfold-text">{preview(first.body)}</span>
+          {gone && <span className="outdated-label">Outdated</span>}
+          {thread.comments.some((c) => c.draft) && <span className="pending-label">Pending</span>}
+          <span className="thread-unfold-count">{plural(thread.comments.length, "comment")}</span>
+          {unreadCount > 0 && <span className="thread-unfold-new">{unreadCount} new</span>}
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div ref={ref} className="thread" data-thread={thread.id}>
       {gone && <OutdatedLines snippet={thread.snippet} />}
       {thread.comments.map((c, i) => (
-        <CommentView key={c.id} thread={thread} comment={c} where={i === 0 ? where : null} />
+        <CommentView key={c.id} thread={thread} comment={c} where={i === 0 ? where : null} onFold={i === 0 ? fold : null} />
       ))}
       <div className="thread-foot">
         {replying ? (
@@ -429,7 +472,14 @@ function OutdatedLines({ snippet }: { snippet: string }) {
   );
 }
 
-const CommentView = memo(function CommentView({ thread, comment: c, where }: { thread: Thread; comment: ThreadComment; where: string | null }) {
+interface CommentViewProps {
+  thread: Thread;
+  comment: ThreadComment;
+  where: string | null;
+  onFold: ((folded: boolean) => void) | null;
+}
+
+const CommentView = memo(function CommentView({ thread, comment: c, where, onFold }: CommentViewProps) {
   const { edit, remove } = useCommentActions();
   const [mode, setMode] = useState<"view" | "edit" | "delete">("view");
   const takesThread = thread.comments[0]?.id === c.id && thread.comments.length > 1;
@@ -437,6 +487,11 @@ const CommentView = memo(function CommentView({ thread, comment: c, where }: { t
   return (
     <div className={`comment comment-${c.author}`}>
       <div className="comment-head">
+        {onFold && (
+          <button className="thread-fold" aria-expanded={true} aria-label="Collapse conversation" title="Collapse conversation" onClick={() => onFold(true)}>
+            <ChevronIcon />
+          </button>
+        )}
         <span className="comment-author">{authorName(c)}</span>
         {where && <span className="comment-where">{where}</span>}
         {c.draft && <span className="pending-label">Pending</span>}

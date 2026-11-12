@@ -73,6 +73,20 @@ export class RepoThreads {
     return thread;
   }
 
+  addNote(anchor: ThreadAnchor, snippet: string, context: ThreadContext | null, body: string, noteOf: string): void {
+    const thread: Thread = { id: newId(), rev: 0, anchor, snippet, context, comments: [comment("claude", body, "done")], noteOf };
+    this.threads.push(thread);
+    this.emit(thread);
+  }
+
+  removeNotes(noteOf: string): void {
+    for (const thread of this.threads.filter((t) => t.noteOf === noteOf && t.comments.every((c) => c.author === "claude"))) {
+      this.threads.splice(this.threads.indexOf(thread), 1);
+      thread.comments = [];
+      this.emit(thread);
+    }
+  }
+
   reply(threadId: string, body: string, single: boolean): Thread | null {
     const thread = this.find(threadId);
     if (thread) this.addComment(thread, body, single);

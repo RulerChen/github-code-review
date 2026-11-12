@@ -83,9 +83,15 @@ export async function deleteReview(viewId: string, review: Review): Promise<Revi
   return (await request<{ reviews: Review[] }>(viewUrl(viewId, "reviews"), (b) => Array.isArray(b.reviews), "DELETE", payload)).reviews;
 }
 
-export async function groupTopics(viewId: string, compare: Comparison, focus: string): Promise<Grouping[]> {
+export interface TopicRequest {
+  focus: string;
+  topics: string[] | null;
+  replaces: string | null;
+}
+
+export async function groupTopics(viewId: string, compare: Comparison, ask: TopicRequest): Promise<Grouping[]> {
   const url = withComparison(viewUrl(viewId, "topics"), compare);
-  return (await request<{ groupings: Grouping[] }>(url, (b) => Array.isArray(b.groupings), "POST", { focus })).groupings;
+  return (await request<{ groupings: Grouping[] }>(url, (b) => Array.isArray(b.groupings), "POST", ask)).groupings;
 }
 
 export function submitReview(viewId: string, body: string): Promise<SubmitResult> {

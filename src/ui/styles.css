@@ -261,6 +261,15 @@ button {
   font: inherit;
 }
 
+.filter-row {
+  display: flex;
+  gap: 4px;
+}
+
+.filter-row > .icon-button {
+  height: 30px;
+}
+
 .filter:focus {
   outline: 2px solid var(--accent);
   outline-offset: -1px;
@@ -962,6 +971,33 @@ button {
   margin: 0;
 }
 
+.group-field {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 10px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.group-field .filter {
+  margin: 0;
+  font-weight: normal;
+}
+
+.group-field textarea.filter {
+  resize: vertical;
+  font: inherit;
+  font-size: 14px;
+  font-weight: normal;
+  line-height: 1.5;
+}
+
+.group-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .group-status {
   display: flex;
   align-items: flex-start;
@@ -1081,6 +1117,10 @@ button {
   font-size: 12px;
 }
 
+.markdown {
+  overflow-wrap: anywhere;
+}
+
 .markdown > :first-child {
   margin-top: 0;
 }
@@ -1092,13 +1132,86 @@ button {
 .markdown p,
 .markdown ul,
 .markdown ol,
-.markdown pre {
+.markdown pre,
+.markdown hr,
+.markdown .markdown-table {
   margin: 0 0 8px;
 }
 
 .markdown ul,
 .markdown ol {
   padding-left: 20px;
+}
+
+.markdown li > ul,
+.markdown li > ol {
+  margin: 2px 0 0;
+}
+
+.markdown li + li {
+  margin-top: 2px;
+}
+
+.markdown li > p {
+  margin-bottom: 4px;
+}
+
+.markdown h1,
+.markdown h2,
+.markdown h3,
+.markdown h4,
+.markdown h5,
+.markdown h6 {
+  margin: 16px 0 8px;
+  font-size: 1em;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.markdown h1 {
+  font-size: 1.25em;
+}
+
+.markdown h2 {
+  font-size: 1.15em;
+}
+
+.markdown h3 {
+  font-size: 1.05em;
+}
+
+.markdown hr {
+  height: 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+}
+
+.markdown .markdown-table {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.markdown table {
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.markdown th,
+.markdown td {
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  overflow-wrap: break-word;
+  vertical-align: top;
+}
+
+.markdown th {
+  background: var(--bg-subtle);
+  font-weight: 600;
+  text-align: left;
+}
+
+.markdown blockquote > :last-child {
+  margin-bottom: 0;
 }
 
 .markdown code {
@@ -1275,6 +1388,7 @@ button {
 .unplaced,
 .file-threads {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 8px;
   padding: 8px 12px 12px;
   border-bottom: 1px solid var(--border-muted);
@@ -1282,6 +1396,7 @@ button {
 
 .topic-threads {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 8px;
   margin-bottom: 16px;
 }
@@ -1319,8 +1434,86 @@ button {
   font-weight: 600;
 }
 
-.comment-claude .comment-author {
+.comment-claude .comment-author,
+.comment-author-claude {
   color: var(--accent);
+}
+
+.thread-fold,
+.thread-unfold {
+  border: 0;
+  background: none;
+  color: var(--fg-muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+.thread-fold {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  margin: 0 -4px 0 -6px;
+  padding: 0;
+  border-radius: 4px;
+}
+
+.thread-fold:hover,
+.thread-unfold:hover {
+  background: var(--bg-subtle);
+  color: var(--fg);
+}
+
+.thread-fold svg,
+.thread-unfold svg {
+  flex: none;
+  fill: currentColor;
+}
+
+.thread-unfold {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  padding: 6px 12px 6px 6px;
+  border-radius: 6px;
+  font-size: 12px;
+  text-align: left;
+}
+
+.thread-unfold svg {
+  transform: rotate(-90deg);
+}
+
+.thread-unfold .comment-author {
+  flex: none;
+}
+
+.thread-unfold-text {
+  flex: 1;
+  overflow: hidden;
+  min-width: 0;
+  color: var(--fg-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.thread-unfold-count {
+  flex: none;
+  color: var(--fg-muted);
+}
+
+.thread-unfold-new {
+  flex: none;
+  padding: 0 6px;
+  border-radius: 10px;
+  background: var(--accent);
+  color: var(--primary-fg);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 18px;
 }
 
 .comment-where,

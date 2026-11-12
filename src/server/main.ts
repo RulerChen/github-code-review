@@ -6,7 +6,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { computeDiff, describeFailures, probeDiff, summarize } from "../engine/diff.js";
 import { sameRange, sortOverrides } from "../shared/comparison.js";
-import type { Comparison, Topic } from "../shared/types.js";
+import type { Comparison, DiffResult, NotedTopic } from "../shared/types.js";
 import { errorMessage, plural } from "../shared/util.js";
 import { stopAll } from "./claude.js";
 import { ReviewServer } from "./http.js";
@@ -42,10 +42,10 @@ async function attempt(failure: string, run: () => Promise<string>) {
   }
 }
 
-async function openViewer(repo: string, compare: Comparison, focus?: string, topics?: Topic[], session?: string): Promise<string> {
+async function openViewer(repo: string, compare: Comparison, focus?: string, topics?: NotedTopic[], session?: string): Promise<string> {
   const probe = await probeDiff(repo, compare);
   const diff = await computeDiff(probe);
-  let grouped: { focus: string | null; topics: Topic[] } | null = null;
+  let grouped: { focus: string | null; topics: NotedTopic[]; diff: DiffResult } | null = null;
   let note = "";
 
   if (topics) {
@@ -56,12 +56,13 @@ async function openViewer(repo: string, compare: Comparison, focus?: string, top
     if (unassigned.length) {
       note = `\n${unassigned.length} change(s) are in no topic, so they appear only in the Files tab: ${unassigned.join(", ")}`;
     }
-    grouped = { focus: focus?.trim() || null, topics };
+    grouped = { focus: focus?.trim() || null, topics, diff };
   }
 
   const server = await getServer();
   server.keepDiff(diff.repoRoot, compare, { version: probe.version, diff });
-  const { view, restored } = server.addView(diff.repoRoot, compare, grouped, repo, session && SESSION_ID.test(session) ? session : null);
+  const { view, restored, dropped } = server.addView(diff.repoRoot, compare, grouped, repo, session && SESSION_ID.test(session) ? session : null);
+  if (dropped) note += `\n${plural(dropped, "note")} could not be placed on a line of the diff.`;
   if (restored?.threads) note += `\nBrought back ${plural(restored.threads, "comment thread")} from the viewer this session had open before.`;
   if (restored?.unread) {
     note += `\n${plural(restored.unread, "review")} submitted there ${restored.unread === 1 ? "was" : "were"} never read. Read ${restored.unread === 1 ? "it" : "them"} with get_review_comments.`;
@@ -179,6 +180,27 @@ async function runMcp(): Promise<void> {
               title: z.string().describe("A few words naming the topic."),
               summary: z.string().describe("Markdown explaining what changed in this topic and why."),
               ids: z.array(z.string()).describe("Ids from list_changes of the changes in this topic."),
+              notes: z
+                .array(
+                  z.object({
+                    id: z.string().describe("Id from list_changes of the change the note is on."),
+                    line: z
+                      .number()
+                      .int()
+                      .positive()
+                      .optional()
+                      .describe(
+                        "A line number inside that change: of an added line, counted from the + number in its @@ header, or of a " +
+                          "removed line, counted from the - number, when the change adds none. Omit it for the whole change.",
+                      ),
+                    body: z.string().min(1).describe("Markdown: what the reviewer should know about these lines."),
+                  }),
+                )
+                .optional()
+                .describe(
+                  "Your comments on the lines a reviewer most needs explained, such as a subtle invariant, a non-obvious " +
+                    "reason or a risk to check, at most three in a topic. They show on those lines as comments from Claude that the user can reply to.",
+                ),
             }),
           )
           .optional()
@@ -190,7 +212,13 @@ async function runMcp(): Promise<void> {
     },
     (args) =>
       attempt("Could not open the diff viewer", () =>
-        openViewer(args.repo ?? process.cwd(), comparison(args), args.focus, args.topics, args.session),
+        openViewer(
+          args.repo ?? process.cwd(),
+          comparison(args),
+          args.focus,
+          args.topics?.map((t) => ({ ...t, notes: (t.notes ?? []).map((n) => ({ id: n.id, line: n.line ?? null, body: n.body.trim() })) })),
+          args.session,
+        ),
       ),
   );
 
