@@ -5,7 +5,7 @@ import { type AddressInfo, isIP } from "node:net";
 import path from "node:path";
 import { promisify } from "node:util";
 import { gzip } from "node:zlib";
-import { grepRepo, readRepoFile } from "../engine/browse.js";
+import { findDefinitions, grepRepo, isIdentifier, readRepoFile } from "../engine/browse.js";
 import { computeDiff, listRefs, probeDiff } from "../engine/diff.js";
 import { comparisonFromQuery, comparisonQuery, isFor } from "../shared/comparison.js";
 import type { Comparison, DiffResult, FileDiff, Grouping, NotedTopic, Review, Thread, ThreadAnchor, ThreadContext, ViewData } from "../shared/types.js";
@@ -65,7 +65,7 @@ const MAX_CACHED_CHARS = 64 * 1024 * 1024;
 const PING_MS = 25_000;
 const SAVE_DELAY_MS = 500;
 const PAGE = /^\/v\/[\w-]+$/;
-const API = /^\/api\/views\/([\w-]+)\/(diff|file|blob|grep|events|refs|threads|review|reviews|wait|version|topics)(?:\/([\w-]+)\/comments(?:\/([\w-]+))?)?$/;
+const API = /^\/api\/views\/([\w-]+)\/(diff|file|blob|grep|defs|events|refs|threads|review|reviews|wait|version|topics)(?:\/([\w-]+)\/comments(?:\/([\w-]+))?)?$/;
 const SHA = /^[0-9a-f]{40,64}$/;
 
 const sshAddress = process.env.SSH_CONNECTION?.split(" ")[2] ?? "";
@@ -357,11 +357,14 @@ export class ReviewServer {
         const q = (query.get("q") ?? "").trim();
         if (!isText(q, MAX_QUERY, true) || /[\0\n\r]/.test(q)) return sendJson(res, 400, { error: "Invalid search" });
         const { version, diff } = await this.loadDiff(view.repo, compare);
-        const gone = new AbortController();
-        res.on("close", () => gone.abort());
-        const found = await grepRepo(diff, q, gone.signal);
-        if (gone.signal.aborted) return;
-        return sendJson(res, 200, { version, ...found });
+        return sendFound(res, version, (signal) => grepRepo(diff, q, signal));
+      }
+      case "GET defs": {
+        const name = query.get("name") ?? "";
+        const from = query.get("path") ?? "";
+        if (!isIdentifier(name) || from.length > MAX_PATH) return sendJson(res, 400, { error: "Invalid name" });
+        const { version, diff } = await this.loadDiff(view.repo, compare);
+        return sendFound(res, version, (signal) => findDefinitions(diff, name, from, signal));
       }
       case "GET version":
         return sendJson(res, 200, { version: (await probeDiff(view.repo, compare)).version });
@@ -565,6 +568,13 @@ function isComparison(c: unknown): c is Comparison {
 
 function isRange(r: unknown): r is Record<string, unknown> {
   return isRecord(r) && isText(r.base, MAX_REF, true) && (r.head === null || isText(r.head, MAX_REF, true)) && typeof r.threeDot === "boolean";
+}
+
+async function sendFound(res: ServerResponse, version: string, find: (signal: AbortSignal) => Promise<object>): Promise<void> {
+  const gone = new AbortController();
+  res.on("close", () => gone.abort());
+  const found = await find(gone.signal);
+  if (!gone.signal.aborted) sendJson(res, 200, { version, ...found });
 }
 
 function sendThread(res: ServerResponse, thread: Thread | null, missing: string): void {

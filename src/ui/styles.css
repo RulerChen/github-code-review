@@ -2311,6 +2311,14 @@ button {
   font-size: 11px;
 }
 
+.definition-menu {
+  width: 560px;
+}
+
+.definition-code {
+  font-family: var(--mono);
+}
+
 .picker-empty {
   padding: 12px;
   color: var(--fg-muted);

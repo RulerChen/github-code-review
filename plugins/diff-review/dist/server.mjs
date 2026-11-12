@@ -37456,9 +37456,57 @@ import { gzip } from "node:zlib";
 // src/engine/browse.ts
 import path3 from "node:path";
 var MAX_HITS = 500;
+var MAX_DEFINITIONS = 50;
 var MAX_HIT_CHARS = 400;
 var LEAD_CHARS = 100;
 var NOT_GENERATED = ":(exclude,attr:linguist-generated=true)";
+var IDENTIFIER = /^[\p{L}_$][\p{L}\p{N}_$]{0,199}$/u;
+var S = "[[:space:]]";
+var START = "(^|[^[:alnum:]_$])";
+var END = "([^[:alnum:]_$]|$)";
+var OPENS = "\\(([^;]*$|[^;{]*\\)[^;{]*\\{)";
+var LANGUAGES = [
+  {
+    exts: ["py", "pyi"],
+    patterns: (n) => [`^${S}*(async${S}+)?def${S}+${n}${S}*\\(`, `^${S}*class${S}+${n}${END}`, `^${n}${S}*(:[^=]*)?=([^=]|$)`]
+  },
+  {
+    exts: ["js", "jsx", "mjs", "cjs", "ts", "tsx", "mts", "cts"],
+    patterns: (n) => [
+      `${START}function${S}*\\*?${S}*${n}${S}*[(<]`,
+      `${START}(class|interface|type|enum|namespace)${S}+${n}${END}`,
+      `${START}(const|let|var)${S}+${n}${S}*(:[^=]*)?=([^=]|$)`,
+      `^${S}*((public|private|protected|static|async|readonly|override|abstract|get|set)${S}+)*\\*?${n}${S}*(<[^>]*>)?\\([^;]*\\)[^;]*\\{${S}*$`,
+      `^${S}*((public|private|protected|static|readonly|override)${S}+)*${n}${S}*(:[^=]*)?=${S}*(async${S}*)?(\\(|[[:alnum:]_$]+${S}*=>)`
+    ]
+  },
+  {
+    exts: ["go"],
+    patterns: (n) => [`^func${S}*(\\([^)]*\\)${S}*)?${n}${S}*[([]`, `^${S}*type${S}+${n}${END}`, `^(var|const)${S}+${n}${END}`]
+  },
+  {
+    exts: ["rs"],
+    patterns: (n) => [
+      `${START}fn${S}+${n}${S}*[(<]`,
+      `${START}(struct|enum|trait|type|union|mod|const|static)${S}+${n}${END}`,
+      `macro_rules!${S}*${n}${END}`
+    ]
+  },
+  {
+    exts: ["c", "h", "cc", "cpp", "cxx", "c++", "hpp", "hh", "hxx", "h++", "ipp", "inl", "cu", "cuh", "m", "mm", "java", "cs"],
+    patterns: (n) => [
+      `^[^[:space:]#/][^;=]*[^[:alnum:]_$]${n}${S}*${OPENS}`,
+      `^${n}${S}*${OPENS}`,
+      `^${S}+([[:alnum:]_][[:alnum:]_:<>,*&]*${S}+)+[*&]*${n}${S}*${OPENS}`,
+      `^${S}*#${S}*define${S}+${n}${END}`,
+      `${START}(struct|class|union|enum|interface|record)${S}+([[:alnum:]_]+${S}+)*${n}${S}*([{:<]|$)`,
+      `^${S}*typedef[^;]*[^[:alnum:]_]${n}${S}*;`,
+      `${START}using${S}+${n}${S}*=`
+    ]
+  }
+];
+var KEYWORDS = "def|defp|defmodule|fn|fun|func|function|sub|proc|class|struct|interface|trait|object|module|type|enum|macro";
+var anyLanguage = (n) => [`${START}(${KEYWORDS})${S}+${n}${END}`];
 function isRepoPath(p) {
   return p !== "" && !/[\0\n\r]/.test(p) && p.split("/").every((s) => s !== "" && s !== "." && s !== "..");
 }
@@ -37487,15 +37535,29 @@ async function readBlobAt(root, rev, rest) {
   if (Number(size) > MAX_CONTENT_BYTES) return { kind: "tooLarge" };
   return classify(await git(root, ["cat-file", "blob", oid]));
 }
-async function grepRepo(diff, query, signal) {
+function grepRepo(diff, query, signal) {
   const q = query.toLowerCase();
+  return grepLines(diff, ["-F", "-i", "-e", query], ["."], MAX_HITS, signal, (text) => text.toLowerCase().indexOf(q));
+}
+var isIdentifier = (name) => IDENTIFIER.test(name);
+function findDefinitions(diff, name, from, signal) {
+  const base = from.slice(from.lastIndexOf("/") + 1);
+  const ext = base.includes(".") ? base.slice(base.lastIndexOf(".") + 1).toLowerCase() : "";
+  const language = LANGUAGES.find((l) => l.exts.includes(ext));
+  const escaped = name.replaceAll("$", "\\$");
+  const patterns = language ? language.patterns(escaped) : anyLanguage(escaped);
+  const exts = language?.exts ?? (ext ? [ext] : []);
+  const pathspecs = exts.length ? exts.map((e) => `*.${e}`) : ["."];
+  return grepLines(diff, ["-E", ...patterns.flatMap((p) => ["-e", p])], pathspecs, MAX_DEFINITIONS, signal, (text) => text.indexOf(name));
+}
+async function grepLines(diff, match, pathspecs, max, signal, atOf) {
   const repos = diff.repos.filter((r) => r.error === null);
   const parts = await mapLimit(repos, REPO_LIMIT, async (repo) => {
     const prefix = repo.dir ? `${repo.dir}/` : "";
     const rev = repo.headCommit;
     const strip = rev ? `${rev}:` : "";
     const where = rev ? [rev] : ["--untracked"];
-    const args = ["grep", "--no-color", "-n", "-z", "-I", "-F", "-i", "-e", query, ...where, "--", ".", NOT_GENERATED];
+    const args = ["grep", "--no-color", "-n", "-z", "-I", ...match, ...where, "--", ...pathspecs, NOT_GENERATED];
     const hits = [];
     await gitLines(
       path3.join(diff.repoRoot, repo.dir),
@@ -37505,8 +37567,9 @@ async function grepRepo(diff, query, signal) {
         const b = line.indexOf("\0", a + 1);
         if (a < 0 || b < 0) return true;
         const file2 = line.slice(0, a);
-        hits.push(hitOf(prefix + (file2.startsWith(strip) ? file2.slice(strip.length) : file2), Number(line.slice(a + 1, b)), line.slice(b + 1), q));
-        return hits.length <= MAX_HITS;
+        const text = line.slice(b + 1);
+        hits.push(hitOf(prefix + (file2.startsWith(strip) ? file2.slice(strip.length) : file2), Number(line.slice(a + 1, b)), text, atOf(text)));
+        return hits.length <= max;
       },
       [0, 1],
       signal
@@ -37514,10 +37577,9 @@ async function grepRepo(diff, query, signal) {
     return hits;
   });
   const all = parts.flat().sort((a, b) => compareText(a.path, b.path) || a.no - b.no);
-  return { hits: all.slice(0, MAX_HITS), capped: all.length > MAX_HITS };
+  return { hits: all.slice(0, max), capped: all.length > max };
 }
-function hitOf(filePath, no, text, q) {
-  const at = text.toLowerCase().indexOf(q);
+function hitOf(filePath, no, text, at) {
   if (text.length <= MAX_HIT_CHARS) return { path: filePath, no, text, at };
   const from = Math.max(0, at - LEAD_CHARS);
   return { path: filePath, no, text: text.slice(from, from + MAX_HIT_CHARS), at: at < 0 ? -1 : at - from };
@@ -38050,7 +38112,7 @@ var MAX_CACHED_CHARS = 64 * 1024 * 1024;
 var PING_MS = 25e3;
 var SAVE_DELAY_MS = 500;
 var PAGE = /^\/v\/[\w-]+$/;
-var API = /^\/api\/views\/([\w-]+)\/(diff|file|blob|grep|events|refs|threads|review|reviews|wait|version|topics)(?:\/([\w-]+)\/comments(?:\/([\w-]+))?)?$/;
+var API = /^\/api\/views\/([\w-]+)\/(diff|file|blob|grep|defs|events|refs|threads|review|reviews|wait|version|topics)(?:\/([\w-]+)\/comments(?:\/([\w-]+))?)?$/;
 var SHA = /^[0-9a-f]{40,64}$/;
 var sshAddress = process.env.SSH_CONNECTION?.split(" ")[2] ?? "";
 var SSH_HOST = isIP(sshAddress) ? sshAddress : null;
@@ -38298,11 +38360,14 @@ var ReviewServer = class {
         const q = (query.get("q") ?? "").trim();
         if (!isText(q, MAX_QUERY, true) || /[\0\n\r]/.test(q)) return sendJson(res, 400, { error: "Invalid search" });
         const { version: version2, diff } = await this.loadDiff(view.repo, compare);
-        const gone = new AbortController();
-        res.on("close", () => gone.abort());
-        const found = await grepRepo(diff, q, gone.signal);
-        if (gone.signal.aborted) return;
-        return sendJson(res, 200, { version: version2, ...found });
+        return sendFound(res, version2, (signal) => grepRepo(diff, q, signal));
+      }
+      case "GET defs": {
+        const name = query.get("name") ?? "";
+        const from = query.get("path") ?? "";
+        if (!isIdentifier(name) || from.length > MAX_PATH) return sendJson(res, 400, { error: "Invalid name" });
+        const { version: version2, diff } = await this.loadDiff(view.repo, compare);
+        return sendFound(res, version2, (signal) => findDefinitions(diff, name, from, signal));
       }
       case "GET version":
         return sendJson(res, 200, { version: (await probeDiff(view.repo, compare)).version });
@@ -38485,6 +38550,12 @@ function isComparison(c) {
 }
 function isRange(r) {
   return isRecord(r) && isText(r.base, MAX_REF, true) && (r.head === null || isText(r.head, MAX_REF, true)) && typeof r.threeDot === "boolean";
+}
+async function sendFound(res, version2, find) {
+  const gone = new AbortController();
+  res.on("close", () => gone.abort());
+  const found = await find(gone.signal);
+  if (!gone.signal.aborted) sendJson(res, 200, { version: version2, ...found });
 }
 function sendThread(res, thread, missing) {
   if (thread) sendJson(res, 200, { thread });

@@ -60,6 +60,13 @@ export function searchRepo(viewId: string, compare: Comparison | null, query: st
   return request<RepoHits>(`${viewUrl(viewId, "grep")}?${params}`, (b) => Array.isArray(b.hits), "GET", undefined, signal);
 }
 
+export function fetchDefinitions(viewId: string, compare: Comparison | null, name: string, path: string): Promise<RepoHits> {
+  const params = new URLSearchParams(compare ? comparisonQuery(compare) : "");
+  params.set("name", name);
+  params.set("path", path);
+  return request<RepoHits>(`${viewUrl(viewId, "defs")}?${params}`, (b) => Array.isArray(b.hits));
+}
+
 export async function fetchVersion(viewId: string, compare: Comparison | null): Promise<string> {
   const url = withComparison(viewUrl(viewId, "version"), compare);
   return (await request<{ version: string }>(url, (b) => typeof b.version === "string")).version;

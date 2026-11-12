@@ -87,7 +87,8 @@ const KEYS: [string[], string][] = [
   [["j", "k"], "Next or previous file or topic"],
   [["u"], "Next conversation with a new answer"],
   [["Ctrl+Enter"], "Add the comment to your review, or submit the review being written"],
-  [["Esc"], "Cancel a comment, or close this list or the conversations"],
+  [["Ctrl+click"], "Find where the name under the pointer is defined (⌘+click on a Mac)"],
+  [["Esc"], "Cancel a comment, or close this list, the code panel or the conversations"],
 ];
 
 export function ShortcutHelp({ onClose }: { onClose: () => void }) {

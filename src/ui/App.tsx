@@ -12,6 +12,7 @@ import {
   deleteComment,
   deleteReview,
   editComment,
+  fetchDefinitions,
   fetchFile,
   fetchRefs,
   fetchRepoFile,
@@ -25,6 +26,7 @@ import {
   viewUrl,
 } from "./api";
 import { CodePanel, type Peek } from "./CodePanel";
+import { type DefinitionLookup, DefinitionMenu, type FindDefinition, FindDefinitionContext, rankDefinitions } from "./definition";
 import { type CommentActions, CommentActionsContext, type CommentsApi, CommentsContext } from "./comments";
 import { CommitBar, CommitList, CompareControls, refLabel, RepoComparisons } from "./Compare";
 import { ConversationsButton, ConversationsPanel, type Place, useConversations } from "./Conversations";
@@ -93,6 +95,8 @@ export function App({ viewId }: Props) {
   const [repoSearch, setRepoSearch] = useState<RepoSearch | null>(null);
   const [code, setCode] = useState<Peek[]>([]);
   const peekSeq = useRef(0);
+  const [lookup, setLookup] = useState<DefinitionLookup | null>(null);
+  const lookupSeq = useRef(0);
 
   const [threads, setThreads] = useState<Thread[]>([]);
   const [reviews, setReviews] = useState<Review[]>([]);
@@ -210,10 +214,44 @@ export function App({ viewId }: Props) {
     setCode((stack) => {
       const top = stack.at(-1);
       if (!top) return [next];
-      return push && top.path !== path ? [...stack, next] : [...stack.slice(0, -1), next];
+      return push ? [...stack, next] : [...stack.slice(0, -1), next];
     });
   }, []);
   const codeTop = code.at(-1) ?? null;
+
+  const closeLookup = useCallback(() => {
+    lookupSeq.current++;
+    setLookup(null);
+  }, []);
+  const findDefinition = useCallback<FindDefinition>(
+    (name, from, x, y) => {
+      if (!viewId) return;
+      const seq = ++lookupSeq.current;
+      const current = (update: (l: DefinitionLookup) => DefinitionLookup) =>
+        setLookup((l) => (l && seq === lookupSeq.current ? update(l) : l));
+      setLookup({ name, x, y, hits: null, capped: false, error: null });
+      fetchDefinitions(viewId, requested.current, name, from).then(
+        (r) => {
+          if (seq !== lookupSeq.current) return;
+          const hits = rankDefinitions(r.hits, from);
+          if (hits.length === 1 && !r.capped) {
+            closeLookup();
+            openCode(hits[0]!.path, hits[0]!.no, true);
+            return;
+          }
+          if (hits.length === 0) {
+            setScope("repo");
+            setQuery(name);
+            setHit(null);
+            setSidebarOpen(true);
+          }
+          current((l) => ({ ...l, hits, capped: r.capped }));
+        },
+        (e: unknown) => current((l) => ({ ...l, error: errorMessage(e) })),
+      );
+    },
+    [viewId, openCode, closeLookup, setSidebarOpen],
+  );
 
   const diff = data?.diff ?? null;
   const compareWith = (next: Comparison, nextTab?: Tab, nextRange: CommitRange | null = null) => {
@@ -514,7 +552,7 @@ export function App({ viewId }: Props) {
     j: () => stepSection(1),
     k: () => stepSection(-1),
     u: conv.nextUnread,
-    Escape: () => (help ? setHelp(false) : codeTop ? setCode([]) : conv.setOpen(false)),
+    Escape: () => (lookup ? closeLookup() : help ? setHelp(false) : codeTop ? setCode([]) : conv.setOpen(false)),
   });
 
   const [isViewed, toggleViewed] = useViewed(diff && `diff-review:viewed:${diff.repoRoot}`, (f: FileDiff) => f.path, signature);
@@ -585,196 +623,208 @@ export function App({ viewId }: Props) {
 
   return (
     <FileLoader.Provider value={loadFile}>
-      <CommentActionsContext.Provider value={actions}>
-        <CommentsContext.Provider value={commentsValue}>
-          <div className="app">
-            <header className="topbar">
-              <div className={`loading-bar${switching ? " is-active" : ""}`} aria-hidden="true" />
-              <SidebarToggle open={sidebarOpen} onToggle={() => setSidebarOpen((o) => !o)} />
-              <div className="topbar-title">
-                <CompareControls diff={diff} loadRefs={loadRefs} onCompare={compareWith} />
-                <RepoComparisons diff={diff} loadRefs={loadRefs} onCompare={compareWith} />
-              </div>
-              <ChangeStats files={diff.files} />
-              <RefreshButton stale={stale} loading={loading} onClick={() => void load(requested.current)} />
-              <span className="spacer" />
-              <ViewTabs view={view} commitCount={stepping?.count ?? diff.commitCount} onSelect={setTab} />
-              <ConversationsButton
-                conv={conv}
-                shown={conv.open && !codeTop}
-                onClick={() => {
-                  setCode([]);
-                  conv.setOpen((o) => codeTop !== null || !o);
-                }}
-              />
-              <KeyboardButton onClick={() => setHelp(true)} />
-              <ThemeToggle />
-              <SubmitReview pending={pendingComments} listening={listening} onSubmit={submit} onOpen={conv.reveal} />
-            </header>
+      <FindDefinitionContext.Provider value={findDefinition}>
+        <CommentActionsContext.Provider value={actions}>
+          <CommentsContext.Provider value={commentsValue}>
+            <div className="app">
+              <header className="topbar">
+                <div className={`loading-bar${switching ? " is-active" : ""}`} aria-hidden="true" />
+                <SidebarToggle open={sidebarOpen} onToggle={() => setSidebarOpen((o) => !o)} />
+                <div className="topbar-title">
+                  <CompareControls diff={diff} loadRefs={loadRefs} onCompare={compareWith} />
+                  <RepoComparisons diff={diff} loadRefs={loadRefs} onCompare={compareWith} />
+                </div>
+                <ChangeStats files={diff.files} />
+                <RefreshButton stale={stale} loading={loading} onClick={() => void load(requested.current)} />
+                <span className="spacer" />
+                <ViewTabs view={view} commitCount={stepping?.count ?? diff.commitCount} onSelect={setTab} />
+                <ConversationsButton
+                  conv={conv}
+                  shown={conv.open && !codeTop}
+                  onClick={() => {
+                    setCode([]);
+                    conv.setOpen((o) => codeTop !== null || !o);
+                  }}
+                />
+                <KeyboardButton onClick={() => setHelp(true)} />
+                <ThemeToggle />
+                <SubmitReview pending={pendingComments} listening={listening} onSubmit={submit} onOpen={conv.reveal} />
+              </header>
 
-            {error && <div className="banner">{error.message}</div>}
+              {error && <div className="banner">{error.message}</div>}
 
-            <div className={`layout${codeTop ? " with-code" : conv.open ? " with-conversations" : ""}${sidebarOpen ? "" : " no-sidebar"}`}>
-              <aside className="sidebar" hidden={!sidebarOpen}>
-                <div className="view">
-                  <div className="filter-row">
-                    <input
-                      className="filter"
-                      type="search"
-                      placeholder="Filter files"
-                      value={filter}
-                      onChange={(e) => setFilter(e.target.value)}
-                      aria-label="Filter files"
-                    />
-                    {shownDirs.length > 0 && !searched.trim() && (
-                      <button
-                        className="icon-button"
-                        aria-label={anyDirOpen ? "Collapse all folders" : "Expand all folders"}
-                        title={anyDirOpen ? "Collapse all folders" : "Expand all folders"}
-                        onClick={() => setFoldedDirs(anyDirOpen ? new Set(dirPaths(treeEntries)) : new Set())}
-                      >
-                        <FoldIcon fold={anyDirOpen} />
-                      </button>
+              <div className={`layout${codeTop ? " with-code" : conv.open ? " with-conversations" : ""}${sidebarOpen ? "" : " no-sidebar"}`}>
+                <aside className="sidebar" hidden={!sidebarOpen}>
+                  <div className="view">
+                    <div className="filter-row">
+                      <input
+                        className="filter"
+                        type="search"
+                        placeholder="Filter files"
+                        value={filter}
+                        onChange={(e) => setFilter(e.target.value)}
+                        aria-label="Filter files"
+                      />
+                      {shownDirs.length > 0 && !searched.trim() && (
+                        <button
+                          className="icon-button"
+                          aria-label={anyDirOpen ? "Collapse all folders" : "Expand all folders"}
+                          title={anyDirOpen ? "Collapse all folders" : "Expand all folders"}
+                          onClick={() => setFoldedDirs(anyDirOpen ? new Set(dirPaths(treeEntries)) : new Set())}
+                        >
+                          <FoldIcon fold={anyDirOpen} />
+                        </button>
+                      )}
+                    </div>
+                    <div className="filter-row">
+                      <input
+                        className="filter"
+                        type="search"
+                        placeholder={scope === "repo" ? "Search in the repository" : "Search in the diff"}
+                        value={query}
+                        onChange={(e) => {
+                          setQuery(e.target.value);
+                          setHit(null);
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key !== "Enter" || e.nativeEvent.isComposing) return;
+                          e.preventDefault();
+                          stepHit(e.shiftKey ? -1 : 1);
+                        }}
+                        aria-label={scope === "repo" ? "Search in the repository" : "Search in the diff"}
+                        title="Enter goes to the next match, Shift+Enter to the previous one"
+                      />
+                      <div className="search-scope" role="radiogroup" aria-label="Search in">
+                        {(["diff", "repo"] as const).map((s) => (
+                          <button
+                            key={s}
+                            role="radio"
+                            aria-checked={scope === s}
+                            className={scope === s ? "is-on" : undefined}
+                            title={s === "repo" ? "Search every file in the compared version" : "Search the lines shown in the diff"}
+                            onClick={() => {
+                              setScope(s);
+                              setHit(null);
+                            }}
+                          >
+                            {s === "repo" ? "Repo" : "Diff"}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    {searched.trim() && scope === "repo" && !repoResult ? (
+                      <p className="tree-empty">
+                        {repoError ? `Could not search: ${repoError}` : repoStale ? "The files changed. Load the new changes to search them." : "Searching…"}
+                      </p>
+                    ) : searched.trim() ? (
+                      <SearchResults
+                        found={found}
+                        query={searched}
+                        current={hit}
+                        onOpen={openHit}
+                        empty={scope === "repo" ? "No matches in the repository." : "No matches in the lines shown in the diff."}
+                      />
+                    ) : (
+                      <FileTree
+                        entries={treeEntries}
+                        isViewed={topicTab ? isTopicFileViewed : isViewed}
+                        onSelect={onSelect}
+                        collapsed={foldedDirs}
+                        onToggle={toggleDir}
+                      />
                     )}
                   </div>
-                  <div className="filter-row">
-                    <input
-                      className="filter"
-                      type="search"
-                      placeholder={scope === "repo" ? "Search in the repository" : "Search in the diff"}
-                      value={query}
-                      onChange={(e) => {
-                        setQuery(e.target.value);
-                        setHit(null);
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key !== "Enter" || e.nativeEvent.isComposing) return;
-                        e.preventDefault();
-                        stepHit(e.shiftKey ? -1 : 1);
-                      }}
-                      aria-label={scope === "repo" ? "Search in the repository" : "Search in the diff"}
-                      title="Enter goes to the next match, Shift+Enter to the previous one"
-                    />
-                    <div className="search-scope" role="radiogroup" aria-label="Search in">
-                      {(["diff", "repo"] as const).map((s) => (
-                        <button
-                          key={s}
-                          role="radio"
-                          aria-checked={scope === s}
-                          className={scope === s ? "is-on" : undefined}
-                          title={s === "repo" ? "Search every file in the compared version" : "Search the lines shown in the diff"}
-                          onClick={() => {
-                            setScope(s);
-                            setHit(null);
-                          }}
-                        >
-                          {s === "repo" ? "Repo" : "Diff"}
-                        </button>
+                </aside>
+
+                <main className={`files${switching ? " is-switching" : ""}`}>
+                  {repoFailures(diff.repos).map((f) => (
+                    <p key={f.error} className="file-note inline">
+                      Not compared in {f.dirs.join(", ")}: {f.error}
+                    </p>
+                  ))}
+                  {stepping && view !== "commits" && (
+                    <CommitBar commits={stepping.commits} count={stepping.count} index={stepIndex} onView={viewCommit} onAll={showAllCommits} />
+                  )}
+                  {view !== "commits" && diff.files.length === 0 && <Notice title="No changes">{noChanges(diff)}</Notice>}
+                  {visited.current.has("topics") && (
+                    <div className="view" hidden={view !== "topics"}>
+                      <ReviewBar
+                        reviews={reviews}
+                        review={review}
+                        grouping={grouping}
+                        repoRoot={diff.repoRoot}
+                        hasChanges={diff.files.length > 0}
+                        onPick={(r) => showReview(r, r.createdAt)}
+                        onGroup={group}
+                        onRemove={removeReview}
+                      />
+                      {topics.map((t) => (
+                        <TopicSection
+                          key={t.key}
+                          topic={t}
+                          viewed={isTopicViewed(t)}
+                          opening={opening}
+                          onToggleViewed={() => toggleTopicViewed(t)}
+                        />
                       ))}
                     </div>
-                  </div>
-                  {searched.trim() && scope === "repo" && !repoResult ? (
-                    <p className="tree-empty">
-                      {repoError ? `Could not search: ${repoError}` : repoStale ? "The files changed. Load the new changes to search them." : "Searching…"}
-                    </p>
-                  ) : searched.trim() ? (
-                    <SearchResults
-                      found={found}
-                      query={searched}
-                      current={hit}
-                      onOpen={openHit}
-                      empty={scope === "repo" ? "No matches in the repository." : "No matches in the lines shown in the diff."}
-                    />
-                  ) : (
-                    <FileTree
-                      entries={treeEntries}
-                      isViewed={topicTab ? isTopicFileViewed : isViewed}
-                      onSelect={onSelect}
-                      collapsed={foldedDirs}
-                      onToggle={toggleDir}
-                    />
                   )}
-                </div>
-              </aside>
-
-              <main className={`files${switching ? " is-switching" : ""}`}>
-                {repoFailures(diff.repos).map((f) => (
-                  <p key={f.error} className="file-note inline">
-                    Not compared in {f.dirs.join(", ")}: {f.error}
-                  </p>
-                ))}
-                {stepping && view !== "commits" && (
-                  <CommitBar commits={stepping.commits} count={stepping.count} index={stepIndex} onView={viewCommit} onAll={showAllCommits} />
-                )}
-                {view !== "commits" && diff.files.length === 0 && <Notice title="No changes">{noChanges(diff)}</Notice>}
-                {visited.current.has("topics") && (
-                  <div className="view" hidden={view !== "topics"}>
-                    <ReviewBar
-                      reviews={reviews}
-                      review={review}
-                      grouping={grouping}
-                      repoRoot={diff.repoRoot}
-                      hasChanges={diff.files.length > 0}
-                      onPick={(r) => showReview(r, r.createdAt)}
-                      onGroup={group}
-                      onRemove={removeReview}
-                    />
-                    {topics.map((t) => (
-                      <TopicSection
-                        key={t.key}
-                        topic={t}
-                        viewed={isTopicViewed(t)}
-                        opening={opening}
-                        onToggleViewed={() => toggleTopicViewed(t)}
+                  {visited.current.has("files") && diff.files.length > 0 && (
+                    <div className="view" hidden={view !== "files"}>
+                      {shown.map(({ file, anchor }) => (
+                        <FileCard
+                          key={file.path}
+                          file={file}
+                          anchor={anchor}
+                          viewed={isViewed(file)}
+                          onToggleViewed={toggleViewed}
+                        />
+                      ))}
+                    </div>
+                  )}
+                  {visited.current.has("commits") && diff.commits.length > 0 && (
+                    <div className="view" hidden={view !== "commits"}>
+                      <CommitList
+                        commits={stepping?.commits ?? diff.commits}
+                        count={stepping?.count ?? diff.commitCount}
+                        current={stepping ? diff.head : null}
+                        onView={viewCommit}
+                        onAll={showAllCommits}
                       />
-                    ))}
-                  </div>
-                )}
-                {visited.current.has("files") && diff.files.length > 0 && (
-                  <div className="view" hidden={view !== "files"}>
-                    {shown.map(({ file, anchor }) => (
-                      <FileCard
-                        key={file.path}
-                        file={file}
-                        anchor={anchor}
-                        viewed={isViewed(file)}
-                        onToggleViewed={toggleViewed}
-                      />
-                    ))}
-                  </div>
-                )}
-                {visited.current.has("commits") && diff.commits.length > 0 && (
-                  <div className="view" hidden={view !== "commits"}>
-                    <CommitList
-                      commits={stepping?.commits ?? diff.commits}
-                      count={stepping?.count ?? diff.commitCount}
-                      current={stepping ? diff.head : null}
-                      onView={viewCommit}
-                      onAll={showAllCommits}
-                    />
-                  </div>
-                )}
-              </main>
+                    </div>
+                  )}
+                </main>
+              </div>
+              {codeTop ? (
+                <CodePanel
+                  peek={codeTop}
+                  file={diff.files.find((f) => f.path === codeTop.path)}
+                  revision={revisionOf(actions.versions(codeTop.path).new)}
+                  version={loadedVersion ?? ""}
+                  load={loadCode}
+                  canGoBack={code.length > 1}
+                  onBack={() => setCode((stack) => stack.slice(0, -1))}
+                  onClose={() => setCode([])}
+                  onShowDiff={() => showDiff(codeTop.path)}
+                />
+              ) : (
+                conv.open && <ConversationsPanel conv={conv} />
+              )}
             </div>
-            {codeTop ? (
-              <CodePanel
-                peek={codeTop}
-                file={diff.files.find((f) => f.path === codeTop.path)}
-                revision={revisionOf(actions.versions(codeTop.path).new)}
-                version={loadedVersion ?? ""}
-                load={loadCode}
-                canGoBack={code.length > 1}
-                onBack={() => setCode((stack) => stack.slice(0, -1))}
-                onClose={() => setCode([])}
-                onShowDiff={() => showDiff(codeTop.path)}
+            {help && <ShortcutHelp onClose={() => setHelp(false)} />}
+            {lookup && (
+              <DefinitionMenu
+                lookup={lookup}
+                onPick={(h) => {
+                  closeLookup();
+                  openCode(h.path, h.no, true);
+                }}
+                onClose={closeLookup}
               />
-            ) : (
-              conv.open && <ConversationsPanel conv={conv} />
             )}
-          </div>
-          {help && <ShortcutHelp onClose={() => setHelp(false)} />}
-        </CommentsContext.Provider>
-      </CommentActionsContext.Provider>
+          </CommentsContext.Provider>
+        </CommentActionsContext.Provider>
+      </FindDefinitionContext.Provider>
     </FileLoader.Provider>
   );
 }

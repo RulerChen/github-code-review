@@ -1,8 +1,9 @@
-import { memo, type MouseEvent, type ReactNode, useEffect, useMemo, useState } from "react";
+import { memo, type MouseEvent, type ReactNode, useContext, useEffect, useMemo, useState } from "react";
 import { stripCr } from "../shared/hunks";
 import type { DiffLine, DisplayHunk, Expansion, Thread } from "../shared/types";
 import { keepInPlace } from "./anchor";
 import { NewThread, onShownVersion, ThreadView, unmark, useCommentActions } from "./comments";
+import { FindDefinitionContext, wordAt } from "./definition";
 import { type Token, type TokenLines, tokensAt } from "./highlight";
 import { type ExpandDir, ExpandIcon } from "./icons";
 import { intraline, type Marks } from "./intraline";
@@ -98,6 +99,7 @@ function Code({ line, tokens, marks }: { line: DiffLine; tokens: Token[] | undef
 
 export const DiffTable = memo(function DiffTable({ path, hunks, oldTokens, newTokens, threads, onExpand, single = false }: Props) {
   const { create, versions } = useCommentActions();
+  const findDefinition = useContext(FindDefinitionContext);
   const [selection, setSelection] = useState<Selection | null>(null);
   const [drag, setDrag] = useState<Drag | null>(null);
 
@@ -145,6 +147,14 @@ export const DiffTable = memo(function DiffTable({ path, hunks, oldTokens, newTo
     window.addEventListener("mouseup", release);
     return () => window.removeEventListener("mouseup", release);
   }, [drag]);
+
+  const lookUp = (e: MouseEvent) => {
+    if (!findDefinition || e.button !== 0 || !(e.ctrlKey || e.metaKey)) return;
+    const word = wordAt(e.clientX, e.clientY);
+    if (!word) return;
+    e.preventDefault();
+    findDefinition(word, path, e.clientX, e.clientY);
+  };
 
   const submit = async (body: string, single: boolean) => {
     if (!selection) return;
@@ -237,7 +247,7 @@ export const DiffTable = memo(function DiffTable({ path, hunks, oldTokens, newTo
   }
 
   return (
-    <table className={single ? "diff single" : "diff"} onMouseDown={press} onMouseOver={hover}>
+    <table className={single ? "diff single" : "diff"} onMouseDown={press} onMouseOver={hover} onClick={lookUp}>
       <colgroup>
         <col className="col-num" />
         <col />

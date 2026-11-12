@@ -8,7 +8,9 @@ export function useDismiss(ref: RefObject<HTMLElement | null>, open: boolean, cl
       if (!ref.current?.contains(e.target as Node)) close();
     };
     const escape = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !e.defaultPrevented) close();
+      if (e.key !== "Escape" || e.defaultPrevented) return;
+      e.preventDefault();
+      close();
     };
     document.addEventListener("mousedown", away);
     document.addEventListener("keydown", escape);
