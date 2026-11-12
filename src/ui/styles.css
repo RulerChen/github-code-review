@@ -270,6 +270,39 @@ button {
   height: 30px;
 }
 
+.filter-row > .filter {
+  min-width: 0;
+}
+
+.search-scope {
+  display: flex;
+  flex: none;
+  height: 30px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.search-scope > button {
+  padding: 0 8px;
+  border: 0;
+  background: var(--bg);
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.search-scope > button + button {
+  border-left: 1px solid var(--border);
+}
+
+.search-scope > button.is-on {
+  background: var(--accent-subtle);
+  color: var(--fg);
+  font-weight: 600;
+}
+
 .filter:focus {
   outline: 2px solid var(--accent);
   outline-offset: -1px;

@@ -5,6 +5,7 @@ import { type AddressInfo, isIP } from "node:net";
 import path from "node:path";
 import { promisify } from "node:util";
 import { gzip } from "node:zlib";
+import { grepRepo, readRepoFile } from "../engine/browse.js";
 import { computeDiff, listRefs, probeDiff } from "../engine/diff.js";
 import { comparisonFromQuery, comparisonQuery, isFor } from "../shared/comparison.js";
 import type { Comparison, DiffResult, FileDiff, Grouping, NotedTopic, Review, Thread, ThreadAnchor, ThreadContext, ViewData } from "../shared/types.js";
@@ -52,6 +53,7 @@ const MAX_COMMENT = 20 * 1024;
 const MAX_SNIPPET = 64 * 1024;
 const MAX_CONTEXT_LINES = 3;
 const MAX_FOCUS = 2000;
+const MAX_QUERY = 200;
 const MAX_TOPICS = 50;
 const MAX_TITLE = 200;
 const MAX_REF = 1024;
@@ -63,7 +65,7 @@ const MAX_CACHED_CHARS = 64 * 1024 * 1024;
 const PING_MS = 25_000;
 const SAVE_DELAY_MS = 500;
 const PAGE = /^\/v\/[\w-]+$/;
-const API = /^\/api\/views\/([\w-]+)\/(diff|file|events|refs|threads|review|reviews|wait|version|topics)(?:\/([\w-]+)\/comments(?:\/([\w-]+))?)?$/;
+const API = /^\/api\/views\/([\w-]+)\/(diff|file|blob|grep|events|refs|threads|review|reviews|wait|version|topics)(?:\/([\w-]+)\/comments(?:\/([\w-]+))?)?$/;
 const SHA = /^[0-9a-f]{40,64}$/;
 
 const sshAddress = process.env.SSH_CONNECTION?.split(" ")[2] ?? "";
@@ -343,6 +345,23 @@ export class ReviewServer {
         const file = diff.files.find((f) => f.path === query.get("path"));
         if (!file || version !== query.get("version")) return sendJson(res, 409, { error: "The diff changed. Load the new changes first." });
         return sendJson(res, 200, { file });
+      }
+      case "GET blob": {
+        const { version, diff } = await this.loadDiff(view.repo, compare);
+        if (version !== query.get("version")) return sendJson(res, 409, { error: "The diff changed. Load the new changes first." });
+        const filePath = query.get("path") ?? "";
+        const file = await readRepoFile(diff, filePath);
+        return file ? sendJson(res, 200, { file }) : sendJson(res, 404, { error: `${filePath} is not in the compared version.` });
+      }
+      case "GET grep": {
+        const q = (query.get("q") ?? "").trim();
+        if (!isText(q, MAX_QUERY, true) || /[\0\n\r]/.test(q)) return sendJson(res, 400, { error: "Invalid search" });
+        const { version, diff } = await this.loadDiff(view.repo, compare);
+        const gone = new AbortController();
+        res.on("close", () => gone.abort());
+        const found = await grepRepo(diff, q, gone.signal);
+        if (gone.signal.aborted) return;
+        return sendJson(res, 200, { version, ...found });
       }
       case "GET version":
         return sendJson(res, 200, { version: (await probeDiff(view.repo, compare)).version });

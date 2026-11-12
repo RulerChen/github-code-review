@@ -155,6 +155,26 @@ export interface ViewData {
   listening: boolean;
 }
 
+export interface RepoFile {
+  path: string;
+  text: string | null;
+  binary: boolean;
+  tooLarge: boolean;
+}
+
+export interface RepoHit {
+  path: string;
+  no: number;
+  text: string;
+  at: number;
+}
+
+export interface RepoHits {
+  version: string;
+  hits: RepoHit[];
+  capped: boolean;
+}
+
 export interface RefRange {
   base: string;
   head: string | null;

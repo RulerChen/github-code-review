@@ -39,6 +39,7 @@ interface Props {
   newTokens: TokenLines | null;
   threads: Thread[];
   onExpand: OnExpand;
+  single?: boolean;
 }
 
 const MARK = { add: "+", del: "-", context: " " } as const;
@@ -95,12 +96,12 @@ function Code({ line, tokens, marks }: { line: DiffLine; tokens: Token[] | undef
   );
 }
 
-export const DiffTable = memo(function DiffTable({ path, hunks, oldTokens, newTokens, threads, onExpand }: Props) {
+export const DiffTable = memo(function DiffTable({ path, hunks, oldTokens, newTokens, threads, onExpand, single = false }: Props) {
   const { create, versions } = useCommentActions();
   const [selection, setSelection] = useState<Selection | null>(null);
   const [drag, setDrag] = useState<Drag | null>(null);
 
-  const rows = useMemo(() => hunks.map((h) => toSplitRows(h.lines)), [hunks]);
+  const rows = useMemo(() => (single ? [] : hunks.map((h) => toSplitRows(h.lines))), [hunks, single]);
   const marks = useMemo(() => rows.map((list) => list.map(marksOf)), [rows]);
   const threadsAt = useMemo(() => {
     const at = new Map<string, Thread[]>();
@@ -154,7 +155,8 @@ export const DiffTable = memo(function DiffTable({ path, hunks, oldTokens, newTo
 
   const expand: Expand = (e, dir, blockId, lines) => {
     const tr = e.currentTarget.closest("tr");
-    const keep = dir === "up" ? tr : dir === "down" ? (tr?.nextElementSibling ?? tr) : (tr?.previousElementSibling ?? tr);
+    const below = tr?.nextElementSibling ?? tr;
+    const keep = dir === "up" ? (single ? below : tr) : dir === "down" ? below : (tr?.previousElementSibling ?? tr);
     keepInPlace(keep, () => onExpand(dir === "up" || dir === "all" ? "above" : "below", blockId, lines));
   };
 
@@ -176,9 +178,35 @@ export const DiffTable = memo(function DiffTable({ path, hunks, oldTokens, newTo
   };
 
   hunks.forEach((h, hi) => {
-    body.push(
-      <HunkRow key={`h${h.firstId}`} header={h.header} expanders={<HunkExpanders prev={hunks[hi - 1]} hunk={h} expand={expand} />} />,
-    );
+    if (!single || h.hiddenAbove > 0) {
+      body.push(
+        <HunkRow
+          key={`h${h.firstId}`}
+          header={h.header}
+          single={single}
+          expanders={<HunkExpanders prev={hunks[hi - 1]} hunk={h} expand={expand} />}
+        />,
+      );
+    }
+
+    if (single) {
+      for (const line of h.lines) {
+        const no = line.newNo;
+        if (no === null) continue;
+        body.push(<SingleRow key={`n${no}`} line={line} tokens={tokensFor(line, null, newTokens)} selected={isSelected("new", no)} />);
+        const content = sideContent("new", no);
+        if (content.length) {
+          body.push(
+            <tr key={`t${no}`} className="thread-row">
+              <td colSpan={2} className="thread-cell">
+                {content}
+              </td>
+            </tr>,
+          );
+        }
+      }
+      return;
+    }
 
     rows[hi]!.forEach((row, ri) => {
       const oldNo = row.left?.oldNo ?? null;
@@ -204,17 +232,21 @@ export const DiffTable = memo(function DiffTable({ path, hunks, oldTokens, newTo
 
   if (last && last.hiddenBelow > 0) {
     body.push(
-      <HunkRow key="end" expanders={<ExpandButton dir="down" onClick={(e) => expand(e, "down", last.lastId, EXPAND_STEP)} />} />,
+      <HunkRow key="end" single={single} expanders={<ExpandButton dir="down" onClick={(e) => expand(e, "down", last.lastId, EXPAND_STEP)} />} />,
     );
   }
 
   return (
-    <table className="diff" onMouseDown={press} onMouseOver={hover}>
+    <table className={single ? "diff single" : "diff"} onMouseDown={press} onMouseOver={hover}>
       <colgroup>
         <col className="col-num" />
         <col />
-        <col className="col-num" />
-        <col />
+        {!single && (
+          <>
+            <col className="col-num" />
+            <col />
+          </>
+        )}
       </colgroup>
       <tbody>{body}</tbody>
     </table>
@@ -223,13 +255,17 @@ export const DiffTable = memo(function DiffTable({ path, hunks, oldTokens, newTo
 
 type Expand = (e: MouseEvent<HTMLButtonElement>, dir: ExpandDir, blockId: string, lines: number) => void;
 
-function HunkRow({ header, expanders }: { header?: string; expanders: ReactNode }) {
+function HunkRow({ header, expanders, single = false }: { header?: string; expanders: ReactNode; single?: boolean }) {
   return (
     <tr className="hunk">
       <td className="num expander">{expanders}</td>
       <td className="hunk-text">{header}</td>
-      <td className="num expander">{expanders}</td>
-      <td className="hunk-text" />
+      {!single && (
+        <>
+          <td className="num expander">{expanders}</td>
+          <td className="hunk-text" />
+        </>
+      )}
     </tr>
   );
 }
@@ -299,6 +335,14 @@ const Row = memo(function Row({ row, marks, oldTokens, newTokens, oldSelected, n
     <tr>
       <SplitCell line={left} tokens={left ? tokensFor(left, oldTokens, newTokens) : undefined} marks={marks?.[0] ?? null} side="old" selected={oldSelected} />
       <SplitCell line={right} tokens={right ? tokensFor(right, oldTokens, newTokens) : undefined} marks={marks?.[1] ?? null} side="new" selected={newSelected} />
+    </tr>
+  );
+});
+
+const SingleRow = memo(function SingleRow({ line, tokens, selected }: { line: DiffLine; tokens: Token[] | undefined; selected: boolean }) {
+  return (
+    <tr>
+      <SplitCell line={line} tokens={tokens} marks={null} side="new" selected={selected} />
     </tr>
   );
 });

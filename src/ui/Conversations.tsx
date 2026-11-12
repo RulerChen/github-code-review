@@ -9,7 +9,7 @@ import { readStorage, useStoredState, writeStorage } from "./storage";
 import "./conversations.css";
 
 export interface Place {
-  tab: "topics" | "files";
+  tab: "topics" | "files" | "code";
   rank: number;
 }
 
@@ -184,14 +184,20 @@ export function ThreadWhere({ anchor }: { anchor: ThreadAnchor }) {
   );
 }
 
-export function ConversationsButton({ conv }: { conv: Conversations }) {
+interface ButtonProps {
+  conv: Conversations;
+  shown: boolean;
+  onClick: () => void;
+}
+
+export function ConversationsButton({ conv, shown, onClick }: ButtonProps) {
   const n = conv.unreadThreads;
   const label = n ? `Conversations, ${n} with new answers` : "Conversations";
   return (
     <button
-      className={`button conv-button${conv.open ? " is-open" : ""}`}
-      onClick={() => conv.setOpen((o) => !o)}
-      aria-pressed={conv.open}
+      className={`button conv-button${shown ? " is-open" : ""}`}
+      onClick={onClick}
+      aria-pressed={shown}
       aria-label={label}
       title={label}
     >

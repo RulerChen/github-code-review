@@ -1,8 +1,9 @@
 import { useEffect, useRef, useSyncExternalStore } from "react";
-import type { DiffLine, FileDiff } from "../shared/types";
+import type { DiffLine, FileDiff, RepoHit } from "../shared/types";
 import { plural } from "../shared/util";
 import { pin } from "./anchor";
-import { basename, dirPrefix } from "./paths";
+import { addedLines } from "./CodePanel";
+import { basename, comparePaths, dirPrefix } from "./paths";
 
 const MAX_HITS = 500;
 const LEAD_CHARS = 16;
@@ -47,6 +48,23 @@ export function searchDiff(files: FileDiff[], query: string): Found {
   return found;
 }
 
+export function repoFound(hits: RepoHit[], capped: boolean, files: FileDiff[]): Found {
+  const changed = new Map(files.map((f) => [f.path, f]));
+  const groups = new Map<string, Hit[]>();
+  let added = new Set<number>();
+  for (const h of hits) {
+    let list = groups.get(h.path);
+    if (!list) {
+      list = [];
+      groups.set(h.path, list);
+      added = addedLines(changed.get(h.path));
+    }
+    list.push({ path: h.path, side: "new", no: h.no, kind: added.has(h.no) ? "add" : "context", text: h.text, at: h.at });
+  }
+  const ordered = [...groups].sort(([a], [b]) => comparePaths(a, b)).map(([path, list]) => ({ path, hits: list }));
+  return { groups: ordered, hits: ordered.flatMap((g) => g.hits), capped };
+}
+
 let target: Hit | null = null;
 let seq = 0;
 const listeners = new Set<() => void>();
@@ -86,11 +104,12 @@ interface Props {
   query: string;
   current: Hit | null;
   onOpen: (hit: Hit) => void;
+  empty: string;
 }
 
-export function SearchResults({ found, query, current, onOpen }: Props) {
+export function SearchResults({ found, query, current, onOpen, empty }: Props) {
   const length = query.trim().length;
-  if (found.hits.length === 0) return <p className="tree-empty">No matches in the lines shown in the diff.</p>;
+  if (found.hits.length === 0) return <p className="tree-empty">{empty}</p>;
 
   return (
     <div className="search-results">
@@ -132,10 +151,16 @@ function HitButton({ hit, length, current, onOpen }: { hit: Hit; length: number;
         {hit.no}
       </span>
       <span className="search-text">
-        {from > indent && "…"}
-        {hit.text.slice(from, hit.at)}
-        <mark>{hit.text.slice(hit.at, hit.at + length)}</mark>
-        {hit.text.slice(hit.at + length)}
+        {hit.at < 0 ? (
+          hit.text.trim()
+        ) : (
+          <>
+            {from > indent && "…"}
+            {hit.text.slice(from, hit.at)}
+            <mark>{hit.text.slice(hit.at, hit.at + length)}</mark>
+            {hit.text.slice(hit.at + length)}
+          </>
+        )}
       </span>
     </button>
   );

@@ -7,14 +7,14 @@ import type { Block, CommitInfo, Comparison, DiffRepo, DiffResult, FileDiff, Fil
 import { compareText, errorMessage, plural, sum } from "../shared/util.js";
 import { git, gitText } from "./git.js";
 
-const MAX_CONTENT_BYTES = 1024 * 1024;
+export const MAX_CONTENT_BYTES = 1024 * 1024;
 const MAX_DIFF_LINES = 20_000;
 const MAX_DIFF_CHARS = 500 * 1024;
 const MAX_COMMITS = 250;
 const MAX_RECENT_COMMITS = 100;
 const BATCH_BYTES = 64 * 1024 * 1024;
 const EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
-const REPO_LIMIT = 4;
+export const REPO_LIMIT = 4;
 const FILE_LIMIT = 8;
 const STAT_LIMIT = 16;
 const COMMIT_FORMAT = "%H%x1f%P%x1f%an%x1f%aI%x1f%s";
@@ -23,7 +23,7 @@ const HUNK_RE = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)$/;
 const COMMIT_RE = /^([0-9a-f]{40,64}) commit /;
 const STATUS: Record<string, FileStatus> = { A: "added", D: "deleted", R: "renamed" };
 
-type Content = { kind: "text"; text: string } | { kind: "binary" } | { kind: "tooLarge" } | { kind: "absent" };
+export type Content = { kind: "text"; text: string } | { kind: "binary" } | { kind: "tooLarge" } | { kind: "absent" };
 type RawBlock = Omit<Block, "id">;
 
 interface RepoPart {
@@ -86,7 +86,7 @@ interface DiffProbe {
   nested: boolean;
 }
 
-const ABSENT: Content = { kind: "absent" };
+export const ABSENT: Content = { kind: "absent" };
 const contentHashes = new Map<string, Map<string, FileHash>>();
 
 const byPath = (a: { path: string }, b: { path: string }) => compareText(a.path, b.path);
@@ -521,13 +521,13 @@ function assignIds(filePath: string, raws: RawBlock[]): Block[] {
   });
 }
 
-function classify(buf: Buffer): Content {
+export function classify(buf: Buffer): Content {
   if (buf.length > MAX_CONTENT_BYTES) return { kind: "tooLarge" };
   if (buf.subarray(0, 8000).includes(0)) return { kind: "binary" };
   return { kind: "text", text: buf.toString("utf8") };
 }
 
-async function readWorkTree(root: string, filePath: string): Promise<Content> {
+export async function readWorkTree(root: string, filePath: string): Promise<Content> {
   const abs = path.join(root, filePath);
   try {
     const st = await lstat(abs);
@@ -642,7 +642,7 @@ async function untrackedFile(ctx: RepoContext, filePath: string): Promise<FileDi
   return { ...added, blocks, hunks: buildHunks(blocks, null, lines), newContent: c.text };
 }
 
-async function mapLimit<T, R>(items: readonly T[], limit: number, fn: (item: T, index: number) => Promise<R>): Promise<R[]> {
+export async function mapLimit<T, R>(items: readonly T[], limit: number, fn: (item: T, index: number) => Promise<R>): Promise<R[]> {
   const out = new Array<R>(items.length);
   let next = 0;
   const worker = async () => {

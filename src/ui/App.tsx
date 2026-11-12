@@ -2,7 +2,7 @@ import { type ReactNode, useCallback, useDeferredValue, useEffect, useLayoutEffe
 import { contextOf } from "../shared/comments";
 import { comparisonFromQuery, comparisonQuery, isFor, repoFailures, sameComparison } from "../shared/comparison";
 import { splitLines } from "../shared/hunks";
-import type { CommitInfo, Comparison, DiffResult, FileDiff, Grouping, Review, Thread, ThreadAnchor, ViewData } from "../shared/types";
+import type { CommitInfo, Comparison, DiffResult, FileDiff, Grouping, RepoHits, Review, Thread, ThreadAnchor, ViewData } from "../shared/types";
 import { errorMessage } from "../shared/util";
 import { followActiveFile } from "./active";
 import { scrollToTop, startAnchoring } from "./anchor";
@@ -14,14 +14,17 @@ import {
   editComment,
   fetchFile,
   fetchRefs,
+  fetchRepoFile,
   fetchVersion,
   fetchView,
   groupTopics,
   replyToThread,
+  searchRepo,
   submitReview,
   type TopicRequest,
   viewUrl,
 } from "./api";
+import { CodePanel, type Peek } from "./CodePanel";
 import { type CommentActions, CommentActionsContext, type CommentsApi, CommentsContext } from "./comments";
 import { CommitBar, CommitList, CompareControls, refLabel, RepoComparisons } from "./Compare";
 import { ConversationsButton, ConversationsPanel, type Place, useConversations } from "./Conversations";
@@ -32,7 +35,7 @@ import { go, KeyboardButton, ShortcutHelp, stepSection, useShortcuts } from "./k
 import { locate } from "./locate";
 import { comparePaths } from "./paths";
 import { ReviewBar } from "./ReviewBar";
-import { type Hit, revealLine, searchDiff, SearchResults } from "./Search";
+import { type Hit, repoFound, revealLine, searchDiff, SearchResults } from "./Search";
 import { useStoredState, useViewed } from "./storage";
 import { SubmitReview } from "./SubmitReview";
 import { ChangeStats, RefreshButton, SidebarToggle, type Tab, ThemeToggle, ViewTabs } from "./TopBar";
@@ -43,6 +46,7 @@ interface Props {
 }
 
 const POLL_MS = 2000;
+const REPO_SEARCH_MS = 250;
 const NO_THREADS: Thread[] = [];
 
 const signature = (f: FileDiff) => (f.blocks.length ? f.blocks.map((b) => b.id).join(",") : `${f.status}:${f.binary}`);
@@ -65,6 +69,12 @@ const savedRange = () => (history.state as { range?: CommitRange } | null)?.rang
 
 const commitComparison = (c: CommitInfo): Comparison => ({ base: c.parents[0]!, head: c.sha, threeDot: false, overrides: [] });
 
+interface RepoSearch {
+  query: string;
+  result: RepoHits | null;
+  error: string | null;
+}
+
 export function App({ viewId }: Props) {
   const [data, setData] = useState<ViewData | null>(null);
   const [error, setError] = useState<{ message: string; status: number } | null>(null);
@@ -79,6 +89,10 @@ export function App({ viewId }: Props) {
   const [foldedDirs, setFoldedDirs] = useState<ReadonlySet<string>>(new Set());
   const [query, setQuery] = useState("");
   const [hit, setHit] = useState<Hit | null>(null);
+  const [scope, setScope] = useState<"diff" | "repo">("diff");
+  const [repoSearch, setRepoSearch] = useState<RepoSearch | null>(null);
+  const [code, setCode] = useState<Peek[]>([]);
+  const peekSeq = useRef(0);
 
   const [threads, setThreads] = useState<Thread[]>([]);
   const [reviews, setReviews] = useState<Review[]>([]);
@@ -181,6 +195,25 @@ export function App({ viewId }: Props) {
   );
 
   const loadRefs = useCallback((repo?: string) => fetchRefs(viewId ?? "", repo), [viewId]);
+
+  const loadCode = useCallback(
+    (path: string) => {
+      const loaded = version.current;
+      if (!viewId || loaded === null) return Promise.reject(new Error("The diff is not loaded yet."));
+      return fetchRepoFile(viewId, requested.current, loaded, path);
+    },
+    [viewId],
+  );
+
+  const openCode = useCallback((path: string, line: number | null, push = false) => {
+    const next = { path, line, seq: ++peekSeq.current };
+    setCode((stack) => {
+      const top = stack.at(-1);
+      if (!top) return [next];
+      return push && top.path !== path ? [...stack, next] : [...stack.slice(0, -1), next];
+    });
+  }, []);
+  const codeTop = code.at(-1) ?? null;
 
   const diff = data?.diff ?? null;
   const compareWith = (next: Comparison, nextTab?: Tab, nextRange: CommitRange | null = null) => {
@@ -363,9 +396,35 @@ export function App({ viewId }: Props) {
   const view: Tab = tab === "topics" ? "topics" : tab === "commits" && diff?.commits.length ? "commits" : "files";
 
   const searched = useDeferredValue(query);
-  const found = useMemo(() => searchDiff(shown.map((e) => e.file), searched), [shown, searched]);
+  const repoQuery = scope === "repo" ? searched.trim() : "";
+  const loadedVersion = data?.version ?? null;
+  useEffect(() => {
+    if (!repoQuery || !viewId || loadedVersion === null) return;
+    const aborted = new AbortController();
+    const timer = window.setTimeout(() => {
+      searchRepo(viewId, requested.current, repoQuery, aborted.signal).then(
+        (result) => setRepoSearch({ query: repoQuery, result, error: null }),
+        (e: unknown) => !aborted.signal.aborted && setRepoSearch({ query: repoQuery, result: null, error: errorMessage(e) }),
+      );
+    }, REPO_SEARCH_MS);
+    return () => {
+      clearTimeout(timer);
+      aborted.abort();
+    };
+  }, [repoQuery, viewId, loadedVersion]);
+  const repoResult = repoSearch?.query === repoQuery && repoSearch.result?.version === loadedVersion ? repoSearch.result : null;
+  const repoError = repoSearch?.query === repoQuery ? repoSearch.error : null;
+  const repoStale = repoSearch?.query === repoQuery && repoSearch.result !== null && repoSearch.result.version !== loadedVersion;
+
+  const diffFound = useMemo(() => searchDiff(shown.map((e) => e.file), scope === "diff" ? searched : ""), [shown, searched, scope]);
+  const repoFiles = diff?.files;
+  const found = useMemo(
+    () => (scope === "repo" ? repoFound(repoResult?.hits ?? [], repoResult?.capped ?? false, repoFiles ?? []) : diffFound),
+    [scope, repoResult, repoFiles, diffFound],
+  );
   const openHit = (next: Hit) => {
     setHit(next);
+    if (scope === "repo") return openCode(next.path, next.no);
     if (view !== "files") setTab("files");
     revealLine(next);
   };
@@ -422,7 +481,7 @@ export function App({ viewId }: Props) {
         return i < 0 ? null : { tab: "topics", rank: topicTab ? i : i - topics.length };
       }
       const fileIndex = entries.findIndex((e) => e.file.path === anchor.path);
-      if (fileIndex < 0) return null;
+      if (fileIndex < 0) return anchor.side === "old" ? null : { tab: "code", rank: topics.length + entries.length };
       if (!topicTab) return { tab: "files", rank: fileIndex };
       const topicIndex = topics.findIndex((topic) => topicShows(topic, t, comments.versions));
       return topicIndex >= 0 ? { tab: "topics", rank: topicIndex } : { tab: "files", rank: topics.length + fileIndex };
@@ -435,6 +494,10 @@ export function App({ viewId }: Props) {
     threads: live,
     place,
     show: (t, p) => {
+      if (p.tab === "code") {
+        if (t.anchor.path !== null) openCode(t.anchor.path, t.anchor.start);
+        return;
+      }
       if (topicTab || tab === "commits" || p.tab === "topics") setTab(p.tab);
       const { path } = t.anchor;
       if (p.tab === "files" && path !== null && !path.toLowerCase().includes(filter.trim().toLowerCase())) setFilter("");
@@ -451,7 +514,7 @@ export function App({ viewId }: Props) {
     j: () => stepSection(1),
     k: () => stepSection(-1),
     u: conv.nextUnread,
-    Escape: () => (help ? setHelp(false) : conv.setOpen(false)),
+    Escape: () => (help ? setHelp(false) : codeTop ? setCode([]) : conv.setOpen(false)),
   });
 
   const [isViewed, toggleViewed] = useViewed(diff && `diff-review:viewed:${diff.repoRoot}`, (f: FileDiff) => f.path, signature);
@@ -474,6 +537,15 @@ export function App({ viewId }: Props) {
     const el = document.getElementById(anchor);
     if (el) go(el);
     else if (topicTab) setOpening({ anchor });
+  };
+  const showDiff = (path: string) => {
+    const entry = entries.find((e) => e.file.path === path);
+    if (!entry) return;
+    if (!matching([entry], filter).length) setFilter("");
+    if (view !== "files") {
+      pendingSelect.current = entry.anchor;
+      setTab("files");
+    } else setOpening({ anchor: entry.anchor });
   };
   const latestSelect = useRef(select);
   latestSelect.current = select;
@@ -527,7 +599,14 @@ export function App({ viewId }: Props) {
               <RefreshButton stale={stale} loading={loading} onClick={() => void load(requested.current)} />
               <span className="spacer" />
               <ViewTabs view={view} commitCount={stepping?.count ?? diff.commitCount} onSelect={setTab} />
-              <ConversationsButton conv={conv} />
+              <ConversationsButton
+                conv={conv}
+                shown={conv.open && !codeTop}
+                onClick={() => {
+                  setCode([]);
+                  conv.setOpen((o) => codeTop !== null || !o);
+                }}
+              />
               <KeyboardButton onClick={() => setHelp(true)} />
               <ThemeToggle />
               <SubmitReview pending={pendingComments} listening={listening} onSubmit={submit} onOpen={conv.reveal} />
@@ -535,7 +614,7 @@ export function App({ viewId }: Props) {
 
             {error && <div className="banner">{error.message}</div>}
 
-            <div className={`layout${conv.open ? " with-conversations" : ""}${sidebarOpen ? "" : " no-sidebar"}`}>
+            <div className={`layout${codeTop ? " with-code" : conv.open ? " with-conversations" : ""}${sidebarOpen ? "" : " no-sidebar"}`}>
               <aside className="sidebar" hidden={!sidebarOpen}>
                 <div className="view">
                   <div className="filter-row">
@@ -558,25 +637,54 @@ export function App({ viewId }: Props) {
                       </button>
                     )}
                   </div>
-                  <input
-                    className="filter"
-                    type="search"
-                    placeholder="Search in the diff"
-                    value={query}
-                    onChange={(e) => {
-                      setQuery(e.target.value);
-                      setHit(null);
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key !== "Enter" || e.nativeEvent.isComposing) return;
-                      e.preventDefault();
-                      stepHit(e.shiftKey ? -1 : 1);
-                    }}
-                    aria-label="Search in the diff"
-                    title="Enter goes to the next match, Shift+Enter to the previous one"
-                  />
-                  {searched.trim() ? (
-                    <SearchResults found={found} query={searched} current={hit} onOpen={openHit} />
+                  <div className="filter-row">
+                    <input
+                      className="filter"
+                      type="search"
+                      placeholder={scope === "repo" ? "Search in the repository" : "Search in the diff"}
+                      value={query}
+                      onChange={(e) => {
+                        setQuery(e.target.value);
+                        setHit(null);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key !== "Enter" || e.nativeEvent.isComposing) return;
+                        e.preventDefault();
+                        stepHit(e.shiftKey ? -1 : 1);
+                      }}
+                      aria-label={scope === "repo" ? "Search in the repository" : "Search in the diff"}
+                      title="Enter goes to the next match, Shift+Enter to the previous one"
+                    />
+                    <div className="search-scope" role="radiogroup" aria-label="Search in">
+                      {(["diff", "repo"] as const).map((s) => (
+                        <button
+                          key={s}
+                          role="radio"
+                          aria-checked={scope === s}
+                          className={scope === s ? "is-on" : undefined}
+                          title={s === "repo" ? "Search every file in the compared version" : "Search the lines shown in the diff"}
+                          onClick={() => {
+                            setScope(s);
+                            setHit(null);
+                          }}
+                        >
+                          {s === "repo" ? "Repo" : "Diff"}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  {searched.trim() && scope === "repo" && !repoResult ? (
+                    <p className="tree-empty">
+                      {repoError ? `Could not search: ${repoError}` : repoStale ? "The files changed. Load the new changes to search them." : "Searching…"}
+                    </p>
+                  ) : searched.trim() ? (
+                    <SearchResults
+                      found={found}
+                      query={searched}
+                      current={hit}
+                      onOpen={openHit}
+                      empty={scope === "repo" ? "No matches in the repository." : "No matches in the lines shown in the diff."}
+                    />
                   ) : (
                     <FileTree
                       entries={treeEntries}
@@ -648,13 +756,31 @@ export function App({ viewId }: Props) {
                 )}
               </main>
             </div>
-            {conv.open && <ConversationsPanel conv={conv} />}
+            {codeTop ? (
+              <CodePanel
+                peek={codeTop}
+                file={diff.files.find((f) => f.path === codeTop.path)}
+                revision={revisionOf(actions.versions(codeTop.path).new)}
+                version={loadedVersion ?? ""}
+                load={loadCode}
+                canGoBack={code.length > 1}
+                onBack={() => setCode((stack) => stack.slice(0, -1))}
+                onClose={() => setCode([])}
+                onShowDiff={() => showDiff(codeTop.path)}
+              />
+            ) : (
+              conv.open && <ConversationsPanel conv={conv} />
+            )}
           </div>
           {help && <ShortcutHelp onClose={() => setHelp(false)} />}
         </CommentsContext.Provider>
       </CommentActionsContext.Provider>
     </FileLoader.Provider>
   );
+}
+
+function revisionOf(commit: string | null): string {
+  return commit ? `at ${commit.slice(0, 7)}` : "working tree";
 }
 
 function matching<T extends { file: FileDiff }>(list: T[], filter: string): T[] {

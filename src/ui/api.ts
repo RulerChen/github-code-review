@@ -1,5 +1,5 @@
 import { comparisonQuery } from "../shared/comparison";
-import type { Comparison, FileDiff, Grouping, RefList, Review, Thread, ThreadAnchor, ThreadContext, ViewData } from "../shared/types";
+import type { Comparison, FileDiff, Grouping, RefList, RepoFile, RepoHits, Review, Thread, ThreadAnchor, ThreadContext, ViewData } from "../shared/types";
 
 export class ApiError extends Error {
   constructor(
@@ -20,9 +20,11 @@ export const viewUrl = (viewId: string, ...parts: string[]) => `/api/views/${[vi
 
 const withComparison = (url: string, compare: Comparison | null) => (compare ? `${url}?${comparisonQuery(compare)}` : url);
 
-async function request<T>(url: string, ok: (body: Partial<T>) => boolean, method = "GET", payload?: unknown): Promise<T> {
+async function request<T>(url: string, ok: (body: Partial<T>) => boolean, method = "GET", payload?: unknown, signal?: AbortSignal): Promise<T> {
   const init: RequestInit =
-    payload === undefined ? { method, cache: "no-store" } : { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) };
+    payload === undefined
+      ? { method, cache: "no-store", signal }
+      : { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) };
   const res = await fetch(url, init);
   const body = (await res.json().catch(() => null)) as (Partial<T> & { error?: string }) | null;
   if (!res.ok || !body || !ok(body)) throw new ApiError(body?.error ?? `HTTP ${res.status}`, res.status);
@@ -43,6 +45,19 @@ export async function fetchFile(viewId: string, compare: Comparison | null, vers
   params.set("path", path);
   params.set("version", version);
   return (await request<{ file: FileDiff }>(`${viewUrl(viewId, "file")}?${params}`, (b) => !!b.file)).file;
+}
+
+export async function fetchRepoFile(viewId: string, compare: Comparison | null, version: string, path: string): Promise<RepoFile> {
+  const params = new URLSearchParams(compare ? comparisonQuery(compare) : "");
+  params.set("path", path);
+  params.set("version", version);
+  return (await request<{ file: RepoFile }>(`${viewUrl(viewId, "blob")}?${params}`, (b) => !!b.file)).file;
+}
+
+export function searchRepo(viewId: string, compare: Comparison | null, query: string, signal: AbortSignal): Promise<RepoHits> {
+  const params = new URLSearchParams(compare ? comparisonQuery(compare) : "");
+  params.set("q", query);
+  return request<RepoHits>(`${viewUrl(viewId, "grep")}?${params}`, (b) => Array.isArray(b.hits), "GET", undefined, signal);
 }
 
 export async function fetchVersion(viewId: string, compare: Comparison | null): Promise<string> {

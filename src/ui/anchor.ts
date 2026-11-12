@@ -5,6 +5,7 @@ const STICKY = ".file-header, .topic-header";
 const LEAF = "tr, .file-note, .topic-summary, .focus";
 const SKIPPED = `${STICKY}, colgroup`;
 const READER_INPUT = ["wheel", "touchstart", "keydown", "mousedown"] as const;
+const OWN_SCROLLER = ".code-body";
 
 interface Anchor {
   el: Element;
@@ -127,6 +128,7 @@ export function scrollToTop(): void {
 }
 
 export function pin(el: Element): () => void {
+  if (el.closest(OWN_SCROLLER)) return () => {};
   pinned = el;
   record();
   const stop = () => {
@@ -143,6 +145,13 @@ export function focusInPlace(el: HTMLElement | null): void {
 
 export function keepInPlace(el: Element | null, change: () => void, floor = -Infinity): void {
   if (!el) return flushSync(change);
+  const box = el.closest(OWN_SCROLLER);
+  if (box) {
+    const top = el.getBoundingClientRect().top;
+    flushSync(change);
+    if (el.isConnected) box.scrollTop += el.getBoundingClientRect().top - top;
+    return;
+  }
   settle();
   anchor = { el, top: Math.max(el.getBoundingClientRect().top, floor) - topBar(), scrollY: window.scrollY };
   flushSync(change);
