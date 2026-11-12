@@ -680,7 +680,7 @@ export function App({ viewId }: Props) {
                       <input
                         className="filter"
                         type="search"
-                        placeholder={scope === "repo" ? "Search in the repository" : "Search in the diff"}
+                        placeholder="Search"
                         value={query}
                         onChange={(e) => {
                           setQuery(e.target.value);
