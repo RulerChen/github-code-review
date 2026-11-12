@@ -2,12 +2,13 @@
 
 A Claude Code plugin that shows your code changes in a GitHub-style diff viewer in the browser.
 
-![Asking Claude Code for a review, reading Claude's topics, asking @claude about a line, and submitting a review that Claude then acts on](docs/demo.gif)
+![Reviewing a folder of two repositories: Claude's topics, the refs of each repository, a question to @claude about a line, and a review that Claude applies to both repositories](docs/demo.gif)
 
 ```
 /diff-review:review                          uncommitted changes
 /diff-review:review main...feature           a branch, compared like a pull request
 /diff-review:review topics: parser, docs     grouped into topics that Claude explains
+/diff-review:review ~/work                   every repository in a folder, on one page
 ```
 
 ## Setup
