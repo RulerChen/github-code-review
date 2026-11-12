@@ -164,6 +164,26 @@ function lineLabel(anchor: ThreadAnchor): string {
   return anchor.side === "old" ? `old ${lines}` : lines;
 }
 
+export function ThreadWhere({ anchor }: { anchor: ThreadAnchor }) {
+  if (anchor.path === null) {
+    return (
+      <span className="conv-where" title={anchorLabel(anchor)}>
+        <span className="conv-file conv-topic">{anchor.topic}</span>
+        <span className="conv-lines">{lineLabel(anchor)}</span>
+      </span>
+    );
+  }
+  return (
+    <span className="conv-where" title={`${anchor.path}, ${anchorLabel(anchor).toLowerCase()}`}>
+      <span className="conv-file">
+        <span className="conv-dir">{dirPrefix(anchor.path)}</span>
+        {basename(anchor.path)}
+      </span>
+      <span className="conv-lines">{lineLabel(anchor)}</span>
+    </span>
+  );
+}
+
 export function ConversationsButton({ conv }: { conv: Conversations }) {
   const n = conv.unreadThreads;
   const label = n ? `Conversations, ${n} with new answers` : "Conversations";
@@ -247,20 +267,7 @@ function ConversationItem({ thread, inDiff, current, unread, onOpen }: ItemProps
 
   const head = (
     <span className="conv-row">
-      {anchor.path === null ? (
-        <span className="conv-where" title={anchorLabel(anchor)}>
-          <span className="conv-file conv-topic">{anchor.topic}</span>
-          <span className="conv-lines">{lineLabel(anchor)}</span>
-        </span>
-      ) : (
-        <span className="conv-where" title={`${anchor.path}, ${anchorLabel(anchor).toLowerCase()}`}>
-          <span className="conv-file">
-            <span className="conv-dir">{dirPrefix(anchor.path)}</span>
-            {basename(anchor.path)}
-          </span>
-          <span className="conv-lines">{lineLabel(anchor)}</span>
-        </span>
-      )}
+      <ThreadWhere anchor={anchor} />
       {isOutdated(thread) && <span className="outdated-label">Outdated</span>}
       {thread.comments.some((c) => c.draft) && <span className="pending-label">Pending</span>}
       {unread > 0 && <span className="conv-badge">{unread} new</span>}

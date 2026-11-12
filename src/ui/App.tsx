@@ -3,7 +3,7 @@ import { contextOf } from "../shared/comments";
 import { comparisonFromQuery, comparisonQuery, isFor, repoFailures, sameComparison } from "../shared/comparison";
 import { splitLines } from "../shared/hunks";
 import type { CommitInfo, Comparison, DiffResult, FileDiff, Grouping, Review, Thread, ThreadAnchor, ViewData } from "../shared/types";
-import { errorMessage, sum } from "../shared/util";
+import { errorMessage } from "../shared/util";
 import { followActiveFile } from "./active";
 import { scrollToTop, startAnchoring } from "./anchor";
 import {
@@ -323,7 +323,6 @@ export function App({ viewId }: Props) {
     };
   }, [live, actions, current, listening]);
 
-  const drafts = sum(live, (t) => t.comments.filter((c) => c.draft).length);
   const submit = async (body: string) => {
     if (!viewId) return false;
     const result = await submitReview(viewId, body);
@@ -442,6 +441,10 @@ export function App({ viewId }: Props) {
     },
   });
   const commentsValue = useMemo(() => ({ ...comments, ...conv.api }), [comments, conv.api]);
+  const pendingComments = useMemo(
+    () => conv.ordered.flatMap((thread) => thread.comments.filter((c) => c.draft).map((comment) => ({ thread, comment }))),
+    [conv.ordered],
+  );
 
   const [help, setHelp] = useState(false);
   useShortcuts({
@@ -527,7 +530,7 @@ export function App({ viewId }: Props) {
               <ConversationsButton conv={conv} />
               <KeyboardButton onClick={() => setHelp(true)} />
               <ThemeToggle />
-              <SubmitReview drafts={drafts} listening={listening} onSubmit={submit} />
+              <SubmitReview pending={pendingComments} listening={listening} onSubmit={submit} onOpen={conv.reveal} />
             </header>
 
             {error && <div className="banner">{error.message}</div>}

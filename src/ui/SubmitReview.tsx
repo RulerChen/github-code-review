@@ -1,18 +1,23 @@
 import { type FormEvent, useRef, useState } from "react";
+import type { Thread, ThreadComment } from "../shared/types";
 import { plural } from "../shared/util";
 import { focusInPlace } from "./anchor";
+import { preview } from "./comments";
 import { CopyButton } from "./controls";
+import { ThreadWhere } from "./Conversations";
 import { useAction, useDismiss } from "./hooks";
 
 const ASK = "address my review comments";
 
 interface Props {
-  drafts: number;
+  pending: { thread: Thread; comment: ThreadComment }[];
   listening: boolean;
   onSubmit: (body: string) => Promise<boolean>;
+  onOpen: (thread: Thread) => void;
 }
 
-export function SubmitReview({ drafts, listening, onSubmit }: Props) {
+export function SubmitReview({ pending, listening, onSubmit, onOpen }: Props) {
+  const drafts = pending.length;
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
   const [delivered, setDelivered] = useState<boolean | null>(null);
@@ -52,6 +57,26 @@ export function SubmitReview({ drafts, listening, onSubmit }: Props) {
                   ? "Claude is waiting for this review and starts on it as soon as you submit."
                   : "Claude isn't waiting for a review right now. Submitting saves it, and Claude works on it once you ask in the terminal."}
               </p>
+              {drafts > 0 && (
+                <ul className="review-drafts" aria-label="Pending comments">
+                  {pending.map(({ thread, comment }) => (
+                    <li key={comment.id}>
+                      <button
+                        type="button"
+                        className="review-draft"
+                        title="Show this comment"
+                        onClick={() => {
+                          setOpen(false);
+                          onOpen(thread);
+                        }}
+                      >
+                        <ThreadWhere anchor={thread.anchor} />
+                        <span className="conv-text">{preview(comment.body)}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
               <textarea
                 value={text}
                 onChange={(e) => setText(e.target.value)}
