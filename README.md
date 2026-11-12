@@ -2,7 +2,7 @@
 
 A Claude Code plugin that shows your code changes in a GitHub-style diff viewer in the browser.
 
-![Reviewing a folder of two repositories: Claude's topics, the refs of each repository, a question to @claude about a line, and a review that Claude applies to both repositories](docs/demo.gif)
+![Demo](docs/demo.gif)
 
 ```
 /diff-review:review                          uncommitted changes
