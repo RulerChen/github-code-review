@@ -36756,32 +36756,40 @@ function buildHunks(blocks, oldLines, newLines, all = blocks, expansion = null) 
   const index = new Map(all.map((b, i) => [b, i]));
   const shown = new Set(blocks);
   const runBefore = (i) => Math.max(0, (i < all.length ? startOf(all[i]) : total) - (i > 0 ? endOf(all[i - 1]) : 0));
+  const runsBetween = (from, to) => {
+    let count = 0;
+    for (let i = from + 1; i <= to; i++) count += runBefore(i);
+    return count;
+  };
   const groups = [];
   for (const b of blocks) {
     const g = groups[groups.length - 1];
     const prev = g?.[g.length - 1];
-    const i = index.get(b);
-    const adjacent = prev !== void 0 && i === index.get(prev) + 1;
-    if (g && prev && hasCtx && adjacent && runBefore(i) <= wantBelow(prev) + wantAbove(b)) g.push(b);
+    if (g && prev && hasCtx && runsBetween(index.get(prev), index.get(b)) <= wantBelow(prev) + wantAbove(b)) g.push(b);
     else groups.push([b]);
   }
-  return groups.map((g) => {
+  return groups.map((g, gi) => {
     const first = g[0];
     const last = g[g.length - 1];
     const fi = index.get(first);
     const li = index.get(last);
-    const prevBlock = all[fi - 1];
-    const nextBlock = all[li + 1];
-    const joinsPrevious = prevBlock !== void 0 && shown.has(prevBlock);
-    const joinsNext = nextBlock !== void 0 && shown.has(nextBlock);
-    const runAbove = runBefore(fi);
-    const runBelow = runBefore(li + 1);
-    const before = Math.min(wantAbove(first), runAbove);
-    const after = Math.min(wantBelow(last), runBelow);
-    const hiddenAbove = hasCtx ? Math.max(0, runAbove - before - (joinsPrevious ? wantBelow(prevBlock) : 0)) : 0;
-    const hiddenBelow = hasCtx ? Math.max(0, runBelow - after - (joinsNext ? wantAbove(nextBlock) : 0)) : 0;
-    let o = first.oldStart - before;
-    let n = first.newStart - before;
+    const prevShown = groups[gi - 1]?.at(-1);
+    const nextShown = groups[gi + 1]?.[0];
+    const pi = prevShown ? index.get(prevShown) : -1;
+    const ni = nextShown ? index.get(nextShown) : all.length;
+    let up = wantAbove(first);
+    let top = fi;
+    while (hasCtx && top - 1 > pi && up >= runBefore(top)) up -= runBefore(top--);
+    let down = wantBelow(last);
+    let bottom = li;
+    while (hasCtx && bottom + 1 < ni && down >= runBefore(bottom + 1)) down -= runBefore(++bottom);
+    const before = Math.min(up, runBefore(top));
+    const after = Math.min(down, runBefore(bottom + 1));
+    const hiddenAbove = hasCtx ? Math.max(0, runsBetween(pi, fi) - wantAbove(first) - (prevShown ? wantBelow(prevShown) : 0)) : 0;
+    const hiddenBelow = hasCtx ? Math.max(0, runsBetween(li, ni) - wantBelow(last) - (nextShown ? wantAbove(nextShown) : 0)) : 0;
+    const head = all[top];
+    let o = head.oldStart - before;
+    let n = head.newStart - before;
     const startO = o;
     const startN = n;
     const lines = [];
@@ -36791,18 +36799,19 @@ function buildHunks(blocks, oldLines, newLines, all = blocks, expansion = null) 
       }
     };
     context(before);
-    for (const b of g) {
+    for (const b of all.slice(top, bottom + 1)) {
+      const outside = shown.has(b) ? {} : { outside: true };
       context(b.newStart - n);
       b.del.forEach((text, k) => {
-        lines.push({ kind: "del", oldNo: ++o, newNo: null, text, blockId: b.id, noEol: b.oldNoEol && k === b.del.length - 1 });
+        lines.push({ kind: "del", oldNo: ++o, newNo: null, text, blockId: b.id, noEol: b.oldNoEol && k === b.del.length - 1, ...outside });
       });
       b.add.forEach((text, k) => {
-        lines.push({ kind: "add", oldNo: null, newNo: ++n, text, blockId: b.id, noEol: b.newNoEol && k === b.add.length - 1 });
+        lines.push({ kind: "add", oldNo: null, newNo: ++n, text, blockId: b.id, noEol: b.newNoEol && k === b.add.length - 1, ...outside });
       });
     }
     context(after);
-    const header = hunkHeader(startO, o - startO, startN, n - startN, first.section);
-    return { header, lines, firstId: first.id, lastId: last.id, hiddenAbove, hiddenBelow, joinsPrevious };
+    const header = hunkHeader(startO, o - startO, startN, n - startN, head.section);
+    return { header, lines, firstId: first.id, lastId: last.id, hiddenAbove, hiddenBelow, joinsPrevious: prevShown !== void 0 };
   });
 }
 
@@ -38241,7 +38250,13 @@ var ReviewServer = class {
     if (replaces !== null) this.removeReview(view.repo, replaces);
     const createdAt = (/* @__PURE__ */ new Date()).toISOString();
     const stored = topics.map(({ title, summary, ids }) => ({ title, summary, ids }));
-    this.reviews.push({ repo: view.repo, compare, focus, topics: stored, createdAt, view: view.id });
+    const wanted = new Set(stored.flatMap((t) => t.ids));
+    const ranges = {};
+    for (const f of diff.files) {
+      const commit = diff.repos.find((r) => r.dir === "" || f.path.startsWith(`${r.dir}/`))?.oldCommit ?? null;
+      for (const b of f.blocks) if (wanted.has(b.id)) ranges[b.id] = { path: f.path, commit, start: b.oldStart, count: b.oldCount };
+    }
+    this.reviews.push({ repo: view.repo, compare, focus, topics: stored, ranges, createdAt, view: view.id });
     let dropped = 0;
     for (const note of topics.flatMap((t) => t.notes)) {
       const placed = placeNote(diff, note);

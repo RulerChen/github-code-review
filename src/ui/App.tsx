@@ -422,7 +422,10 @@ export function App({ viewId }: Props) {
     [diff],
   );
   const shown = useMemo(() => matching(entries, filter), [entries, filter]);
-  const topics = useMemo(() => (review ? buildTopics(review, entries.map((e) => e.file)) : []), [review, entries]);
+  const topics = useMemo(
+    () => (review && diff ? buildTopics(review, entries.map((e) => e.file), diff.repos) : []),
+    [review, entries, diff],
+  );
   const topicFiles = useMemo(
     () =>
       topics

@@ -380,16 +380,16 @@ function SplitCell({ line, tokens, marks, side, selected }: CellProps) {
   }
 
   const n = side === "old" ? line.oldNo : line.newNo;
-  const sel = selected ? " is-selected" : "";
+  const mods = `${line.outside ? " outside" : ""}${selected ? " is-selected" : ""}`;
   return (
     <>
       <td
-        className={`num ${line.kind}${sel}`}
+        className={`num ${line.kind}${mods}`}
         data-side={side}
         data-n={n ?? ""}
         title={n ? "Comment on this line. Drag or shift-click to select a range." : undefined}
       />
-      <td className={`code ${line.kind}${sel}`} data-mark={MARK[line.kind]}>
+      <td className={`code ${line.kind}${mods}`} data-mark={MARK[line.kind]} title={line.outside ? "This change is not in this topic." : undefined}>
         <Code line={line} tokens={tokens} marks={marks?.length ? marks : null} />
       </td>
     </>

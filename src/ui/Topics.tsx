@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { changeIds } from "../shared/hunks";
-import type { Block, FileDiff, Review, Thread } from "../shared/types";
+import type { Block, DiffRepo, FileDiff, Review, Thread } from "../shared/types";
 import { plural } from "../shared/util";
 import { keepHeaderInPlace } from "./anchor";
 import { type CommentsApi, onShownVersion, ThreadList, useComments } from "./comments";
@@ -22,18 +22,29 @@ export interface TopicView {
   summary: string;
   parts: TopicPart[];
   changeCount: number;
-  stale: number;
+  edited: number;
+  left: number;
   signature: string;
   firstFor: Set<string>;
 }
 
-export function buildTopics(review: Review, files: FileDiff[]): TopicView[] {
+export function buildTopics(review: Review, files: FileDiff[], repos: DiffRepo[]): TopicView[] {
   const known = new Set(files.flatMap(changeIds));
+  const claimed = new Set(review.topics.flatMap((t) => t.ids));
+  const baseOf = (path: string) => repos.find((r) => r.dir === "" || path.startsWith(`${r.dir}/`))?.oldCommit ?? null;
+  const editedInto = (id: string): string[] => {
+    const r = review.ranges?.[id];
+    if (!r || baseOf(r.path) !== r.commit) return [];
+    const blocks = files.find((f) => f.path === r.path)?.blocks ?? [];
+    return blocks.filter((b) => !claimed.has(b.id) && b.oldStart <= r.start + r.count && r.start <= b.oldStart + b.oldCount).map((b) => b.id);
+  };
   const seen = new Set<string>();
 
   return review.topics.map((t, index) => {
-    const present = [...new Set(t.ids)].filter((id) => known.has(id));
-    const chosen = new Set(present);
+    const ids = [...new Set(t.ids)];
+    const present = ids.filter((id) => known.has(id));
+    const edited = ids.filter((id) => !known.has(id)).map(editedInto);
+    const chosen = new Set([...present, ...edited.flat()]);
 
     const parts: TopicPart[] = [];
     const firstFor = new Set<string>();
@@ -50,9 +61,10 @@ export function buildTopics(review: Review, files: FileDiff[]): TopicView[] {
       title: t.title,
       summary: t.summary,
       parts,
-      changeCount: present.length,
-      stale: t.ids.length - present.length,
-      signature: present.join(","),
+      changeCount: chosen.size,
+      edited: edited.length,
+      left: edited.filter((into) => into.length === 0).length,
+      signature: [...chosen].join(","),
       firstFor,
     };
   });
@@ -66,8 +78,11 @@ export function topicShows(topic: TopicView, thread: Thread, versions: CommentsA
   return topic.parts.some((p) => p.file.path === anchor.path && hasLine(baseHunksOf(p.file, p.blocks), anchor.side, anchor.end));
 }
 
-const staleNote = (n: number) =>
-  `${plural(n, "change")} ${n === 1 ? "was" : "were"} edited after Claude made these topics and left this topic.`;
+function outdatedNote({ edited, left }: TopicView): string {
+  const what = `${plural(edited, "change")} ${edited === 1 ? "was" : "were"} edited after Claude made these topics`;
+  const gone = left === 0 ? "." : left === edited ? " and left this topic." : `, and ${left} of them left this topic.`;
+  return `${what}${gone} Edit topics and update them to ${left === 0 ? "explain the new code" : `bring ${left === 1 ? "it" : "them"} back`}.`;
+}
 
 interface SectionProps {
   topic: TopicView;
@@ -104,8 +119,8 @@ export function TopicSection({ topic, viewed, opening, onToggleViewed }: Section
           onClick={() => keepHeaderInPlace(header.current, () => setCollapsed(!collapsed))}
         />
         <h2 className="topic-title">{topic.title}</h2>
-        {topic.stale > 0 && (
-          <span className="outdated-label" title={`${staleNote(topic.stale)} Edit topics and update them to bring ${topic.stale === 1 ? "it" : "them"} back.`}>
+        {topic.edited > 0 && (
+          <span className="outdated-label" title={outdatedNote(topic)}>
             Outdated
           </span>
         )}
@@ -149,11 +164,7 @@ export function TopicSection({ topic, viewed, opening, onToggleViewed }: Section
             }}
             onClose={() => setCommenting(false)}
           />
-          {topic.stale > 0 && (
-            <p className="topic-note">
-              {staleNote(topic.stale)} Edit topics and update them to bring {topic.stale === 1 ? "it" : "them"} back.
-            </p>
-          )}
+          {topic.edited > 0 && <p className="topic-note">{outdatedNote(topic)}</p>}
           {topic.parts.map((p) => (
             <FileCard key={p.file.path} file={p.file} blocks={p.blocks} anchor={p.anchor} />
           ))}

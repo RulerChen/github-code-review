@@ -8,7 +8,7 @@ import { gzip } from "node:zlib";
 import { findDefinitions, grepRepo, isIdentifier, readRepoFile } from "../engine/browse.js";
 import { computeDiff, listRefs, probeDiff } from "../engine/diff.js";
 import { comparisonFromQuery, comparisonQuery, isFor } from "../shared/comparison.js";
-import type { Comparison, DiffResult, FileDiff, Grouping, NotedTopic, Review, Thread, ThreadAnchor, ThreadContext, ViewData } from "../shared/types.js";
+import type { BaseRange, Comparison, DiffResult, FileDiff, Grouping, NotedTopic, Review, Thread, ThreadAnchor, ThreadContext, ViewData } from "../shared/types.js";
 import { errorMessage, isRecord, sum } from "../shared/util.js";
 import { groupChanges } from "./group.js";
 import { placeNote } from "./review.js";
@@ -218,7 +218,13 @@ export class ReviewServer {
 
     const createdAt = new Date().toISOString();
     const stored = topics.map(({ title, summary, ids }) => ({ title, summary, ids }));
-    this.reviews.push({ repo: view.repo, compare, focus, topics: stored, createdAt, view: view.id });
+    const wanted = new Set(stored.flatMap((t) => t.ids));
+    const ranges: Record<string, BaseRange> = {};
+    for (const f of diff.files) {
+      const commit = diff.repos.find((r) => r.dir === "" || f.path.startsWith(`${r.dir}/`))?.oldCommit ?? null;
+      for (const b of f.blocks) if (wanted.has(b.id)) ranges[b.id] = { path: f.path, commit, start: b.oldStart, count: b.oldCount };
+    }
+    this.reviews.push({ repo: view.repo, compare, focus, topics: stored, ranges, createdAt, view: view.id });
 
     let dropped = 0;
     for (const note of topics.flatMap((t) => t.notes)) {

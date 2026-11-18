@@ -20,6 +20,7 @@ export interface DiffLine {
   text: string;
   blockId: string | null;
   noEol: boolean;
+  outside?: boolean;
 }
 
 export interface DisplayHunk {
@@ -71,11 +72,19 @@ export interface NotedTopic extends Topic {
   notes: TopicNote[];
 }
 
+export interface BaseRange {
+  path: string;
+  commit: string | null;
+  start: number;
+  count: number;
+}
+
 export interface Review {
   repo: string;
   compare: Comparison;
   focus: string | null;
   topics: Topic[];
+  ranges?: Record<string, BaseRange>;
   createdAt: string;
   view: string;
 }
