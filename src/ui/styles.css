@@ -1128,6 +1128,11 @@ button {
   color: var(--fg-muted);
 }
 
+.topic-header .outdated-label {
+  border-color: var(--attention);
+  color: var(--attention);
+}
+
 .topic-meta {
   color: var(--fg-muted);
   font-size: 12px;

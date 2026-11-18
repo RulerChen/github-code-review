@@ -66,6 +66,9 @@ export function topicShows(topic: TopicView, thread: Thread, versions: CommentsA
   return topic.parts.some((p) => p.file.path === anchor.path && hasLine(baseHunksOf(p.file, p.blocks), anchor.side, anchor.end));
 }
 
+const staleNote = (n: number) =>
+  `${plural(n, "change")} ${n === 1 ? "was" : "were"} edited after Claude made these topics and left this topic.`;
+
 interface SectionProps {
   topic: TopicView;
   viewed: boolean;
@@ -101,6 +104,11 @@ export function TopicSection({ topic, viewed, opening, onToggleViewed }: Section
           onClick={() => keepHeaderInPlace(header.current, () => setCollapsed(!collapsed))}
         />
         <h2 className="topic-title">{topic.title}</h2>
+        {topic.stale > 0 && (
+          <span className="outdated-label" title={`${staleNote(topic.stale)} Edit topics and update them to bring ${topic.stale === 1 ? "it" : "them"} back.`}>
+            Outdated
+          </span>
+        )}
         <span className="topic-meta">
           {plural(topic.changeCount, "change")} in {plural(files.length, "file")}
           {threads.length > 0 && ` · ${plural(threads.length, "comment")}`}
@@ -143,8 +151,7 @@ export function TopicSection({ topic, viewed, opening, onToggleViewed }: Section
           />
           {topic.stale > 0 && (
             <p className="topic-note">
-              {plural(topic.stale, "change")} {topic.stale === 1 ? "was" : "were"} edited after Claude made these topics and
-              left this topic. Edit topics and update them to bring {topic.stale === 1 ? "it" : "them"} back.
+              {staleNote(topic.stale)} Edit topics and update them to bring {topic.stale === 1 ? "it" : "them"} back.
             </p>
           )}
           {topic.parts.map((p) => (
