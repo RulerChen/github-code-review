@@ -84,7 +84,7 @@ export interface Review {
   compare: Comparison;
   focus: string | null;
   topics: Topic[];
-  ranges?: Record<string, BaseRange>;
+  changes?: Record<string, BaseRange | null>;
   createdAt: string;
   view: string;
 }
@@ -95,6 +95,7 @@ export interface Grouping {
   focus: string | null;
   topics: string[] | null;
   replaces: string | null;
+  syncs: string | null;
   activity: string | null;
   error: string | null;
 }

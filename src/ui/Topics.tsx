@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { changeIds } from "../shared/hunks";
+import { changeIds, editedInto, oldCommitOf } from "../shared/hunks";
 import type { Block, DiffRepo, FileDiff, Review, Thread } from "../shared/types";
 import { plural } from "../shared/util";
 import { keepHeaderInPlace } from "./anchor";
@@ -31,19 +31,13 @@ export interface TopicView {
 export function buildTopics(review: Review, files: FileDiff[], repos: DiffRepo[]): TopicView[] {
   const known = new Set(files.flatMap(changeIds));
   const claimed = new Set(review.topics.flatMap((t) => t.ids));
-  const baseOf = (path: string) => repos.find((r) => r.dir === "" || path.startsWith(`${r.dir}/`))?.oldCommit ?? null;
-  const editedInto = (id: string): string[] => {
-    const r = review.ranges?.[id];
-    if (!r || baseOf(r.path) !== r.commit) return [];
-    const blocks = files.find((f) => f.path === r.path)?.blocks ?? [];
-    return blocks.filter((b) => !claimed.has(b.id) && b.oldStart <= r.start + r.count && r.start <= b.oldStart + b.oldCount).map((b) => b.id);
-  };
+  const commitOf = oldCommitOf(repos);
   const seen = new Set<string>();
 
   return review.topics.map((t, index) => {
     const ids = [...new Set(t.ids)];
     const present = ids.filter((id) => known.has(id));
-    const edited = ids.filter((id) => !known.has(id)).map(editedInto);
+    const edited = ids.filter((id) => !known.has(id)).map((id) => editedInto(review.changes?.[id], files, commitOf, claimed));
     const chosen = new Set([...present, ...edited.flat()]);
 
     const parts: TopicPart[] = [];

@@ -111,7 +111,7 @@ export interface TopicRequest {
   replaces: string | null;
 }
 
-export async function groupTopics(viewId: string, compare: Comparison, ask: TopicRequest): Promise<Grouping[]> {
+export async function groupTopics(viewId: string, compare: Comparison, ask: TopicRequest | { sync: string }): Promise<Grouping[]> {
   const url = withComparison(viewUrl(viewId, "topics"), compare);
   return (await request<{ groupings: Grouping[] }>(url, (b) => Array.isArray(b.groupings), "POST", ask)).groupings;
 }

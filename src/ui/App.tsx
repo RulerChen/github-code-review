@@ -1,7 +1,7 @@
 import { type ReactNode, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { contextOf } from "../shared/comments";
 import { comparisonFromQuery, comparisonQuery, isFor, repoFailures, sameComparison } from "../shared/comparison";
-import { splitLines } from "../shared/hunks";
+import { changeIds, splitLines } from "../shared/hunks";
 import type { CommitInfo, Comparison, DiffResult, FileDiff, Grouping, RepoHits, Review, Thread, ThreadAnchor, ViewData } from "../shared/types";
 import { errorMessage } from "../shared/util";
 import { followActiveFile } from "./active";
@@ -410,6 +410,16 @@ export function App({ viewId }: Props) {
   const group = async (ask: TopicRequest) => {
     if (viewId && current) setGroupings(await groupTopics(viewId, current, ask));
   };
+  const synced = useRef<string | null>(null);
+  useEffect(() => {
+    const before = review?.changes;
+    if (!viewId || !current || !data || !review || !before || (grouping && grouping.error === null)) return;
+    const key = `${review.createdAt} ${data.version}`;
+    const now = data.diff.files.flatMap(changeIds);
+    if (synced.current === key || (now.length === Object.keys(before).length && now.every((id) => id in before))) return;
+    synced.current = key;
+    groupTopics(viewId, current, { sync: review.createdAt }).then(setGroupings, () => {});
+  }, [viewId, current, data, review, grouping]);
   const removeReview = async (r: Review) => {
     if (viewId) setReviews(await deleteReview(viewId, r));
   };

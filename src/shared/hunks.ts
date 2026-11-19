@@ -1,4 +1,4 @@
-import type { Block, DiffLine, DisplayHunk, Expansion, FileDiff } from "./types.js";
+import type { BaseRange, Block, DiffLine, DiffRepo, DisplayHunk, Expansion, FileDiff } from "./types.js";
 
 const CONTEXT_LINES = 3;
 
@@ -13,6 +13,16 @@ export const stripCr = (s: string) => (s.endsWith("\r") ? s.slice(0, -1) : s);
 
 export function changeIds(file: FileDiff): string[] {
   return file.blocks.length ? file.blocks.map((b) => b.id) : [`file:${file.path}`];
+}
+
+export function oldCommitOf(repos: DiffRepo[]): (path: string) => string | null {
+  return (path) => repos.find((r) => r.dir === "" || path.startsWith(`${r.dir}/`))?.oldCommit ?? null;
+}
+
+export function editedInto(range: BaseRange | null | undefined, files: FileDiff[], commitOf: (path: string) => string | null, taken: Set<string>): string[] {
+  if (!range || commitOf(range.path) !== range.commit) return [];
+  const blocks = files.find((f) => f.path === range.path)?.blocks ?? [];
+  return blocks.filter((b) => !taken.has(b.id) && b.oldStart <= range.start + range.count && range.start <= b.oldStart + b.oldCount).map((b) => b.id);
 }
 
 function rangeHeader(start0: number, count: number): string {

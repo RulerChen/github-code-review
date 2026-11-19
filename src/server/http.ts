@@ -8,10 +8,10 @@ import { gzip } from "node:zlib";
 import { findDefinitions, grepRepo, isIdentifier, readRepoFile } from "../engine/browse.js";
 import { computeDiff, listRefs, probeDiff } from "../engine/diff.js";
 import { comparisonFromQuery, comparisonQuery, isFor } from "../shared/comparison.js";
-import type { BaseRange, Comparison, DiffResult, FileDiff, Grouping, NotedTopic, Review, Thread, ThreadAnchor, ThreadContext, ViewData } from "../shared/types.js";
+import type { Comparison, DiffResult, FileDiff, Grouping, NotedTopic, Review, Thread, ThreadAnchor, ThreadContext, ViewData } from "../shared/types.js";
 import { errorMessage, isRecord, sum } from "../shared/util.js";
-import { groupChanges } from "./group.js";
-import { placeNote } from "./review.js";
+import { groupChanges, mergeSync, needsClaude, syncTopics, type TopicSync, topicDelta } from "./group.js";
+import { changesOf, placeNote } from "./review.js";
 import { dropOldStates, loadState, saveState } from "./store.js";
 import { RepoThreads } from "./threads.js";
 
@@ -218,13 +218,7 @@ export class ReviewServer {
 
     const createdAt = new Date().toISOString();
     const stored = topics.map(({ title, summary, ids }) => ({ title, summary, ids }));
-    const wanted = new Set(stored.flatMap((t) => t.ids));
-    const ranges: Record<string, BaseRange> = {};
-    for (const f of diff.files) {
-      const commit = diff.repos.find((r) => r.dir === "" || f.path.startsWith(`${r.dir}/`))?.oldCommit ?? null;
-      for (const b of f.blocks) if (wanted.has(b.id)) ranges[b.id] = { path: f.path, commit, start: b.oldStart, count: b.oldCount };
-    }
-    this.reviews.push({ repo: view.repo, compare, focus, topics: stored, ranges, createdAt, view: view.id });
+    this.reviews.push({ repo: view.repo, compare, focus, topics: stored, changes: changesOf(diff), createdAt, view: view.id });
 
     let dropped = 0;
     for (const note of topics.flatMap((t) => t.notes)) {
@@ -255,7 +249,7 @@ export class ReviewServer {
     if (i >= 0 && this.groupings[i]!.error === null) return;
     if (i >= 0) this.groupings.splice(i, 1);
 
-    const job: Grouping = { repo: view.repo, compare, focus, topics: names, replaces, activity: "Starting", error: null };
+    const job: Grouping = { repo: view.repo, compare, focus, topics: names, replaces, syncs: null, activity: "Starting", error: null };
     this.groupings.push(job);
     this.broadcast("groupings", this.groupings);
 
@@ -276,6 +270,47 @@ export class ReviewServer {
         this.broadcast("groupings", this.groupings);
       }
     })();
+  }
+
+  private async sync(view: View, compare: Comparison, createdAt: string, threads: RepoThreads): Promise<void> {
+    const same = isFor(view.repo, compare);
+    const { diff } = await this.loadDiff(view.repo, compare);
+    const review = this.reviews.find((r) => same(r) && r.createdAt === createdAt);
+    if (!review || this.groupings.some((g) => same(g) && g.error === null)) return;
+    const delta = topicDelta(review, diff);
+    if (!delta) return;
+
+    const apply = ({ topics, notes }: TopicSync) => {
+      review.topics = topics;
+      review.changes = changesOf(diff);
+      for (const note of notes) {
+        const placed = placeNote(diff, note);
+        if (placed) threads.addNote(placed.anchor, placed.snippet, placed.context, note.body, createdAt);
+      }
+      this.broadcast("reviews", this.reviews);
+      this.saveSoon(view.repo);
+    };
+    if (!needsClaude(review, delta)) return apply(mergeSync(review, diff, delta, []));
+
+    const failed = this.groupings.findIndex(same);
+    if (failed >= 0) this.groupings.splice(failed, 1);
+    const job: Grouping = { repo: view.repo, compare, focus: review.focus, topics: null, replaces: null, syncs: createdAt, activity: "Starting", error: null };
+    this.groupings.push(job);
+    this.broadcast("groupings", this.groupings);
+    try {
+      const onActivity = (activity: string) => {
+        job.activity = activity;
+        this.broadcast("groupings", this.groupings);
+      };
+      const update = await syncTopics({ review, diff, delta, cwd: threads.cwd, session: threads.parentSession, onActivity });
+      this.groupings.splice(this.groupings.indexOf(job), 1);
+      if (this.reviews.includes(review)) apply(update);
+      this.broadcast("groupings", this.groupings);
+    } catch (err) {
+      job.activity = null;
+      job.error = errorMessage(err);
+      this.broadcast("groupings", this.groupings);
+    }
   }
 
   private broadcast(event: string, data: unknown): void {
@@ -381,7 +416,12 @@ export class ReviewServer {
       case "GET wait":
         return wait(res, query, view, threads);
       case "POST topics": {
-        const { focus, topics, replaces } = await readJson(req);
+        const { focus, topics, replaces, sync } = await readJson(req);
+        if (sync !== undefined) {
+          if (!isText(sync, MAX_REF, true)) return sendJson(res, 400, { error: "Invalid topics" });
+          void this.sync(view, compare, sync, threads).catch(() => {});
+          return sendJson(res, 202, { groupings: this.groupings });
+        }
         if (focus !== undefined && focus !== null && !isText(focus, MAX_FOCUS)) return sendJson(res, 400, { error: "Invalid focus" });
         const names = topics === undefined || topics === null ? null : topics;
         if (names !== null && !(Array.isArray(names) && names.length <= MAX_TOPICS && names.every((n) => isText(n, MAX_TITLE, true)))) {

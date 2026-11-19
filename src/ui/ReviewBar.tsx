@@ -61,7 +61,7 @@ export function ReviewBar({ reviews, review, grouping, repoRoot, hasChanges, onP
           <span className="group-spinner" aria-hidden="true" />
           <div>
             <p>
-              {grouping.replaces ? "Claude is updating the topics" : "Claude is making topics"}
+              {grouping.syncs ? "Claude is updating the topics to the new changes" : grouping.replaces ? "Claude is updating the topics" : "Claude is making topics"}
               {grouping.focus && (
                 <>
                   {" "}
@@ -76,7 +76,7 @@ export function ReviewBar({ reviews, review, grouping, repoRoot, hasChanges, onP
       )}
       {grouping?.error && !running && (
         <p className="group-card group-error" role="alert">
-          {grouping.replaces ? "Could not update the topics" : "Could not make topics"}: {grouping.error}
+          {grouping.replaces || grouping.syncs ? "Could not update the topics" : "Could not make topics"}: {grouping.error}
         </p>
       )}
       {hasChanges && !running && review && editing && (
@@ -92,7 +92,7 @@ export function ReviewBar({ reviews, review, grouping, repoRoot, hasChanges, onP
       )}
       {hasChanges && !running && !editing && (
         <CreateForm
-          initial={grouping?.replaces === null ? (grouping.focus ?? "") : ""}
+          initial={grouping?.replaces === null && grouping.syncs === null ? (grouping.focus ?? "") : ""}
           explain={review === null}
           busy={busy}
           error={error}
