@@ -1,4 +1,5 @@
 import { useEffect, useRef, useSyncExternalStore } from "react";
+import { wordRegExp } from "../shared/search";
 import type { DiffLine, FileDiff, RepoHit } from "../shared/types";
 import { plural } from "../shared/util";
 import { pin } from "./anchor";
@@ -16,6 +17,7 @@ export interface Hit {
   kind: DiffLine["kind"];
   text: string;
   at: number;
+  length: number;
 }
 
 interface Found {
@@ -25,20 +27,21 @@ interface Found {
 }
 
 export function searchDiff(files: FileDiff[], query: string): Found {
-  const q = query.trim().toLowerCase();
+  const word = wordRegExp(query);
   const found: Found = { groups: [], hits: [], capped: false };
-  if (!q) return found;
+  if (!word) return found;
 
   for (const file of files) {
     const hits: Hit[] = [];
     for (const hunk of file.hunks) {
       for (const line of hunk.lines) {
-        const at = line.text.toLowerCase().indexOf(q);
-        if (at < 0) continue;
+        const match = word.exec(line.text);
+        if (!match) continue;
         if (found.hits.length === MAX_HITS) return { ...found, capped: true };
 
         const side = line.kind === "del" ? "old" : "new";
-        const hit: Hit = { path: file.path, side, no: (side === "old" ? line.oldNo : line.newNo)!, kind: line.kind, text: line.text, at };
+        const no = (side === "old" ? line.oldNo : line.newNo)!;
+        const hit: Hit = { path: file.path, side, no, kind: line.kind, text: line.text, at: match.index, length: match[0].length };
         if (!hits.length) found.groups.push({ path: file.path, hits });
         hits.push(hit);
         found.hits.push(hit);
@@ -48,7 +51,8 @@ export function searchDiff(files: FileDiff[], query: string): Found {
   return found;
 }
 
-export function repoFound(hits: RepoHit[], capped: boolean, files: FileDiff[]): Found {
+export function repoFound(hits: RepoHit[], capped: boolean, files: FileDiff[], query: string): Found {
+  const word = wordRegExp(query);
   const changed = new Map(files.map((f) => [f.path, f]));
   const groups = new Map<string, Hit[]>();
   let added = new Set<number>();
@@ -59,7 +63,9 @@ export function repoFound(hits: RepoHit[], capped: boolean, files: FileDiff[]): 
       groups.set(h.path, list);
       added = addedLines(changed.get(h.path));
     }
-    list.push({ path: h.path, side: "new", no: h.no, kind: added.has(h.no) ? "add" : "context", text: h.text, at: h.at });
+    const match = word?.exec(h.text);
+    const kind = added.has(h.no) ? "add" : "context";
+    list.push({ path: h.path, side: "new", no: h.no, kind, text: h.text, at: match?.index ?? -1, length: match?.[0].length ?? 0 });
   }
   const ordered = [...groups].sort(([a], [b]) => comparePaths(a, b)).map(([path, list]) => ({ path, hits: list }));
   return { groups: ordered, hits: ordered.flatMap((g) => g.hits), capped };
@@ -101,14 +107,12 @@ const MARK = { add: "+", del: "-", context: "" } as const;
 
 interface Props {
   found: Found;
-  query: string;
   current: Hit | null;
   onOpen: (hit: Hit) => void;
   empty: string;
 }
 
-export function SearchResults({ found, query, current, onOpen, empty }: Props) {
-  const length = query.trim().length;
+export function SearchResults({ found, current, onOpen, empty }: Props) {
   if (found.hits.length === 0) return <p className="tree-empty">{empty}</p>;
 
   return (
@@ -126,7 +130,7 @@ export function SearchResults({ found, query, current, onOpen, empty }: Props) {
           <ul>
             {g.hits.map((h) => (
               <li key={`${h.side}${h.no}`}>
-                <HitButton hit={h} length={length} current={h === current} onOpen={onOpen} />
+                <HitButton hit={h} current={h === current} onOpen={onOpen} />
               </li>
             ))}
           </ul>
@@ -136,7 +140,7 @@ export function SearchResults({ found, query, current, onOpen, empty }: Props) {
   );
 }
 
-function HitButton({ hit, length, current, onOpen }: { hit: Hit; length: number; current: boolean; onOpen: (hit: Hit) => void }) {
+function HitButton({ hit, current, onOpen }: { hit: Hit; current: boolean; onOpen: (hit: Hit) => void }) {
   const ref = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     if (current) ref.current?.scrollIntoView({ block: "nearest" });
@@ -157,8 +161,8 @@ function HitButton({ hit, length, current, onOpen }: { hit: Hit; length: number;
           <>
             {from > indent && "…"}
             {hit.text.slice(from, hit.at)}
-            <mark>{hit.text.slice(hit.at, hit.at + length)}</mark>
-            {hit.text.slice(hit.at + length)}
+            <mark>{hit.text.slice(hit.at, hit.at + hit.length)}</mark>
+            {hit.text.slice(hit.at + hit.length)}
           </>
         )}
       </span>

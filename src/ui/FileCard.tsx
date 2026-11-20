@@ -9,7 +9,6 @@ import { CollapseButton, CommentButton, CopyButton, ViewedToggle } from "./contr
 import { DiffTable, hasLine, type OnExpand, toSplitRows, twoExpanders } from "./DiffTable";
 import { highlight, languageFor, type TokenLines } from "./highlight";
 import { useAction } from "./hooks";
-import { isOutdated } from "./locate";
 import { showLineTarget, useLineTarget } from "./Search";
 
 const AUTO_LOAD_LINES = 400;
@@ -140,9 +139,9 @@ export const FileCard = memo(function FileCard({ file: next, blocks: nextBlocks 
 
   const threads = threadsFor(file.path);
   const fileThreads = threads.filter((t) => t.anchor.side === null);
-  const unplaced = threads.filter(
-    (t) => t.anchor.side !== null && (partial ? isOutdated(t) : !onShownVersion(t, versions) || !hasLine(hunks, t.anchor.side, t.anchor.end)),
-  );
+  const unplaced = partial
+    ? []
+    : threads.filter((t) => t.anchor.side !== null && (!onShownVersion(t, versions) || !hasLine(hunks, t.anchor.side, t.anchor.end)));
   const cheap = deferred || hunks.length === 0;
   const additions = partial ? sum(blocks, (b) => b.newCount) : file.additions;
   const deletions = partial ? sum(blocks, (b) => b.oldCount) : file.deletions;
@@ -208,14 +207,6 @@ export const FileCard = memo(function FileCard({ file: next, blocks: nextBlocks 
             onCreate={(body, single) => create({ path: file.path, side: null, start: null, end: null }, "", body, single)}
             onClose={() => setCommenting(false)}
           />
-          {unplaced.length > 0 && (
-            <div className="unplaced">
-              <p className="file-note inline">Comments on lines not shown in this diff</p>
-              {unplaced.map((t) => (
-                <ThreadView key={t.id} thread={t} withVersion />
-              ))}
-            </div>
-          )}
           <FileBody
             file={file}
             hunks={hunks}
@@ -228,6 +219,14 @@ export const FileCard = memo(function FileCard({ file: next, blocks: nextBlocks 
             tokens={tokens ?? NO_TOKENS}
             threads={threads}
           />
+          {unplaced.length > 0 && (
+            <div className="unplaced">
+              <p className="file-note inline">Comments on lines outside this diff: the lines changed, are folded away, or are from another version.</p>
+              {unplaced.map((t) => (
+                <ThreadView key={t.id} thread={t} withVersion />
+              ))}
+            </div>
+          )}
         </div>
       )}
     </section>
@@ -377,7 +376,7 @@ const sameText = (a: FileDiff, b: FileDiff) =>
   a.path === b.path && a.oldPath === b.oldPath && a.oldContent === b.oldContent && a.newContent === b.newContent;
 
 function useShown(file: FileDiff, blocks: Block[], enabled: boolean): Shown {
-  const lang = languageFor(file.path);
+  const lang = languageFor(file.path, file.newContent ?? file.oldContent);
   const want = enabled && lang !== null;
   const wantOld = file.newContent === null || blocks.some((b) => b.oldCount > 0);
 
@@ -398,7 +397,7 @@ function useShown(file: FileDiff, blocks: Block[], enabled: boolean): Shown {
       if (!cancelled) setShown({ file, blocks, tokens });
     };
     Promise.all([
-      wantOld && file.oldContent !== null ? highlight(file.oldContent, languageFor(file.oldPath ?? file.path) ?? lang) : null,
+      wantOld && file.oldContent !== null ? highlight(file.oldContent, languageFor(file.oldPath ?? file.path, file.oldContent) ?? lang) : null,
       file.newContent !== null ? highlight(file.newContent, lang) : null,
     ]).then(([o, n]) => show({ old: o, new: n }), () => show(null));
     return () => {

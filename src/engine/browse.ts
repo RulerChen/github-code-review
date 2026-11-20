@@ -1,4 +1,5 @@
 import path from "node:path";
+import { wordPattern, wordRegExp } from "../shared/search.js";
 import type { DiffRepo, DiffResult, RepoFile, RepoHit } from "../shared/types.js";
 import { compareText } from "../shared/util.js";
 import { ABSENT, classify, type Content, MAX_CONTENT_BYTES, mapLimit, readWorkTree, REPO_LIMIT } from "./diff.js";
@@ -93,8 +94,8 @@ async function readBlobAt(root: string, rev: string, rest: string): Promise<Cont
 }
 
 export function grepRepo(diff: DiffResult, query: string, signal: AbortSignal): Promise<{ hits: RepoHit[]; capped: boolean }> {
-  const q = query.toLowerCase();
-  return grepLines(diff, ["-F", "-i", "-e", query], ["."], MAX_HITS, signal, (text) => text.toLowerCase().indexOf(q));
+  const found = wordRegExp(query);
+  return grepLines(diff, ["-E", "-i", "-e", wordPattern(query)], ["."], MAX_HITS, signal, (text) => found?.exec(text)?.index ?? -1);
 }
 
 export const isIdentifier = (name: string) => IDENTIFIER.test(name);

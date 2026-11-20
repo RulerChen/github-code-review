@@ -36,7 +36,29 @@ export function locate(thread: Thread, lines: string[]): Thread {
   if (best >= 0 && bestScore * 2 >= telling) {
     return best === origin ? thread : { ...thread, anchor: { ...anchor, start: best + 1, end: best + want.length } };
   }
-  const gone = { ...thread };
+  const gone = { ...thread, anchor: { ...anchor, ...around(lines, before, after, anchor.start, anchor.end) } };
   outdated.add(gone);
   return gone;
+}
+
+function around(lines: string[], before: string[], after: string[], start: number, end: number): { start: number; end: number } {
+  const best = (block: string[], shift: number, from: number, near: number) => {
+    let found = -1;
+    let foundScore = 0;
+    for (let at = from; at <= lines.length; at++) {
+      const s = block.filter((l, k) => WORD.test(l) && same(lines[at + shift + k], l)).length;
+      if (s > foundScore || (s > 0 && s === foundScore && Math.abs(at - near) < Math.abs(found - near))) {
+        found = at;
+        foundScore = s;
+      }
+    }
+    return found;
+  };
+
+  const top = best(before, -before.length, 0, start - 1);
+  const bottom = best(after, 0, Math.max(top, 0), top < 0 ? end : top + end - start + 1);
+  const first = top >= 0 ? top + 1 : bottom >= 0 ? bottom - (end - start) : start;
+  const last = bottom >= 0 ? bottom : top >= 0 ? top + end - start + 1 : end;
+  const clamp = (n: number) => Math.min(Math.max(n, 1), Math.max(lines.length, 1));
+  return { start: clamp(Math.min(first, last)), end: clamp(last) };
 }

@@ -1,9 +1,9 @@
-import { memo, type MouseEvent, type ReactNode, useContext, useEffect, useMemo, useState } from "react";
+import { memo, type MouseEvent, type ReactNode, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { stripCr } from "../shared/hunks";
 import type { DiffLine, DisplayHunk, Expansion, Thread } from "../shared/types";
 import { keepInPlace } from "./anchor";
 import { NewThread, onShownVersion, ThreadView, unmark, useCommentActions } from "./comments";
-import { FindDefinitionContext, wordAt } from "./definition";
+import { FindDefinitionContext, selectedAt, wordAt } from "./definition";
 import { type Token, type TokenLines, tokensAt } from "./highlight";
 import { type ExpandDir, ExpandIcon } from "./icons";
 import { intraline, type Marks } from "./intraline";
@@ -121,7 +121,9 @@ export const DiffTable = memo(function DiffTable({ path, hunks, oldTokens, newTo
   const isSelected = (side: Side, no: number | null) =>
     shown !== null && no !== null && shown.side === side && no >= shown.start && no <= shown.end;
 
+  const selected = useRef<string | null>(null);
   const press = (e: MouseEvent) => {
+    selected.current = e.ctrlKey || e.metaKey ? selectedAt(e.clientX, e.clientY) : null;
     const hit = e.button === 0 ? lineAt(e.target, true) : null;
     if (!hit) return;
     e.preventDefault();
@@ -150,10 +152,10 @@ export const DiffTable = memo(function DiffTable({ path, hunks, oldTokens, newTo
 
   const lookUp = (e: MouseEvent) => {
     if (!findDefinition || e.button !== 0 || !(e.ctrlKey || e.metaKey)) return;
-    const word = wordAt(e.clientX, e.clientY);
-    if (!word) return;
+    const text = selected.current ?? wordAt(e.clientX, e.clientY);
+    if (!text) return;
     e.preventDefault();
-    findDefinition(word, path, e.clientX, e.clientY);
+    findDefinition(text, path, e.clientX, e.clientY);
   };
 
   const submit = async (body: string, single: boolean) => {

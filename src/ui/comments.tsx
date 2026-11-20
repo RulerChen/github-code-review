@@ -21,8 +21,8 @@ export interface CommentsApi {
   remove: (threadId: string, commentId: string) => Promise<void>;
   unread: (thread: Thread) => number;
   markRead: (thread: Thread) => void;
-  isFolded: (threadId: string) => boolean;
-  setFolded: (threadId: string, folded: boolean) => void;
+  isFolded: (threadId: string, byDefault: boolean) => boolean;
+  setFolded: (threadId: string, folded: boolean, byDefault: boolean) => void;
   pending: boolean;
   listening: boolean;
   revealSeq: number;
@@ -78,7 +78,7 @@ export function readableCount(thread: Thread): number {
 }
 
 export const onShownVersion = (thread: Thread, versions: CommentsApi["versions"]) =>
-  thread.anchor.side === null || (!isOutdated(thread) && thread.anchor.commit === versions(thread.anchor.path)[thread.anchor.side]);
+  thread.anchor.side === null || thread.anchor.commit === versions(thread.anchor.path)[thread.anchor.side];
 
 interface FormProps {
   placeholder: string;
@@ -260,7 +260,7 @@ function CommentForm({ placeholder, initial = "", editing = false, lines, onSubm
         <textarea ref={input} value={text} onChange={(e) => setText(e.target.value)} placeholder={placeholder} rows={3} hidden={!writing} />
         {!writing && (
           <div ref={previewBox} className="comment-preview" tabIndex={-1}>
-            {text.trim() ? <Markdown text={text} base={lines} /> : <p className="comment-preview-empty">Nothing to preview</p>}
+            <Markdown text={text} base={lines} />
           </div>
         )}
       </div>
@@ -363,16 +363,26 @@ function flash(el: HTMLElement): void {
 export function ThreadView({ thread, withVersion = false }: { thread: Thread; withVersion?: boolean }) {
   const { reply, unread, markRead, revealSeq, peekReveal, takeReveal, isFolded, setFolded } = useComments();
   const [replying, setReplying] = useState(false);
+  const [editing, setEditing] = useState<string | null>(null);
+  const [moving, setMoving] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const unreadCount = unread(thread);
-  const folded = isFolded(thread.id);
-  const fold = useCallback((next: boolean) => keepInPlace(ref.current, () => setFolded(thread.id, next)), [setFolded, thread.id]);
+  const gone = isOutdated(thread);
+  const folded = isFolded(thread.id, gone);
+  const fold = useCallback(
+    (next: boolean) =>
+      keepInPlace(ref.current, () => {
+        setMoving(!matchMedia("(prefers-reduced-motion: reduce)").matches);
+        setFolded(thread.id, next, gone);
+      }),
+    [setFolded, thread.id, gone],
+  );
 
   useEffect(() => {
     const el = ref.current;
     if (!el || el.getClientRects().length === 0) return;
     if (folded) {
-      if (peekReveal()?.id === thread.id) setFolded(thread.id, false);
+      if (peekReveal()?.id === thread.id) setFolded(thread.id, false, gone);
       return;
     }
     if (!takeReveal(thread.id)) return;
@@ -400,47 +410,58 @@ export function ThreadView({ thread, withVersion = false }: { thread: Thread; wi
     };
   }, [thread, unreadCount, markRead, folded]);
 
-  const gone = isOutdated(thread);
-  const where = gone ? null : whereText(thread.anchor, withVersion);
   const first = thread.comments[0];
-  if (folded && first) {
-    return (
-      <div ref={ref} className="thread is-folded" data-thread={thread.id}>
-        <button className="thread-unfold" aria-expanded={false} aria-label="Expand conversation" onClick={() => fold(false)}>
-          <ChevronIcon />
-          <span className={`comment-author comment-author-${first.author}`}>{authorName(first)}</span>
-          <span className="thread-unfold-text">{preview(first.body)}</span>
-          {gone && <span className="outdated-label">Outdated</span>}
-          {thread.comments.some((c) => c.draft) && <span className="pending-label">Pending</span>}
-          <span className="thread-unfold-count">{plural(thread.comments.length, "comment")}</span>
-          {unreadCount > 0 && <span className="thread-unfold-new">{unreadCount} new</span>}
-        </button>
-      </div>
-    );
-  }
+  if (!first) return null;
+  const where = gone ? null : whereText(thread.anchor, withVersion);
+  const foldLabel = folded ? "Expand conversation" : "Collapse conversation";
 
   return (
-    <div ref={ref} className="thread" data-thread={thread.id}>
-      {gone && <OutdatedLines snippet={thread.snippet} />}
-      {thread.comments.map((c, i) => (
-        <CommentView key={c.id} thread={thread} comment={c} where={i === 0 ? where : null} onFold={i === 0 ? fold : null} />
-      ))}
-      <div className="thread-foot">
-        {replying ? (
-          <CommentForm
-            placeholder="Reply…"
-            lines={suggestionLines(thread)}
-            onSubmit={async (body, single) => {
-              await reply(thread.id, body, single);
-              setReplying(false);
-            }}
-            onCancel={() => setReplying(false)}
-          />
+    <div ref={ref} className={`thread${folded ? " is-folded" : ""}${moving ? " is-moving" : ""}`} data-thread={thread.id}>
+      <div className="thread-head" onClick={(e) => (folded || (e.target as Element).closest(".thread-fold")) && fold(!folded)}>
+        <button className="thread-fold" aria-expanded={!folded} aria-label={foldLabel} title={foldLabel}>
+          <ChevronIcon />
+        </button>
+        <span className={`comment-author comment-author-${first.author}`}>{authorName(first)}</span>
+        {gone && <span className="outdated-label">Outdated</span>}
+        {(folded ? thread.comments.some((c) => c.draft) : first.draft) && <span className="pending-label">Pending</span>}
+        {folded ? (
+          <>
+            <span className="thread-preview">{preview(first.body)}</span>
+            <span className="thread-count">{plural(thread.comments.length, "comment")}</span>
+            {unreadCount > 0 && <span className="thread-unread">{unreadCount} new</span>}
+          </>
         ) : (
-          <button className="thread-reply" onClick={() => setReplying(true)}>
-            Reply…
-          </button>
+          <>
+            {where && <span className="comment-where">{where}</span>}
+            {first.editedAt && <span className="comment-edited">edited</span>}
+            {first.author === "user" && editing !== first.id && <CommentTools thread={thread} comment={first} onEdit={() => setEditing(first.id)} />}
+          </>
         )}
+      </div>
+      <div className="thread-body" inert={folded} onTransitionEnd={(e) => e.target === e.currentTarget && setMoving(false)}>
+        <div className="thread-body-inner">
+          {gone && <OutdatedLines snippet={thread.snippet} />}
+          {thread.comments.map((c, i) => (
+            <CommentView key={c.id} thread={thread} comment={c} first={i === 0} editing={editing === c.id} setEditing={setEditing} />
+          ))}
+          <div className="thread-foot">
+            {replying ? (
+              <CommentForm
+                placeholder="Reply…"
+                lines={suggestionLines(thread)}
+                onSubmit={async (body, single) => {
+                  await reply(thread.id, body, single);
+                  setReplying(false);
+                }}
+                onCancel={() => setReplying(false)}
+              />
+            ) : (
+              <button className="thread-reply" onClick={() => setReplying(true)}>
+                Reply…
+              </button>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -451,10 +472,7 @@ const MARK_CLASS: Record<string, string> = { "+": " add", "-": " del" };
 function OutdatedLines({ snippet }: { snippet: string }) {
   return (
     <div className="thread-outdated">
-      <div className="thread-outdated-head">
-        <span className="outdated-label">Outdated</span>
-        These lines changed after the comment was written.
-      </div>
+      <div className="thread-outdated-head">These lines changed after the comment was written.</div>
       <div className="suggestion-lines">
         {snippet.split("\n").map((l, k) => (
           <div key={k} className={`suggestion-line${MARK_CLASS[l[0] ?? ""] ?? ""}`} data-mark={l[0]}>
@@ -469,39 +487,25 @@ function OutdatedLines({ snippet }: { snippet: string }) {
 interface CommentViewProps {
   thread: Thread;
   comment: ThreadComment;
-  where: string | null;
-  onFold: ((folded: boolean) => void) | null;
+  first: boolean;
+  editing: boolean;
+  setEditing: (commentId: string | null) => void;
 }
 
-const CommentView = memo(function CommentView({ thread, comment: c, where, onFold }: CommentViewProps) {
-  const { edit, remove } = useCommentActions();
-  const [mode, setMode] = useState<"view" | "edit" | "delete">("view");
-  const takesThread = thread.comments[0]?.id === c.id && thread.comments.length > 1;
+const CommentView = memo(function CommentView({ thread, comment: c, first, editing, setEditing }: CommentViewProps) {
+  const { edit } = useCommentActions();
 
   return (
-    <div className={`comment comment-${c.author}`}>
-      <div className="comment-head">
-        {onFold && (
-          <button className="thread-fold" aria-expanded={true} aria-label="Collapse conversation" title="Collapse conversation" onClick={() => onFold(true)}>
-            <ChevronIcon />
-          </button>
-        )}
-        <span className="comment-author">{authorName(c)}</span>
-        {where && <span className="comment-where">{where}</span>}
-        {c.draft && <span className="pending-label">Pending</span>}
-        {c.editedAt && <span className="comment-edited">edited</span>}
-        {c.author === "user" && mode === "view" && (
-          <span className="comment-actions">
-            <button className="icon-button small" onClick={() => setMode("edit")} aria-label="Edit comment" title="Edit">
-              <PencilIcon />
-            </button>
-            <button className="icon-button small" onClick={() => setMode("delete")} aria-label="Delete comment" title="Delete">
-              <TrashIcon />
-            </button>
-          </span>
-        )}
-      </div>
-      {mode === "edit" ? (
+    <div className={`comment comment-${c.author}${first ? " is-first" : ""}`}>
+      {!first && (
+        <div className="comment-head">
+          <span className="comment-author">{authorName(c)}</span>
+          {c.draft && <span className="pending-label">Pending</span>}
+          {c.editedAt && <span className="comment-edited">edited</span>}
+          {c.author === "user" && !editing && <CommentTools thread={thread} comment={c} onEdit={() => setEditing(c.id)} />}
+        </div>
+      )}
+      {editing ? (
         <CommentForm
           placeholder="Edit comment"
           initial={c.body}
@@ -509,9 +513,9 @@ const CommentView = memo(function CommentView({ thread, comment: c, where, onFol
           editing
           onSubmit={async (body) => {
             await edit(thread.id, c.id, body);
-            setMode("view");
+            setEditing(null);
           }}
-          onCancel={() => setMode("view")}
+          onCancel={() => setEditing(null)}
         />
       ) : (
         <>
@@ -519,32 +523,27 @@ const CommentView = memo(function CommentView({ thread, comment: c, where, onFol
           {c.status === "pending" && <p className="comment-activity">{c.activity ? `${c.activity}…` : "Writing…"}</p>}
         </>
       )}
-      {mode === "delete" && (
-        <ConfirmDelete
-          message={takesThread ? "Delete this conversation and its replies?" : "Delete this comment?"}
-          onCancel={() => setMode("view")}
-          onConfirm={() => remove(thread.id, c.id)}
-        />
-      )}
     </div>
   );
 });
 
-function ConfirmDelete({ message, onCancel, onConfirm }: { message: string; onCancel: () => void; onConfirm: () => Promise<void> }) {
-  const { busy, error, run } = useAction(onConfirm);
-  const cancel = useRef<HTMLButtonElement>(null);
-  useLayoutEffect(() => cancel.current?.focus({ preventScroll: true }), []);
+function CommentTools({ thread, comment: c, onEdit }: { thread: Thread; comment: ThreadComment; onEdit: () => void }) {
+  const { remove } = useCommentActions();
+  const { busy, error, run } = useAction(() => remove(thread.id, c.id));
+  const takesThread = thread.comments[0]?.id === c.id && thread.comments.length > 1;
+  const deleteLabel = takesThread ? "Delete this conversation and its replies" : "Delete comment";
 
   return (
-    <div className="comment-confirm" role="alertdialog" aria-label={message} onKeyDown={(e) => e.key === "Escape" && onCancel()}>
-      <span className="comment-confirm-text">{message}</span>
-      <button ref={cancel} className="button" onClick={onCancel}>
-        Cancel
-      </button>
-      <button className="button danger" onClick={() => void run()} disabled={busy}>
-        Delete
-      </button>
-      {error && <p className="comment-error">{error}</p>}
-    </div>
+    <>
+      {error && <span className="comment-error">{error}</span>}
+      <span className="comment-actions">
+        <button className="icon-button small" onClick={onEdit} aria-label="Edit comment" title="Edit">
+          <PencilIcon />
+        </button>
+        <button className="icon-button small" onClick={() => void run()} disabled={busy} aria-label={deleteLabel} title={deleteLabel}>
+          <TrashIcon />
+        </button>
+      </span>
+    </>
   );
 }

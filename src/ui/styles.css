@@ -187,6 +187,8 @@ button {
   top: var(--topbar-h);
   height: calc(100vh - var(--topbar-h));
   overflow: auto;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
   padding: 16px 8px 16px 16px;
   border-right: 1px solid var(--border-muted);
 }
@@ -259,6 +261,10 @@ button {
   background: var(--bg);
   color: var(--fg);
   font: inherit;
+}
+
+.filter::-webkit-search-cancel-button {
+  display: none;
 }
 
 .filter-row {
@@ -1435,6 +1441,11 @@ button {
   border-bottom: 1px solid var(--border-muted);
 }
 
+.file-body > .unplaced {
+  border-top: 1px solid var(--border-muted);
+  border-bottom: 0;
+}
+
 .topic-threads {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -1463,6 +1474,10 @@ button {
   border-top: 1px solid var(--border-muted);
 }
 
+.comment.is-first {
+  padding-top: 0;
+}
+
 .comment-head {
   display: flex;
   align-items: center;
@@ -1480,13 +1495,22 @@ button {
   color: var(--accent);
 }
 
-.thread-fold,
-.thread-unfold {
-  border: 0;
-  background: none;
-  color: var(--fg-muted);
-  font: inherit;
+.thread-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 0 12px;
+  border-radius: 5px;
+  font-size: 12px;
+}
+
+.thread.is-folded > .thread-head {
   cursor: pointer;
+}
+
+.thread.is-folded > .thread-head:hover {
+  background: var(--bg-subtle);
 }
 
 .thread-fold {
@@ -1497,56 +1521,43 @@ button {
   height: 20px;
   margin: 0 -4px 0 -6px;
   padding: 0;
+  border: 0;
   border-radius: 4px;
+  background: none;
+  color: var(--fg-muted);
+  cursor: pointer;
 }
 
-.thread-fold:hover,
-.thread-unfold:hover {
+.thread-fold:hover {
   background: var(--bg-subtle);
   color: var(--fg);
 }
 
-.thread-fold svg,
-.thread-unfold svg {
-  flex: none;
+.thread-fold svg {
   fill: currentColor;
+  transition: transform 150ms var(--ease-out);
 }
 
-.thread-unfold {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  min-width: 0;
-  padding: 6px 12px 6px 6px;
-  border-radius: 6px;
-  font-size: 12px;
-  text-align: left;
-}
-
-.thread-unfold svg {
+.thread.is-folded .thread-fold svg {
   transform: rotate(-90deg);
 }
 
-.thread-unfold .comment-author {
-  flex: none;
-}
-
-.thread-unfold-text {
+.thread-preview {
   flex: 1;
   overflow: hidden;
   min-width: 0;
   color: var(--fg-muted);
   text-overflow: ellipsis;
   white-space: nowrap;
+  animation: view-in 150ms var(--ease-out);
 }
 
-.thread-unfold-count {
+.thread-count {
   flex: none;
   color: var(--fg-muted);
 }
 
-.thread-unfold-new {
+.thread-unread {
   flex: none;
   padding: 0 6px;
   border-radius: 10px;
@@ -1555,6 +1566,40 @@ button {
   font-size: 11px;
   font-weight: 600;
   line-height: 18px;
+}
+
+.thread-body {
+  display: grid;
+  grid-template-rows: 1fr;
+}
+
+.thread.is-folded > .thread-body {
+  grid-template-rows: 0fr;
+}
+
+.thread-body-inner {
+  min-height: 0;
+}
+
+.thread.is-folded .thread-body-inner,
+.thread.is-moving .thread-body-inner {
+  overflow: hidden;
+}
+
+.thread.is-folded .thread-body-inner {
+  opacity: 0;
+}
+
+.thread.is-folded:not(.is-moving) .thread-body-inner {
+  visibility: hidden;
+}
+
+.thread.is-moving > .thread-body {
+  transition: grid-template-rows 200ms var(--ease-out);
+}
+
+.thread.is-moving .thread-body-inner {
+  transition: opacity 200ms var(--ease-out);
 }
 
 .comment-where,
@@ -1571,8 +1616,16 @@ button {
 }
 
 .comment:hover .comment-actions,
-.comment:focus-within .comment-actions {
+.comment:focus-within .comment-actions,
+.thread-head:hover .comment-actions,
+.thread-head:focus-within .comment-actions,
+.thread:has(.comment.is-first:hover) .thread-head .comment-actions {
   opacity: 1;
+}
+
+.thread-head .comment-error,
+.comment-head .comment-error {
+  margin: 0;
 }
 
 @media (hover: none) {
@@ -1613,15 +1666,12 @@ button {
 }
 
 .thread-outdated {
-  overflow: hidden;
+  margin-bottom: 8px;
+  border-top: 1px solid var(--border-muted);
   border-bottom: 1px solid var(--border-muted);
-  border-radius: 6px 6px 0 0;
 }
 
 .thread-outdated-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
   padding: 6px 12px;
   background: var(--bg-subtle);
   color: var(--fg-muted);
@@ -1902,8 +1952,9 @@ button {
 }
 
 .comment-tab[aria-selected="true"] {
+  border-color: var(--border-muted);
+  background: var(--bg-subtle);
   color: var(--fg);
-  font-weight: 600;
 }
 
 .comment-toolbar {
@@ -1930,11 +1981,6 @@ button {
   padding: 8px;
   overflow-wrap: anywhere;
   outline: none;
-}
-
-.comment-preview-empty {
-  margin: 0;
-  color: var(--fg-muted);
 }
 
 .comment-form-actions {
@@ -2039,8 +2085,14 @@ button {
 @media (prefers-reduced-motion: reduce) {
   .chevron svg,
   .tree-toggle svg,
+  .thread-fold svg,
+  .thread.is-moving > .thread-body,
+  .thread.is-moving .thread-body-inner,
   .segmented-indicator[data-ready] {
     transition: none;
+  }
+  .thread-preview {
+    animation: none;
   }
   .loading-bar.is-active::before {
     width: 100%;
@@ -2325,6 +2377,30 @@ button {
 
 .definition-code {
   font-family: var(--mono);
+}
+
+.definition-note {
+  margin: 0;
+  padding: 8px 12px 4px;
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+
+.definition-more {
+  display: block;
+  width: 100%;
+  padding: 8px 12px;
+  border: 0;
+  border-top: 1px solid var(--border-muted);
+  background: none;
+  color: var(--accent);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.definition-more:hover {
+  background: var(--bg-subtle);
 }
 
 .picker-empty {

@@ -3203,28 +3203,28 @@ var require_utils = __commonJS({
         if (left.length === 1 && left[0] === "") left.length = 0;
         if (right.length === 1 && right[0] === "") right.length = 0;
       }
-      const parts = left.concat(right);
+      const parts2 = left.concat(right);
       let hextetCount = 0;
-      for (let i = 0; i < parts.length; i++) {
-        const part = parts[i];
+      for (let i = 0; i < parts2.length; i++) {
+        const part = parts2[i];
         if (part === "") return void 0;
         if (part.indexOf(".") !== -1) {
-          if (i !== parts.length - 1 || compression !== -1 && right.length === 0 || !isIPv4(part)) return void 0;
+          if (i !== parts2.length - 1 || compression !== -1 && right.length === 0 || !isIPv4(part)) return void 0;
           hextetCount += 2;
           continue;
         }
         if (!isHextet(part)) return void 0;
-        parts[i] = parseInt(part, 16).toString(16);
+        parts2[i] = parseInt(part, 16).toString(16);
         hextetCount++;
       }
       if (compression === -1) {
         if (hextetCount !== 8) return void 0;
-        return compressIPv6ZeroRun(parts);
+        return compressIPv6ZeroRun(parts2);
       }
       if (hextetCount >= 8) return void 0;
-      const expanded = parts.slice(0, left.length);
+      const expanded = parts2.slice(0, left.length);
       for (let i = hextetCount; i < 8; i++) expanded.push("0");
-      for (let i = left.length; i < parts.length; i++) expanded.push(parts[i]);
+      for (let i = left.length; i < parts2.length; i++) expanded.push(parts2[i]);
       return compressIPv6ZeroRun(expanded);
     }
     function normalizeIPv6(host) {
@@ -13872,10 +13872,10 @@ var $ZodCIDRv4 = /* @__PURE__ */ $constructor("$ZodCIDRv4", (inst, def) => {
   $ZodStringFormat.init(inst, def);
 });
 function isValidCIDRv6(value) {
-  const parts = value.split("/");
-  if (parts.length !== 2)
+  const parts2 = value.split("/");
+  if (parts2.length !== 2)
     return false;
-  const [address, prefix] = parts;
+  const [address, prefix] = parts2;
   if (!prefix)
     return false;
   const prefixNum = Number(prefix);
@@ -26332,10 +26332,10 @@ function _readonly(Class2, innerType) {
   });
 }
 // @__NO_SIDE_EFFECTS__
-function _templateLiteral(Class2, parts, params) {
+function _templateLiteral(Class2, parts2, params) {
   return new Class2({
     type: "template_literal",
-    parts,
+    parts: parts2,
     ...normalizeParams(params)
   });
 }
@@ -26748,15 +26748,15 @@ function foldObjects(members2) {
     for (const key in object3.properties) {
       if (Object.prototype.hasOwnProperty.call(properties, key))
         continue;
-      const parts = [];
+      const parts2 = [];
       for (const other of objects) {
         const part = other.properties?.[key] ?? undeclaredConstraint(other);
         if (part === null || part === void 0)
           continue;
-        if (!parts.some((seen) => JSON.stringify(seen) === JSON.stringify(part)))
-          parts.push(part);
+        if (!parts2.some((seen) => JSON.stringify(seen) === JSON.stringify(part)))
+          parts2.push(part);
       }
-      const merged = parts.length === 1 ? parts[0] : foldObjects(parts) ?? { allOf: parts };
+      const merged = parts2.length === 1 ? parts2[0] : foldObjects(parts2) ?? { allOf: parts2 };
       assignProp(properties, key, merged);
     }
     for (const key of object3.required ?? [])
@@ -30132,10 +30132,10 @@ var ZodTemplateLiteral = /* @__PURE__ */ $constructor("ZodTemplateLiteral", (ins
   ZodType2.init(inst, def);
   inst._zod.processJSONSchema = (ctx, json2, params) => templateLiteralProcessor(inst, ctx, json2, params);
 });
-function templateLiteral(parts, params) {
+function templateLiteral(parts2, params) {
   return new ZodTemplateLiteral({
     type: "template_literal",
-    parts,
+    parts: parts2,
     ...util_exports.normalizeParams(params)
   });
 }
@@ -30475,24 +30475,24 @@ function canonicalKey(value, seen) {
   seen.add(value);
   try {
     if (Array.isArray(value)) {
-      const parts2 = [];
+      const parts3 = [];
       for (const item of value) {
         const key = canonicalKey(item, seen);
         if (key === null)
           return null;
-        parts2.push(key);
+        parts3.push(key);
       }
-      return `a${parts2.length}:[${parts2.join(",")}]`;
+      return `a${parts3.length}:[${parts3.join(",")}]`;
     }
     const keys = Object.keys(value).sort();
-    const parts = [];
+    const parts2 = [];
     for (const k of keys) {
       const key = canonicalKey(value[k], seen);
       if (key === null)
         return null;
-      parts.push(`${k.length}:${k}=${key}`);
+      parts2.push(`${k.length}:${k}=${key}`);
     }
-    return `o${parts.length}:{${parts.join(",")}}`;
+    return `o${parts2.length}:{${parts2.join(",")}}`;
   } finally {
     seen.delete(value);
   }
@@ -36933,8 +36933,8 @@ async function computeDiff(probe) {
     const { baseCommit, headCommit, oldCommit } = repo;
     return { repoRoot: root, ...c, baseCommit, headCommit, oldCommit, repos: [repo], commits, commitCount, files };
   }
-  const parts = await mapLimit(repos, REPO_LIMIT, (r) => diffRepo(r).catch((err) => failedPart(r.dir, r.range, err)));
-  const states = parts.map((p) => p.repo);
+  const parts2 = await mapLimit(repos, REPO_LIMIT, (r) => diffRepo(r).catch((err) => failedPart(r.dir, r.range, err)));
+  const states = parts2.map((p) => p.repo);
   if (states.every((r) => r.error !== null)) {
     throw new Error(repoFailures(states).map((f) => `${f.error} (${f.dirs.join(", ")})`).join("; "));
   }
@@ -36945,9 +36945,9 @@ async function computeDiff(probe) {
     headCommit: null,
     oldCommit: null,
     repos: states,
-    commits: parts.flatMap((p) => p.commits.map((commit) => ({ ...commit, repo: p.repo.dir }))).sort(byDate).slice(-MAX_COMMITS),
-    commitCount: sum(parts, (p) => p.commitCount),
-    files: parts.flatMap((p) => p.files).sort(byPath)
+    commits: parts2.flatMap((p) => p.commits.map((commit) => ({ ...commit, repo: p.repo.dir }))).sort(byDate).slice(-MAX_COMMITS),
+    commitCount: sum(parts2, (p) => p.commitCount),
+    files: parts2.flatMap((p) => p.files).sort(byPath)
   };
 }
 function failedPart(dir, range, err) {
@@ -37121,12 +37121,12 @@ async function repoRefs(root) {
   return { branches, tags, commits, repoCount: 1, partial: [] };
 }
 function parseRaw(buf) {
-  const parts = buf.toString("utf8").split("\0");
+  const parts2 = buf.toString("utf8").split("\0");
   const out = [];
-  for (let i = 0; i < parts.length - 1; ) {
-    const [, , oldOid = "", newOid = "", code = ""] = parts[i++].slice(1).split(" ");
-    const oldPath = code.startsWith("R") || code.startsWith("C") ? parts[i++] : null;
-    out.push({ code: code[0], path: parts[i++], oldPath, oldOid, newOid });
+  for (let i = 0; i < parts2.length - 1; ) {
+    const [, , oldOid = "", newOid = "", code = ""] = parts2[i++].slice(1).split(" ");
+    const oldPath = code.startsWith("R") || code.startsWith("C") ? parts2[i++] : null;
+    out.push({ code: code[0], path: parts2[i++], oldPath, oldOid, newOid });
   }
   return out;
 }
@@ -37174,10 +37174,10 @@ async function generatedPaths(root, paths, source) {
   if (paths.length === 0) return /* @__PURE__ */ new Set();
   const input2 = `${paths.join("\0")}\0`;
   const read = (from) => git(root, ["check-attr", "-z", "--stdin", ...from ? ["--source", from] : [], "linguist-generated"], [0], input2);
-  const parts = (await read(source).catch((err) => source ? read(null) : Promise.reject(err))).toString("utf8").split("\0");
+  const parts2 = (await read(source).catch((err) => source ? read(null) : Promise.reject(err))).toString("utf8").split("\0");
   const out = /* @__PURE__ */ new Set();
-  for (let i = 0; i + 2 < parts.length; i += 3) {
-    if (parts[i + 2] === "set" || parts[i + 2] === "true") out.add(parts[i]);
+  for (let i = 0; i + 2 < parts2.length; i += 3) {
+    if (parts2[i + 2] === "set" || parts2[i + 2] === "true") out.add(parts2[i]);
   }
   return out;
 }
@@ -37380,6 +37380,7 @@ import { spawn as spawn2 } from "node:child_process";
 import path2 from "node:path";
 import { createInterface } from "node:readline";
 var TIMEOUT_MS = 5 * 60 * 1e3;
+var MAX_ACTIVITY_CHARS = 80;
 var running = /* @__PURE__ */ new Set();
 function stopAll() {
   for (const child of running) child.kill();
@@ -37396,7 +37397,11 @@ function ask(o) {
     "--verbose",
     "--include-partial-messages",
     "--tools",
-    "Read,Grep,Glob",
+    "Read,Grep,Glob,Bash,WebFetch,WebSearch",
+    "--permission-mode",
+    "dontAsk",
+    "--allowedTools",
+    "WebFetch,WebSearch",
     "--strict-mcp-config",
     "--mcp-config",
     '{"mcpServers":{}}'
@@ -37462,6 +37467,9 @@ function describe3(cwd, tool, input2) {
   if (tool === "Read") return `Reading ${path2.relative(cwd, str("file_path")) || str("file_path")}`;
   if (tool === "Grep") return `Searching for ${str("pattern")}`;
   if (tool === "Glob") return `Looking for ${str("pattern")}`;
+  if (tool === "Bash") return `Running ${str("command").slice(0, MAX_ACTIVITY_CHARS)}`;
+  if (tool === "WebFetch") return `Reading ${str("url").slice(0, MAX_ACTIVITY_CHARS)}`;
+  if (tool === "WebSearch") return `Searching the web for ${str("query").slice(0, MAX_ACTIVITY_CHARS)}`;
   return `Using ${tool}`;
 }
 
@@ -37476,6 +37484,29 @@ import { gzip } from "node:zlib";
 
 // src/engine/browse.ts
 import path3 from "node:path";
+
+// src/shared/search.ts
+var WORD = "A-Za-z0-9_";
+var IS_WORD = new RegExp(`[${WORD}]`);
+function parts(query, special) {
+  const q = query.trim();
+  return {
+    words: q.split(/\s+/).map((w) => w.replace(special, "\\$&")),
+    wordStart: IS_WORD.test(q[0] ?? ""),
+    wordEnd: IS_WORD.test(q[q.length - 1] ?? "")
+  };
+}
+function wordRegExp(query) {
+  if (!query.trim()) return null;
+  const { words, wordStart, wordEnd } = parts(query, /[.*+?^${}()|[\]\\]/g);
+  return new RegExp(`${wordStart ? `(?<![${WORD}])` : ""}${words.join("\\s+")}${wordEnd ? `(?![${WORD}])` : ""}`, "i");
+}
+function wordPattern(query) {
+  const { words, wordStart, wordEnd } = parts(query, /[.*+?^${()|[\\]/g);
+  return `${wordStart ? `(^|[^${WORD}])` : ""}${words.join("[[:space:]]+")}${wordEnd ? `([^${WORD}]|$)` : ""}`;
+}
+
+// src/engine/browse.ts
 var MAX_HITS = 500;
 var MAX_DEFINITIONS = 50;
 var MAX_HIT_CHARS = 400;
@@ -37557,8 +37588,8 @@ async function readBlobAt(root, rev, rest) {
   return classify(await git(root, ["cat-file", "blob", oid]));
 }
 function grepRepo(diff, query, signal) {
-  const q = query.toLowerCase();
-  return grepLines(diff, ["-F", "-i", "-e", query], ["."], MAX_HITS, signal, (text) => text.toLowerCase().indexOf(q));
+  const found = wordRegExp(query);
+  return grepLines(diff, ["-E", "-i", "-e", wordPattern(query)], ["."], MAX_HITS, signal, (text) => found?.exec(text)?.index ?? -1);
 }
 var isIdentifier = (name) => IDENTIFIER.test(name);
 function findDefinitions(diff, name, from, signal) {
@@ -37573,7 +37604,7 @@ function findDefinitions(diff, name, from, signal) {
 }
 async function grepLines(diff, match, pathspecs, max, signal, atOf) {
   const repos = diff.repos.filter((r) => r.error === null);
-  const parts = await mapLimit(repos, REPO_LIMIT, async (repo) => {
+  const parts2 = await mapLimit(repos, REPO_LIMIT, async (repo) => {
     const prefix = repo.dir ? `${repo.dir}/` : "";
     const rev = repo.headCommit;
     const strip = rev ? `${rev}:` : "";
@@ -37597,7 +37628,7 @@ async function grepLines(diff, match, pathspecs, max, signal, atOf) {
     );
     return hits;
   });
-  const all = parts.flat().sort((a, b) => compareText(a.path, b.path) || a.no - b.no);
+  const all = parts2.flat().sort((a, b) => compareText(a.path, b.path) || a.no - b.no);
   return { hits: all.slice(0, max), capped: all.length > max };
 }
 function hitOf(filePath, no, text, at) {
@@ -37968,7 +37999,7 @@ import { randomBytes } from "node:crypto";
 var EMIT_INTERVAL_MS = 100;
 var REVIEWING = "The user is reviewing the code changes in a diff viewer";
 var STOPPED = "The viewer stopped before Claude answered. Ask again for an answer.";
-var ANSWER = "Answer the last comment directly and concisely, in the language it is written in, using Markdown. You can read files to check details, but do not change anything.";
+var ANSWER = "Answer the last comment in the language it is written in. Keep it short: put the answer in the first sentence and stop after two or three sentences, unless they ask for more. Answer only what was asked: no extra observations, caveats or suggestions, no preamble, no restating the question, no closing summary and no headings. Use Markdown only where it helps, such as a short code block. To check details you can read files, run read-only git commands such as git diff, git log and git show, and search or fetch the web. Do not change anything.";
 var newId = () => randomBytes(6).toString("base64url");
 var now = () => (/* @__PURE__ */ new Date()).toISOString();
 var RepoThreads = class {
@@ -38013,10 +38044,10 @@ var RepoThreads = class {
     this.read = this.submissions.length;
     this.onChange();
   }
-  create(anchor2, snippet, context, body, single) {
+  create(anchor2, snippet, context, body, single, shown) {
     const thread = { id: newId(), rev: 0, anchor: anchor2, snippet, context, comments: [] };
     this.threads.push(thread);
-    this.addComment(thread, body, single);
+    this.addComment(thread, body, single, shown);
     return thread;
   }
   addNote(anchor2, snippet, context, body, noteOf) {
@@ -38031,9 +38062,9 @@ var RepoThreads = class {
       this.emit(thread);
     }
   }
-  reply(threadId, body, single) {
+  reply(threadId, body, single, shown) {
     const thread = this.find(threadId);
-    if (thread) this.addComment(thread, body, single);
+    if (thread) this.addComment(thread, body, single, shown);
     return thread;
   }
   edit(threadId, commentId, body) {
@@ -38115,19 +38146,19 @@ var RepoThreads = class {
     for (const fn of this.listeners) fn(thread);
     this.onChange();
   }
-  addComment(thread, body, single) {
+  addComment(thread, body, single, shown) {
     const c = comment("user", body, "done");
     thread.comments.push(c);
     const asking = MENTION.test(body);
     const submission = !asking && single ? this.newSubmission("") : null;
-    if (asking) this.answer(thread);
+    if (asking) this.answer(thread, shown);
     c.draft = !asking && !single;
     c.review = submission?.n ?? null;
     this.emit(thread);
     if (submission) this.wake(submission);
   }
-  answer(thread) {
-    const prompt = buildPrompt2(thread);
+  answer(thread, shown) {
+    const prompt = buildPrompt2(thread, shown);
     const reply = comment("claude", "", "pending");
     reply.activity = "Waiting";
     thread.comments.push(reply);
@@ -38180,10 +38211,11 @@ var RepoThreads = class {
 function comment(author, body, status) {
   return { id: newId(), author, body, status, activity: null, createdAt: now(), draft: false, review: null, editedAt: null };
 }
-function buildPrompt2(thread) {
+function buildPrompt2(thread, shown) {
   const history = thread.comments.filter((c) => c.status === "done").map((c) => `${c.author === "user" ? "User" : "Claude"}: ${c.body}`).join("\n\n");
   const [intro, ...context] = promptContext(thread.anchor, thread.snippet);
-  return [intro, ANSWER, ...context, "", "Thread:", history].join("\n");
+  const diff = thread.anchor.path === null ? [] : [`The diff on the page is ${describeComparison(shown)}.`];
+  return [intro, ...diff, ANSWER, ...context, "", "Thread:", history].join("\n");
 }
 function promptContext(anchor2, snippet) {
   if (anchor2.path === null) {
@@ -38567,12 +38599,12 @@ var ReviewServer = class {
         if (!isComment(body, single) || !isAnchor(anchor2) || !isText(snippet, MAX_SNIPPET) || !isContext(context)) {
           return sendJson(res, 400, { error: "Invalid comment" });
         }
-        return sendJson(res, 201, { thread: threads.create(anchor2, snippet, context, body.trim(), single === true) });
+        return sendJson(res, 201, { thread: threads.create(anchor2, snippet, context, body.trim(), single === true, compare) });
       }
       case "POST threads/thread": {
         const { body, single } = await readJson(req);
         if (!isComment(body, single)) return sendJson(res, 400, { error: "Invalid comment" });
-        return sendThread(res, threads.reply(threadId, body.trim(), single === true), "Unknown thread");
+        return sendThread(res, threads.reply(threadId, body.trim(), single === true, compare), "Unknown thread");
       }
       case "PATCH threads/comment": {
         const { body } = await readJson(req);
@@ -38926,7 +38958,7 @@ async function runMcp() {
       if (args.after !== void 0 && !wanted && repos.filter((r) => r.threads.submissions.length).length > 1) {
         return result("Several repositories have reviews, numbered separately. Set repo to the one the wait command named.", true);
       }
-      const parts = repos.flatMap(({ repo: repo2, threads, view }) => {
+      const parts2 = repos.flatMap(({ repo: repo2, threads, view }) => {
         const text = formatReviewComments(threads.threads, threads.submissions, args.after ?? null, threads.read);
         threads.markRead();
         if (!text) return [];
@@ -38941,19 +38973,19 @@ When you have addressed it, reply on each thread with reply_to_review. Then wait
       if (!all.length) {
         return result("No viewer is open. Open it with open_diff_viewer, which brings back the comments of the viewer this session had open before.");
       }
-      return result(parts.length ? parts.join("\n\n") : "No review comments yet.");
+      return result(parts2.length ? parts2.join("\n\n") : "No review comments yet.");
     }
   );
   mcp.registerTool(
     "reply_to_review",
     {
       title: "Reply to review",
-      description: "Reply on comment threads in the diff viewer after addressing the user's review, saying what you changed or answering the comment. The replies show in the page.",
+      description: "Reply on comment threads in the diff viewer after addressing the user's review, saying what you changed or answering the comment in a sentence or two. The replies show in the page.",
       inputSchema: {
         replies: external_exports.array(
           external_exports.object({
             thread: external_exports.string().describe("A thread id from get_review_comments."),
-            body: external_exports.string().min(1).describe("Markdown: what you changed, or your answer.")
+            body: external_exports.string().min(1).describe("Markdown, a sentence or two: what you changed, or your answer.")
           })
         ).min(1)
       },

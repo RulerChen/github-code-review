@@ -61,7 +61,7 @@ export function CodePanel({ peek, file, revision, version, load, canGoBack, onBa
   const text = repoFile?.text ?? null;
   const lines = useMemo(() => (text === null ? [] : splitLines(text)), [text]);
 
-  const lang = languageFor(path);
+  const lang = languageFor(path, text);
   const [tokens, setTokens] = useState<{ text: string; lines: TokenLines | null } | null>(null);
   useEffect(() => {
     if (text === null || !lang) return;

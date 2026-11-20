@@ -107,12 +107,42 @@ const BY_NAME: Record<string, Lang> = {
   "tsconfig.json": "jsonc",
 };
 
-export function languageFor(filePath: string): Lang | null {
+const BY_INTERPRETER: Record<string, Lang> = {
+  sh: "shellscript",
+  ash: "shellscript",
+  bash: "shellscript",
+  dash: "shellscript",
+  ksh: "shellscript",
+  zsh: "shellscript",
+  lua: "lua",
+  make: "make",
+  node: "javascript",
+  nodejs: "javascript",
+  php: "php",
+  pwsh: "powershell",
+  python: "python",
+  ruby: "ruby",
+};
+
+const PROSE = new Set(["AUTHORS", "CHANGELOG", "COPYING", "LICENCE", "LICENSE", "NOTICE", "README"]);
+
+function interpreter(content: string): string | null {
+  if (!content.startsWith("#!")) return null;
+  const end = content.indexOf("\n");
+  const words = content.slice(2, end < 0 ? undefined : end).trim().split(/\s+/);
+  const program = basename(words[0] ?? "") === "env" ? words.slice(1).find((w) => !w.startsWith("-") && !w.includes("=")) : words[0];
+  return program ? basename(program).replace(/[\d.]+$/, "") : null;
+}
+
+export function languageFor(filePath: string, content: string | null = null): Lang | null {
   const name = basename(filePath);
   if (BY_NAME[name]) return BY_NAME[name];
   if (name.startsWith("Dockerfile.")) return "dockerfile";
   const dot = name.lastIndexOf(".");
-  return dot > 0 ? (BY_EXTENSION[name.slice(dot + 1).toLowerCase()] ?? null) : null;
+  if (dot > 0) return BY_EXTENSION[name.slice(dot + 1).toLowerCase()] ?? null;
+  const program = content === null ? null : interpreter(content);
+  if (program) return BY_INTERPRETER[program] ?? null;
+  return dot < 0 && !PROSE.has(name.toUpperCase()) ? "shellscript" : null;
 }
 
 const MAX_HIGHLIGHT_CHARS = 400_000;

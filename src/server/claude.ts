@@ -22,6 +22,7 @@ interface StreamLine {
 }
 
 const TIMEOUT_MS = 5 * 60 * 1000;
+const MAX_ACTIVITY_CHARS = 80;
 const running = new Set<ChildProcess>();
 
 export function stopAll(): void {
@@ -36,7 +37,9 @@ export function ask(o: AskOptions): Promise<{ sessionId: string | null; text: st
     "--output-format", "stream-json",
     "--verbose",
     "--include-partial-messages",
-    "--tools", "Read,Grep,Glob",
+    "--tools", "Read,Grep,Glob,Bash,WebFetch,WebSearch",
+    "--permission-mode", "dontAsk",
+    "--allowedTools", "WebFetch,WebSearch",
     "--strict-mcp-config",
     "--mcp-config", '{"mcpServers":{}}',
   ];
@@ -108,5 +111,8 @@ function describe(cwd: string, tool: string, input: Record<string, unknown>): st
   if (tool === "Read") return `Reading ${path.relative(cwd, str("file_path")) || str("file_path")}`;
   if (tool === "Grep") return `Searching for ${str("pattern")}`;
   if (tool === "Glob") return `Looking for ${str("pattern")}`;
+  if (tool === "Bash") return `Running ${str("command").slice(0, MAX_ACTIVITY_CHARS)}`;
+  if (tool === "WebFetch") return `Reading ${str("url").slice(0, MAX_ACTIVITY_CHARS)}`;
+  if (tool === "WebSearch") return `Searching the web for ${str("query").slice(0, MAX_ACTIVITY_CHARS)}`;
   return `Using ${tool}`;
 }

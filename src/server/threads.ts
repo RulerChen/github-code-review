@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { lineRange, MENTION } from "../shared/comments.js";
 import { describeComparison } from "../shared/comparison.js";
-import type { Thread, ThreadAnchor, ThreadComment, ThreadContext } from "../shared/types.js";
+import type { Comparison, Thread, ThreadAnchor, ThreadComment, ThreadContext } from "../shared/types.js";
 import { errorMessage } from "../shared/util.js";
 import { ask } from "./claude.js";
 
@@ -9,7 +9,10 @@ const EMIT_INTERVAL_MS = 100;
 const REVIEWING = "The user is reviewing the code changes in a diff viewer";
 const STOPPED = "The viewer stopped before Claude answered. Ask again for an answer.";
 const ANSWER =
-  "Answer the last comment directly and concisely, in the language it is written in, using Markdown. You can read files to check details, but do not change anything.";
+  "Answer the last comment in the language it is written in. Keep it short: put the answer in the first sentence and stop after two or three sentences, unless they ask for more. " +
+  "Answer only what was asked: no extra observations, caveats or suggestions, no preamble, no restating the question, no closing summary and no headings. " +
+  "Use Markdown only where it helps, such as a short code block. " +
+  "To check details you can read files, run read-only git commands such as git diff, git log and git show, and search or fetch the web. Do not change anything.";
 
 const newId = () => randomBytes(6).toString("base64url");
 const now = () => new Date().toISOString();
@@ -66,10 +69,10 @@ export class RepoThreads {
     this.onChange();
   }
 
-  create(anchor: ThreadAnchor, snippet: string, context: ThreadContext | null, body: string, single: boolean): Thread {
+  create(anchor: ThreadAnchor, snippet: string, context: ThreadContext | null, body: string, single: boolean, shown: Comparison): Thread {
     const thread: Thread = { id: newId(), rev: 0, anchor, snippet, context, comments: [] };
     this.threads.push(thread);
-    this.addComment(thread, body, single);
+    this.addComment(thread, body, single, shown);
     return thread;
   }
 
@@ -87,9 +90,9 @@ export class RepoThreads {
     }
   }
 
-  reply(threadId: string, body: string, single: boolean): Thread | null {
+  reply(threadId: string, body: string, single: boolean, shown: Comparison): Thread | null {
     const thread = this.find(threadId);
-    if (thread) this.addComment(thread, body, single);
+    if (thread) this.addComment(thread, body, single, shown);
     return thread;
   }
 
@@ -182,20 +185,20 @@ export class RepoThreads {
     this.onChange();
   }
 
-  private addComment(thread: Thread, body: string, single: boolean): void {
+  private addComment(thread: Thread, body: string, single: boolean, shown: Comparison): void {
     const c = comment("user", body, "done");
     thread.comments.push(c);
     const asking = MENTION.test(body);
     const submission = !asking && single ? this.newSubmission("") : null;
-    if (asking) this.answer(thread);
+    if (asking) this.answer(thread, shown);
     c.draft = !asking && !single;
     c.review = submission?.n ?? null;
     this.emit(thread);
     if (submission) this.wake(submission);
   }
 
-  private answer(thread: Thread): void {
-    const prompt = buildPrompt(thread);
+  private answer(thread: Thread, shown: Comparison): void {
+    const prompt = buildPrompt(thread, shown);
     const reply = comment("claude", "", "pending");
     reply.activity = "Waiting";
     thread.comments.push(reply);
@@ -254,13 +257,14 @@ function comment(author: ThreadComment["author"], body: string, status: ThreadCo
   return { id: newId(), author, body, status, activity: null, createdAt: now(), draft: false, review: null, editedAt: null };
 }
 
-function buildPrompt(thread: Thread): string {
+function buildPrompt(thread: Thread, shown: Comparison): string {
   const history = thread.comments
     .filter((c) => c.status === "done")
     .map((c) => `${c.author === "user" ? "User" : "Claude"}: ${c.body}`)
     .join("\n\n");
   const [intro, ...context] = promptContext(thread.anchor, thread.snippet);
-  return [intro, ANSWER, ...context, "", "Thread:", history].join("\n");
+  const diff = thread.anchor.path === null ? [] : [`The diff on the page is ${describeComparison(shown)}.`];
+  return [intro, ...diff, ANSWER, ...context, "", "Thread:", history].join("\n");
 }
 
 function promptContext(anchor: ThreadAnchor, snippet: string): [string, ...string[]] {

@@ -26,7 +26,7 @@ import {
   viewUrl,
 } from "./api";
 import { CodePanel, type Peek } from "./CodePanel";
-import { type DefinitionLookup, DefinitionMenu, type FindDefinition, FindDefinitionContext, rankDefinitions } from "./definition";
+import { type DefinitionLookup, DefinitionMenu, type FindDefinition, FindDefinitionContext, isName, rankDefinitions } from "./definition";
 import { type CommentActions, CommentActionsContext, type CommentsApi, CommentsContext } from "./comments";
 import { CommitBar, CommitList, CompareControls, refLabel, RepoComparisons } from "./Compare";
 import { ConversationsButton, ConversationsPanel, type Place, useConversations } from "./Conversations";
@@ -224,34 +224,42 @@ export function App({ viewId }: Props) {
     setLookup(null);
   }, []);
   const findDefinition = useCallback<FindDefinition>(
-    (name, from, x, y) => {
+    (text, from, x, y) => {
       if (!viewId) return;
       const seq = ++lookupSeq.current;
       const current = (update: (l: DefinitionLookup) => DefinitionLookup) =>
         setLookup((l) => (l && seq === lookupSeq.current ? update(l) : l));
-      setLookup({ name, x, y, hits: null, capped: false, error: null });
-      fetchDefinitions(viewId, requested.current, name, from).then(
-        (r) => {
-          if (seq !== lookupSeq.current) return;
-          const hits = rankDefinitions(r.hits, from);
-          if (hits.length === 1 && !r.capped) {
-            closeLookup();
-            openCode(hits[0]!.path, hits[0]!.no, true);
-            return;
-          }
-          if (hits.length === 0) {
-            setScope("repo");
-            setQuery(name);
-            setHit(null);
-            setSidebarOpen(true);
-          }
-          current((l) => ({ ...l, hits, capped: r.capped }));
-        },
-        (e: unknown) => current((l) => ({ ...l, error: errorMessage(e) })),
-      );
+      const fail = (e: unknown) => current((l) => ({ ...l, error: errorMessage(e) }));
+      const findLines = () =>
+        searchRepo(viewId, requested.current, text, new AbortController().signal).then(
+          (r) => current((l) => ({ ...l, hits: rankDefinitions(r.hits, from), lines: true, capped: r.capped })),
+          fail,
+        );
+
+      setLookup({ name: text, x, y, hits: null, lines: false, capped: false, error: null });
+      if (!isName(text)) return void findLines();
+      fetchDefinitions(viewId, requested.current, text, from).then((r) => {
+        if (seq !== lookupSeq.current) return;
+        const hits = rankDefinitions(r.hits, from);
+        if (hits.length === 0) return void findLines();
+        if (hits.length === 1 && !r.capped) {
+          closeLookup();
+          openCode(hits[0]!.path, hits[0]!.no, true);
+          return;
+        }
+        current((l) => ({ ...l, hits, capped: r.capped }));
+      }, fail);
     },
-    [viewId, openCode, closeLookup, setSidebarOpen],
+    [viewId, openCode, closeLookup],
   );
+  const searchLookup = () => {
+    if (!lookup) return;
+    setScope("repo");
+    setQuery(lookup.name);
+    setHit(null);
+    setSidebarOpen(true);
+    closeLookup();
+  };
 
   const diff = data?.diff ?? null;
   const compareWith = (next: Comparison, nextTab?: Tab, nextRange: CommitRange | null = null) => {
@@ -334,10 +342,10 @@ export function App({ viewId }: Props) {
         const full: ThreadAnchor = anchor.path === null ? { ...anchor, compare: current } : { ...anchor, commit: versions(anchor.path)[anchor.side ?? "new"] };
         const lines = full.side === "new" && full.commit === null ? latestLines.current(full.path) : null;
         const context = lines && full.side !== null ? contextOf(lines, full.start, full.end) : null;
-        update(await createThread(viewId, full, snippet, context, body, single));
+        update(await createThread(viewId, current, full, snippet, context, body, single));
       },
       reply: async (threadId, body, single) => {
-        if (viewId) update(await replyToThread(viewId, threadId, body, single));
+        if (viewId) update(await replyToThread(viewId, current, threadId, body, single));
       },
       edit: async (threadId, commentId, body) => {
         if (viewId) update(await editComment(viewId, threadId, commentId, body));
@@ -470,8 +478,8 @@ export function App({ viewId }: Props) {
   const diffFound = useMemo(() => searchDiff(shown.map((e) => e.file), scope === "diff" ? searched : ""), [shown, searched, scope]);
   const repoFiles = diff?.files;
   const found = useMemo(
-    () => (scope === "repo" ? repoFound(repoResult?.hits ?? [], repoResult?.capped ?? false, repoFiles ?? []) : diffFound),
-    [scope, repoResult, repoFiles, diffFound],
+    () => (scope === "repo" ? repoFound(repoResult?.hits ?? [], repoResult?.capped ?? false, repoFiles ?? [], repoQuery) : diffFound),
+    [scope, repoResult, repoFiles, repoQuery, diffFound],
   );
   const openHit = (next: Hit) => {
     setHit(next);
@@ -693,7 +701,7 @@ export function App({ viewId }: Props) {
                       <input
                         className="filter"
                         type="search"
-                        placeholder="Search"
+                        placeholder={scope === "repo" ? "Search the repo" : "Search the diff"}
                         value={query}
                         onChange={(e) => {
                           setQuery(e.target.value);
@@ -714,7 +722,11 @@ export function App({ viewId }: Props) {
                             role="radio"
                             aria-checked={scope === s}
                             className={scope === s ? "is-on" : undefined}
-                            title={s === "repo" ? "Search every file in the compared version" : "Search the lines shown in the diff"}
+                            title={
+                              s === "repo"
+                                ? "Search every file in the compared version. A match opens its file on the right."
+                                : "Search the lines shown in the diff. A match goes to its line in the diff."
+                            }
                             onClick={() => {
                               setScope(s);
                               setHit(null);
@@ -732,7 +744,6 @@ export function App({ viewId }: Props) {
                     ) : searched.trim() ? (
                       <SearchResults
                         found={found}
-                        query={searched}
                         current={hit}
                         onOpen={openHit}
                         empty={scope === "repo" ? "No matches in the repository." : "No matches in the lines shown in the diff."}
@@ -832,6 +843,7 @@ export function App({ viewId }: Props) {
                   closeLookup();
                   openCode(h.path, h.no, true);
                 }}
+                onSearch={searchLookup}
                 onClose={closeLookup}
               />
             )}

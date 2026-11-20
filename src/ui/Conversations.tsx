@@ -57,7 +57,7 @@ export function useConversations({ repoRoot, threads, place, show }: Options): C
   const key = repoRoot ? `diff-review:read:${repoRoot}` : null;
   const foldKey = repoRoot ? `diff-review:folded:${repoRoot}` : null;
   const [seen, setSeen] = useState<Record<string, number>>({});
-  const [folded, setFoldedIds] = useState<Record<string, true>>({});
+  const [folded, setFoldedIds] = useState<Record<string, boolean>>({});
   const [current, setCurrent] = useState<string | null>(null);
   const [open, setOpen] = useStoredState("diff-review:conversations", false);
   const [revealSeq, setRevealSeq] = useState(0);
@@ -73,15 +73,15 @@ export function useConversations({ repoRoot, threads, place, show }: Options): C
 
   const threadIds = useRef(new Set<string>());
   threadIds.current = new Set(threads.map((t) => t.id));
-  const isFolded = useCallback((threadId: string) => folded[threadId] === true, [folded]);
+  const isFolded = useCallback((threadId: string, byDefault: boolean) => folded[threadId] ?? byDefault, [folded]);
   const setFolded = useCallback(
-    (threadId: string, fold: boolean) => {
+    (threadId: string, fold: boolean, byDefault: boolean) => {
       if (!foldKey) return;
       setFoldedIds((prev) => {
-        if ((prev[threadId] === true) === fold) return prev;
-        const next: Record<string, true> = {};
-        for (const id of Object.keys(prev)) if (id !== threadId && threadIds.current.has(id)) next[id] = true;
-        if (fold) next[threadId] = true;
+        if ((prev[threadId] ?? byDefault) === fold) return prev;
+        const next: Record<string, boolean> = {};
+        for (const [id, value] of Object.entries(prev)) if (id !== threadId && threadIds.current.has(id)) next[id] = value;
+        if (fold !== byDefault) next[threadId] = fold;
         writeStorage(foldKey, next);
         return next;
       });

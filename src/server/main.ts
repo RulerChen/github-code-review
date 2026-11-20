@@ -281,13 +281,13 @@ async function runMcp(): Promise<void> {
       title: "Reply to review",
       description:
         "Reply on comment threads in the diff viewer after addressing the user's review, saying what you changed or " +
-        "answering the comment. The replies show in the page.",
+        "answering the comment in a sentence or two. The replies show in the page.",
       inputSchema: {
         replies: z
           .array(
             z.object({
               thread: z.string().describe("A thread id from get_review_comments."),
-              body: z.string().min(1).describe("Markdown: what you changed, or your answer."),
+              body: z.string().min(1).describe("Markdown, a sentence or two: what you changed, or your answer."),
             }),
           )
           .min(1),
