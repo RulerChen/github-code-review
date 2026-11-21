@@ -12,6 +12,8 @@ export interface Language {
   params: (name: string) => string[];
   // The module an import line takes its names from.
   module?: RegExp;
+  // Lines that open a place a reader would name: a function, a method, a class. The name is the group n, and o is what owns it, as the receiver of a Go method.
+  scopes: RegExp[];
 }
 
 export type Scoped =
@@ -50,6 +52,16 @@ const LOWER = "(?=[a-z_])";
 // A type, then the name.
 const typed = (n: string) => `${C_TYPE}(?:\\s*[*&]+\\s*|\\s+)(?:const\\s+)?${n}${E}`;
 
+// A parameter list with at most one pair of parentheses inside it, so a call that takes a function, as in "useEffect(() => {", is not a method.
+const ARGS = "\\((?:[^()]|\\([^()]*\\))*\\)";
+// What follows "=" or ":" when the value is a function.
+const JS_FUNCTION = `(?:async\\s*)?(?:(?:<[^>]*>\\s*)?${ARGS}\\s*(?::[^=]*)?=>|[\\w$]+\\s*=>|function\\b)`;
+const JS_VAR = "(?:const|let|var)\\s+(?<n>[\\w$]+)";
+// A name with what qualifies it, as "SkipList<Key>::Insert", "Env::~Env" and "operator==".
+const C_ARGS = "(?:<[^;(){}]*>)?";
+const C_NAME = `(?<n>(?!${C_KEYWORD}\\b)~?[A-Za-z_]\\w*${C_ARGS}(?:::~?\\w+${C_ARGS})*(?:(?<=\\boperator)\\s*(?:\\(\\)|\\[\\]|[^\\s\\w()]{1,3}))?)`;
+const C_OPENS = "\\((?:[^;]*$|[^;{]*\\)[^;{]*\\{)";
+
 export const LANGUAGES: Language[] = [
   {
     exts: ["py", "pyi"],
@@ -68,6 +80,7 @@ export const LANGUAGES: Language[] = [
     ],
     params: (n) => [`^\\s*\\*{0,2}${n}${E}\\s*(?:[,:)]|=(?!=)|$)`],
     module: /^\s*from\s+([\w.]+)\s+import\b|^\s*import\s+([\w.]+)/,
+    scopes: [/^\s*(?:async\s+)?def\s+(?<n>\w+)/, /^\s*class\s+(?<n>\w+)/, /^(?<n>\w+)\s*(?::[^=]*)?=(?!=)/],
   },
   {
     exts: ["js", "jsx", "mjs", "cjs", "ts", "tsx", "mts", "cts"],
@@ -97,6 +110,15 @@ export const LANGUAGES: Language[] = [
       `^\\s*[{\\[](?:[^=()]*?[,{\\[\\s:])?${n}${E}\\s*(?:=[^,}\\]]*)?[,}\\]]`,
     ],
     module: /\bfrom\s*["']([^"']+)["']|\brequire\s*\(\s*["']([^"']+)["']/,
+    scopes: [
+      /\bfunction\s*\*?\s*(?<n>[\w$]+)\s*[(<]/,
+      /^\s*(?:(?:export|default|declare|abstract)\s+)*(?:class|interface|type|enum|namespace)\s+(?<n>[\w$]+)/,
+      // Any variable at the top level. Inside a function, one that holds a function or what a React hook returns: a reader names the place by the function around it, not by a value.
+      new RegExp(`^(?:export\\s+)?(?:declare\\s+)?${JS_VAR}`),
+      new RegExp(`^\\s+${JS_VAR}\\s*(?::[^=]*)?=\\s*(?:${JS_FUNCTION}|(?:React\\.)?use[A-Z]\\w*\\s*(?:<.*>)?\\()`),
+      new RegExp(`^\\s*${JS_HEAD}\\*?(?<n>(?!${JS_CONTROL}\\b)[\\w$#]+)\\s*(?:<[^>()]*>)?${ARGS}(?:\\s*:.+?)?\\s*\\{\\s*$`),
+      new RegExp(`^\\s*${JS_MODS}(?:static\\s+)?(?<n>[\\w$#]+)\\s*(?:(?::[^=]*)?=|:)\\s*${JS_FUNCTION}`),
+    ],
   },
   {
     exts: ["go"],
@@ -113,6 +135,7 @@ export const LANGUAGES: Language[] = [
     ],
     params: (n) => [`^\\s*${n}${E}(?:\\s*,|\\s+[\\w*\\[\\]<.(])`],
     module: /^\s*(?:import\s+)?[\w.]*\s*"([^"]+)"\s*$/,
+    scopes: [/^func\s*(?:\(\s*(?:\w+\s+)?\*?(?<o>\w+)[^)]*\)\s*)?(?<n>\w+)\s*[(\[]/, /^type\s+(?<n>\w+)/, /^(?:var|const)\s+(?<n>\w+)/],
   },
   {
     exts: ["rs"],
@@ -136,6 +159,13 @@ export const LANGUAGES: Language[] = [
     ],
     params: (n) => [`^\\s*(?:mut\\s+)?${n}${E}\\s*:`],
     module: /^\s*(?:pub(?:\([^)]*\))?\s+)?use\s+([\w:]+)/,
+    scopes: [
+      /\bfn\s+(?<n>\w+)\s*[(<]/,
+      /^\s*(?:pub(?:\([^)]*\))?\s+)?(?:unsafe\s+)?(?:struct|enum|trait|union|mod)\s+(?<n>\w+)/,
+      /^\s*(?:unsafe\s+)?impl\b(?:\s*<.*?>)?\s+(?:.*?\s+for\s+)?(?<n>[\w:]+)/,
+      /^\s*macro_rules!\s*(?<n>\w+)/,
+      /^(?:pub(?:\([^)]*\))?\s+)?(?:const|static)\s+(?:mut\s+)?(?<n>\w+)/,
+    ],
   },
   {
     exts: ["c", "h", "cc", "cpp", "cxx", "c++", "hpp", "hh", "hxx", "h++", "ipp", "inl", "cu", "cuh", "m", "mm", "java", "cs"],
@@ -160,6 +190,15 @@ export const LANGUAGES: Language[] = [
       `\\((?:[^()]*?,)?\\s*(?:${C_TYPE}(?:\\s*[*&]+\\s*|\\s+))?${n}${E}\\s*(?:,[^()]*)?\\)(?:\\s+->|\\s*=>)`,
     ],
     params: (n) => [`(?:^|[(,])\\s*${typed(n)}\\s*(?:\\[[^\\]]*\\])?\\s*(?:[,)=]|$)`],
+    scopes: [
+      // A function at the top level: the first name followed by "(" on a line that is not a statement.
+      new RegExp(`^(?![\\s#/}])(?:[^;=(]*?[^\\w$:~])?${C_NAME}\\s*${C_OPENS}`),
+      // A method in a class body: at least one word of type before the name, so a call or a loop macro is not one.
+      new RegExp(`^\\s+(?!${C_KEYWORD}\\b)(?:[\\w@<][\\w:<>,.?*&\\[\\]]*\\s+)+[*&]*${C_NAME}\\s*${C_OPENS}`),
+      /^\s*(?:(?:typedef|public|private|protected|internal|static|final|abstract|sealed|partial|export)\s+)*(?:struct|class|union|enum(?:\s+(?:class|struct))?|interface|record|namespace)\s+(?:[A-Z][A-Z0-9_]*(?:\([^)]*\))?\s+)?(?<n>\w+(?:::\w+)*)\s*(?:[{:<]|$|(?:final|extends|implements|permits|where)\b)/,
+      // A table at the top level: "static struct option opts[] = {".
+      /^(?![\s#/}])[^;=(]*?[^\w$](?<n>\w+)\s*(?:\[[^\]]*\]\s*)*=\s*\{?\s*$/,
+    ],
   },
 ];
 
@@ -180,6 +219,12 @@ export const GENERIC: Language = {
     `\\bfor(?:each)?\\s+\\(?(?:\\w+\\s*,\\s*)*[$]?${n}${E}(?:\\s*,\\s*\\w+)*\\s+in\\b`,
   ],
   params: (n) => [`^\\s*(?:\\w+\\s+)?[$@%&*]*${n}${E}\\s*(?:[,:)]|=(?!=)|$)`],
+  scopes: [
+    new RegExp(
+      `^\\s*(?:(?:export|pub|public|private|protected|internal|open|override|static|final|abstract|async|local|suspend|inline|data|sealed)\\s+)*(?:${KEYWORDS})\\s+(?:self\\.)?(?<n>[\\w$.:]*[\\w$][?!]?)`,
+    ),
+    /^\s*(?:function\s+)?(?<n>[\w-]+)\s*\(\s*\)\s*\{?\s*$/,
+  ],
 };
 
 export function languageOf(filePath: string): Language {
@@ -211,7 +256,7 @@ function indentOf(line: string): number {
 }
 
 // Lines that open or close no scope: blank lines, comments, preprocessor lines and labels such as "default:" or "else:".
-const NO_SCOPE = /^(?:$|\/\/|\/\*|\*(?:\s|\/|$)|--|#(?!\s*define\b)|(?:case\b.*|\w+)\s*:\s*(?:(?:\/\/|#).*)?$)/;
+const NO_SCOPE = /^(?:$|\/\/|\/\*|\*(?:\s|\/|$)|--|#(?!\s*define\b)|(?:case\b.*|\w+)\s*:\s*(?:(?:\/\/|#|\/\*).*)?$)/;
 const CONTROL = /^(?:\}\s*)?(?:if|else|elif|for|foreach|while|until|unless|switch|return|assert)\b/;
 
 // A line that ends a parameter list wrapped over several lines and opens the block: ") {", "}: Props) {", ") => (", ") -> int:", or the lone "{" under a header. A closing bracket on its own ends a call, not a parameter list.
@@ -299,4 +344,61 @@ function inList(lines: string[], no: number): boolean {
     return t !== "{" && closesList(t) && !CONTROL.test(opener(lines, k, i));
   }
   return false;
+}
+
+const NAMES = 2;
+const MACRO = /^\s*#\s*define\s+(\w+)/;
+
+// Reads a file once for many of its lines. Says where a line is by the names of the definitions around it, the outer one first: "Server › handle".
+export function insideOf(text: string, filePath: string): (no: number) => string | null {
+  const lines = text.split("\n");
+  const scopes = languageOf(filePath).scopes;
+  // The indentation of each line, or -1 when the line opens or closes no scope. A "#define" at the margin inside a function is such a line.
+  const indents: number[] = [];
+  const indentAt = (k: number) => (indents[k] ??= /^(?:#|$)/.test(lines[k - 1]!.trim()) || NO_SCOPE.test(lines[k - 1]!.trim()) ? -1 : indentOf(lines[k - 1]!));
+  // A header whose parameters are wrapped is read with the line that closes them: "addView(" and "): View {" make "addView(): View {". A wrapped call closes with ");" and makes no header.
+  const header = (k: number, indent: number): string => {
+    const l = lines[k - 1]!.trimEnd();
+    if (!l.endsWith("(")) return l;
+    for (let d = k + 1; d <= lines.length; d++) {
+      const i = indentAt(d);
+      if (i >= 0 && i <= indent) return lines[d - 1]!.trim().startsWith(")") ? l + lines[d - 1]!.trim() : l;
+    }
+    return l;
+  };
+
+  return (no) => {
+    const line = lines[no - 1];
+    if (line === undefined) return null;
+    // The body of a macro: the lines a backslash joins to "#define NAME".
+    let top = no;
+    while (top > 1 && lines[top - 2]!.trimEnd().endsWith("\\")) top--;
+    const macro = top < no ? MACRO.exec(lines[top - 1]!)?.[1] : undefined;
+    if (macro) return macro;
+    // A comment or a preprocessor line is as deep as the code under it: "#ifdef" sits at the margin inside a function.
+    let next = no;
+    while (next <= lines.length && indentAt(next) < 0) next++;
+    let min = Math.max(indentOf(line), next <= lines.length ? indentAt(next) : 0);
+    // The line that closes a wrapped parameter list belongs to the definition the list started.
+    let opened = closesList(line.trim());
+
+    const names: string[] = [];
+    for (let k = no - 1; k >= 1 && (min > 0 || opened) && names.length < NAMES; k--) {
+      const i = indentAt(k);
+      if (i < 0 || i > min) continue;
+      const encloses = i < min || opened;
+      const under = opened;
+      opened = false;
+      min = i;
+      if (!encloses) continue;
+
+      const l = header(k, i);
+      let found: Record<string, string | undefined> | undefined;
+      for (const r of scopes) if ((found = r.exec(l)?.groups)) break;
+      if (found?.n) names.unshift((found.o ? `${found.o}.${found.n}` : found.n).replace(/<[^<>]*>/g, ""));
+      // Between a lone "{" and its header there can be more of the header: ") -> T" and "where".
+      else opened = closesList(l.trim()) || (under && /^(?:[)\]]|where\b)/.test(l.trim()));
+    }
+    return names.length ? names.join(" \u203a ") : null;
+  };
 }

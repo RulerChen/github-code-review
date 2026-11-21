@@ -37506,7 +37506,7 @@ function wordPattern(query, whole) {
   return `${wordStart ? `(^|[^${WORD}])` : ""}${words.join("[[:space:]]+")}${wordEnd ? `([^${WORD}]|$)` : ""}`;
 }
 
-// src/engine/scope.ts
+// src/shared/scope.ts
 var S = "[[:space:]]";
 var START = "(^|[^[:alnum:]_$])";
 var END = "([^[:alnum:]_$]|$)";
@@ -37522,6 +37522,12 @@ var C_KEYWORD = "(?:return|goto|delete|throw|new|else|case|typedef|using|namespa
 var C_TYPE = `(?!${C_KEYWORD}\\b)${C_MODS}[A-Za-z_][\\w:.]*(?:<[^;(){}]*>)?(?:\\[\\s*\\])*`;
 var LOWER = "(?=[a-z_])";
 var typed = (n) => `${C_TYPE}(?:\\s*[*&]+\\s*|\\s+)(?:const\\s+)?${n}${E}`;
+var ARGS = "\\((?:[^()]|\\([^()]*\\))*\\)";
+var JS_FUNCTION = `(?:async\\s*)?(?:(?:<[^>]*>\\s*)?${ARGS}\\s*(?::[^=]*)?=>|[\\w$]+\\s*=>|function\\b)`;
+var JS_VAR = "(?:const|let|var)\\s+(?<n>[\\w$]+)";
+var C_ARGS = "(?:<[^;(){}]*>)?";
+var C_NAME = `(?<n>(?!${C_KEYWORD}\\b)~?[A-Za-z_]\\w*${C_ARGS}(?:::~?\\w+${C_ARGS})*(?:(?<=\\boperator)\\s*(?:\\(\\)|\\[\\]|[^\\s\\w()]{1,3}))?)`;
+var C_OPENS = "\\((?:[^;]*$|[^;{]*\\)[^;{]*\\{)";
 var LANGUAGES = [
   {
     exts: ["py", "pyi"],
@@ -37539,7 +37545,8 @@ var LANGUAGES = [
       `\\blambda\\b(?:[^:]*?,)?\\s*\\*{0,2}${n}${E}\\s*(?:[,:]|=(?!=))`
     ],
     params: (n) => [`^\\s*\\*{0,2}${n}${E}\\s*(?:[,:)]|=(?!=)|$)`],
-    module: /^\s*from\s+([\w.]+)\s+import\b|^\s*import\s+([\w.]+)/
+    module: /^\s*from\s+([\w.]+)\s+import\b|^\s*import\s+([\w.]+)/,
+    scopes: [/^\s*(?:async\s+)?def\s+(?<n>\w+)/, /^\s*class\s+(?<n>\w+)/, /^(?<n>\w+)\s*(?::[^=]*)?=(?!=)/]
   },
   {
     exts: ["js", "jsx", "mjs", "cjs", "ts", "tsx", "mts", "cts"],
@@ -37568,7 +37575,16 @@ var LANGUAGES = [
       `^\\s*(?:\\.\\.\\.)?${JS_MODS}${n}${E}\\s*\\??\\s*(?:[,:)]|=(?![=>])|$)`,
       `^\\s*[{\\[](?:[^=()]*?[,{\\[\\s:])?${n}${E}\\s*(?:=[^,}\\]]*)?[,}\\]]`
     ],
-    module: /\bfrom\s*["']([^"']+)["']|\brequire\s*\(\s*["']([^"']+)["']/
+    module: /\bfrom\s*["']([^"']+)["']|\brequire\s*\(\s*["']([^"']+)["']/,
+    scopes: [
+      /\bfunction\s*\*?\s*(?<n>[\w$]+)\s*[(<]/,
+      /^\s*(?:(?:export|default|declare|abstract)\s+)*(?:class|interface|type|enum|namespace)\s+(?<n>[\w$]+)/,
+      // Any variable at the top level. Inside a function, one that holds a function or what a React hook returns: a reader names the place by the function around it, not by a value.
+      new RegExp(`^(?:export\\s+)?(?:declare\\s+)?${JS_VAR}`),
+      new RegExp(`^\\s+${JS_VAR}\\s*(?::[^=]*)?=\\s*(?:${JS_FUNCTION}|(?:React\\.)?use[A-Z]\\w*\\s*(?:<.*>)?\\()`),
+      new RegExp(`^\\s*${JS_HEAD}\\*?(?<n>(?!${JS_CONTROL}\\b)[\\w$#]+)\\s*(?:<[^>()]*>)?${ARGS}(?:\\s*:.+?)?\\s*\\{\\s*$`),
+      new RegExp(`^\\s*${JS_MODS}(?:static\\s+)?(?<n>[\\w$#]+)\\s*(?:(?::[^=]*)?=|:)\\s*${JS_FUNCTION}`)
+    ]
   },
   {
     exts: ["go"],
@@ -37584,7 +37600,8 @@ var LANGUAGES = [
       `\\b(?:if|for|switch|case)\\b.*?[\\s,;]${n}${E}\\s*(?:,\\s*\\w+\\s*)*:=`
     ],
     params: (n) => [`^\\s*${n}${E}(?:\\s*,|\\s+[\\w*\\[\\]<.(])`],
-    module: /^\s*(?:import\s+)?[\w.]*\s*"([^"]+)"\s*$/
+    module: /^\s*(?:import\s+)?[\w.]*\s*"([^"]+)"\s*$/,
+    scopes: [/^func\s*(?:\(\s*(?:\w+\s+)?\*?(?<o>\w+)[^)]*\)\s*)?(?<n>\w+)\s*[(\[]/, /^type\s+(?<n>\w+)/, /^(?:var|const)\s+(?<n>\w+)/]
   },
   {
     exts: ["rs"],
@@ -37607,7 +37624,14 @@ var LANGUAGES = [
       `[(\\s{,&|]${LOWER}${n}${E}\\s*(?:[,)}]|@)[^=]*=>`
     ],
     params: (n) => [`^\\s*(?:mut\\s+)?${n}${E}\\s*:`],
-    module: /^\s*(?:pub(?:\([^)]*\))?\s+)?use\s+([\w:]+)/
+    module: /^\s*(?:pub(?:\([^)]*\))?\s+)?use\s+([\w:]+)/,
+    scopes: [
+      /\bfn\s+(?<n>\w+)\s*[(<]/,
+      /^\s*(?:pub(?:\([^)]*\))?\s+)?(?:unsafe\s+)?(?:struct|enum|trait|union|mod)\s+(?<n>\w+)/,
+      /^\s*(?:unsafe\s+)?impl\b(?:\s*<.*?>)?\s+(?:.*?\s+for\s+)?(?<n>[\w:]+)/,
+      /^\s*macro_rules!\s*(?<n>\w+)/,
+      /^(?:pub(?:\([^)]*\))?\s+)?(?:const|static)\s+(?:mut\s+)?(?<n>\w+)/
+    ]
   },
   {
     exts: ["c", "h", "cc", "cpp", "cxx", "c++", "hpp", "hh", "hxx", "h++", "ipp", "inl", "cu", "cuh", "m", "mm", "java", "cs"],
@@ -37631,7 +37655,16 @@ var LANGUAGES = [
       `${B}${n}(?:\\s+->|\\s*=>)`,
       `\\((?:[^()]*?,)?\\s*(?:${C_TYPE}(?:\\s*[*&]+\\s*|\\s+))?${n}${E}\\s*(?:,[^()]*)?\\)(?:\\s+->|\\s*=>)`
     ],
-    params: (n) => [`(?:^|[(,])\\s*${typed(n)}\\s*(?:\\[[^\\]]*\\])?\\s*(?:[,)=]|$)`]
+    params: (n) => [`(?:^|[(,])\\s*${typed(n)}\\s*(?:\\[[^\\]]*\\])?\\s*(?:[,)=]|$)`],
+    scopes: [
+      // A function at the top level: the first name followed by "(" on a line that is not a statement.
+      new RegExp(`^(?![\\s#/}])(?:[^;=(]*?[^\\w$:~])?${C_NAME}\\s*${C_OPENS}`),
+      // A method in a class body: at least one word of type before the name, so a call or a loop macro is not one.
+      new RegExp(`^\\s+(?!${C_KEYWORD}\\b)(?:[\\w@<][\\w:<>,.?*&\\[\\]]*\\s+)+[*&]*${C_NAME}\\s*${C_OPENS}`),
+      /^\s*(?:(?:typedef|public|private|protected|internal|static|final|abstract|sealed|partial|export)\s+)*(?:struct|class|union|enum(?:\s+(?:class|struct))?|interface|record|namespace)\s+(?:[A-Z][A-Z0-9_]*(?:\([^)]*\))?\s+)?(?<n>\w+(?:::\w+)*)\s*(?:[{:<]|$|(?:final|extends|implements|permits|where)\b)/,
+      // A table at the top level: "static struct option opts[] = {".
+      /^(?![\s#/}])[^;=(]*?[^\w$](?<n>\w+)\s*(?:\[[^\]]*\]\s*)*=\s*\{?\s*$/
+    ]
   }
 ];
 var KEYWORDS = "def|defp|defmodule|fn|fun|func|function|sub|proc|class|struct|interface|trait|object|module|type|enum|macro";
@@ -37648,7 +37681,13 @@ var GENERIC = {
     `\\|(?:[^|]*?,)?\\s*${n}${E}\\s*(?:,[^|]*)?\\|`,
     `\\bfor(?:each)?\\s+\\(?(?:\\w+\\s*,\\s*)*[$]?${n}${E}(?:\\s*,\\s*\\w+)*\\s+in\\b`
   ],
-  params: (n) => [`^\\s*(?:\\w+\\s+)?[$@%&*]*${n}${E}\\s*(?:[,:)]|=(?!=)|$)`]
+  params: (n) => [`^\\s*(?:\\w+\\s+)?[$@%&*]*${n}${E}\\s*(?:[,:)]|=(?!=)|$)`],
+  scopes: [
+    new RegExp(
+      `^\\s*(?:(?:export|pub|public|private|protected|internal|open|override|static|final|abstract|async|local|suspend|inline|data|sealed)\\s+)*(?:${KEYWORDS})\\s+(?:self\\.)?(?<n>[\\w$.:]*[\\w$][?!]?)`
+    ),
+    /^\s*(?:function\s+)?(?<n>[\w-]+)\s*\(\s*\)\s*\{?\s*$/
+  ]
 };
 function languageOf(filePath) {
   const base = filePath.slice(filePath.lastIndexOf("/") + 1);
@@ -37672,7 +37711,7 @@ function indentOf(line) {
   }
   return n;
 }
-var NO_SCOPE = /^(?:$|\/\/|\/\*|\*(?:\s|\/|$)|--|#(?!\s*define\b)|(?:case\b.*|\w+)\s*:\s*(?:(?:\/\/|#).*)?$)/;
+var NO_SCOPE = /^(?:$|\/\/|\/\*|\*(?:\s|\/|$)|--|#(?!\s*define\b)|(?:case\b.*|\w+)\s*:\s*(?:(?:\/\/|#|\/\*).*)?$)/;
 var CONTROL = /^(?:\}\s*)?(?:if|else|elif|for|foreach|while|until|unless|switch|return|assert)\b/;
 function closesList(t) {
   if (t === "{") return true;
@@ -37741,12 +37780,58 @@ function inList(lines, no) {
   }
   return false;
 }
+var NAMES = 2;
+var MACRO = /^\s*#\s*define\s+(\w+)/;
+function insideOf(text, filePath) {
+  const lines = text.split("\n");
+  const scopes = languageOf(filePath).scopes;
+  const indents = [];
+  const indentAt = (k) => indents[k] ??= /^(?:#|$)/.test(lines[k - 1].trim()) || NO_SCOPE.test(lines[k - 1].trim()) ? -1 : indentOf(lines[k - 1]);
+  const header = (k, indent2) => {
+    const l = lines[k - 1].trimEnd();
+    if (!l.endsWith("(")) return l;
+    for (let d = k + 1; d <= lines.length; d++) {
+      const i = indentAt(d);
+      if (i >= 0 && i <= indent2) return lines[d - 1].trim().startsWith(")") ? l + lines[d - 1].trim() : l;
+    }
+    return l;
+  };
+  return (no) => {
+    const line = lines[no - 1];
+    if (line === void 0) return null;
+    let top = no;
+    while (top > 1 && lines[top - 2].trimEnd().endsWith("\\")) top--;
+    const macro = top < no ? MACRO.exec(lines[top - 1])?.[1] : void 0;
+    if (macro) return macro;
+    let next = no;
+    while (next <= lines.length && indentAt(next) < 0) next++;
+    let min = Math.max(indentOf(line), next <= lines.length ? indentAt(next) : 0);
+    let opened = closesList(line.trim());
+    const names = [];
+    for (let k = no - 1; k >= 1 && (min > 0 || opened) && names.length < NAMES; k--) {
+      const i = indentAt(k);
+      if (i < 0 || i > min) continue;
+      const encloses = i < min || opened;
+      const under = opened;
+      opened = false;
+      min = i;
+      if (!encloses) continue;
+      const l = header(k, i);
+      let found;
+      for (const r of scopes) if (found = r.exec(l)?.groups) break;
+      if (found?.n) names.unshift((found.o ? `${found.o}.${found.n}` : found.n).replace(/<[^<>]*>/g, ""));
+      else opened = closesList(l.trim()) || under && /^(?:[)\]]|where\b)/.test(l.trim());
+    }
+    return names.length ? names.join(" \u203A ") : null;
+  };
+}
 
 // src/engine/browse.ts
 var MAX_HITS = 500;
 var MAX_DEFINITIONS = 50;
 var MAX_HIT_CHARS = 400;
 var LEAD_CHARS = 100;
+var MAX_READ_FILES = 200;
 var NOT_GENERATED = ":(exclude,attr:linguist-generated=true)";
 var IDENTIFIER = /^[\p{L}_$][\p{L}\p{N}_$]{0,199}$/u;
 function isRepoPath(p) {
@@ -37777,7 +37862,7 @@ async function readBlobAt(root, rev, rest) {
   if (Number(size) > MAX_CONTENT_BYTES) return { kind: "tooLarge" };
   return classify(await git(root, ["cat-file", "blob", oid]));
 }
-function grepRepo(diff, query, whole, signal) {
+async function grepRepo(diff, query, whole, signal) {
   const found = wordRegExp(query, whole);
   const pattern = wordPattern(query, whole);
   const plain = (query.match(/[A-Za-z0-9_]+/g) ?? []).reduce((a, b) => b.length > a.length ? b : a, "");
@@ -37785,7 +37870,59 @@ function grepRepo(diff, query, whole, signal) {
   const changed = new Set(diff.files.map((f) => f.path));
   const busy = searchable(diff).filter((r) => r.dir !== "" && diff.files.some((f) => f.path.startsWith(`${r.dir}/`)));
   const far = (p) => changed.has(p) ? 0 : busy.length === 0 || busy.some((r) => p.startsWith(`${r.dir}/`)) ? 1 : 2;
-  return grepLines(diff, searchable(diff), ["-E", "-i", ...match], ["."], MAX_HITS, signal, (text) => found?.exec(text)?.index ?? -1, far);
+  const lines = await grepLines(diff, searchable(diff), ["-E", "-i", ...match], ["."], MAX_HITS, signal, (text) => found?.exec(text)?.index ?? -1, far);
+  if (!signal.aborted) await nameFunctions(diff, lines.hits);
+  return lines;
+}
+async function nameFunctions(diff, hits) {
+  const texts = await readTexts(diff, [...new Set(hits.map((h) => h.path))].slice(0, MAX_READ_FILES));
+  const files = /* @__PURE__ */ new Map();
+  for (const h of hits) {
+    const text = texts.get(h.path);
+    if (text === void 0) continue;
+    let inside = files.get(h.path);
+    if (!inside) files.set(h.path, inside = insideOf(text, h.path));
+    h.inside = inside(h.no);
+  }
+}
+async function readTexts(diff, paths) {
+  const out = /* @__PURE__ */ new Map();
+  const changed = new Map(diff.files.map((f) => [f.path, f]));
+  const wanted = /* @__PURE__ */ new Map();
+  for (const p of paths) {
+    const file2 = changed.get(p);
+    if (file2) {
+      if (file2.newContent !== null) out.set(p, file2.newContent);
+      continue;
+    }
+    const where = repoOf(diff, p);
+    const rev = where && (where.repo.headCommit ?? where.repo.oldCommit);
+    if (!where || !rev) continue;
+    const list = wanted.get(where.repo) ?? { root: where.root, rev, rests: [] };
+    list.rests.push(where.rest);
+    wanted.set(where.repo, list);
+  }
+  await mapLimit([...wanted], REPO_LIMIT, async ([repo, { root, rev, rests }]) => {
+    const names = (list) => list.map((r) => `${rev}:${r}
+`).join("");
+    const sizes = (await git(root, ["cat-file", "--batch-check=%(objecttype) %(objectsize)"], [0], names(rests))).toString("utf8").split("\n");
+    const small = rests.filter((_, n) => {
+      const [type, size] = (sizes[n] ?? "").split(" ");
+      return type === "blob" && Number(size) <= MAX_CONTENT_BYTES;
+    });
+    if (!small.length) return;
+    const buf = await git(root, ["cat-file", "--batch"], [0], names(small));
+    let at = 0;
+    for (const rest of small) {
+      const eol = buf.indexOf(10, at);
+      if (eol < 0) break;
+      const size = Number(buf.toString("utf8", at, eol).split(" ")[2]);
+      const content = classify(buf.subarray(eol + 1, eol + 1 + size));
+      at = eol + 1 + size + 1;
+      if (content.kind === "text") out.set(repo.dir ? `${repo.dir}/${rest}` : rest, content.text);
+    }
+  });
+  return out;
 }
 var searchable = (diff) => diff.repos.filter((r) => r.error === null);
 async function nearestFirst(groups, find) {

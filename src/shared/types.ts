@@ -177,6 +177,8 @@ export interface RepoHit {
   no: number;
   text: string;
   at: number;
+  // The function, method or class the line is in. Null at the top level, and absent when the file was not read.
+  inside?: string | null;
 }
 
 export interface RepoHits {

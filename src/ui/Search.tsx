@@ -1,4 +1,5 @@
 import { useEffect, useRef, useSyncExternalStore } from "react";
+import { insideOf } from "../shared/scope";
 import { wordRegExp } from "../shared/search";
 import type { DiffLine, DiffRepo, FileDiff, RepoHit } from "../shared/types";
 import { plural } from "../shared/util";
@@ -21,6 +22,8 @@ export interface Hit {
   length: number;
   // A changed line goes to its place in the diff. Any other line opens its file in the code panel.
   inDiff: boolean;
+  // The function, method or class the line is in. Null at the top level and when that is not known.
+  inside: string | null;
 }
 
 interface Found {
@@ -44,6 +47,7 @@ export function searchChanges(files: FileDiff[], query: string, whole: boolean):
 
   for (const file of files) {
     const hits: Hit[] = [];
+    const places: Partial<Record<Hit["side"], (no: number) => string | null>> = {};
     for (const hunk of file.hunks) {
       for (const line of hunk.lines) {
         const match = line.kind === "context" ? null : word.exec(line.text);
@@ -52,7 +56,10 @@ export function searchChanges(files: FileDiff[], query: string, whole: boolean):
 
         const side = line.kind === "del" ? "old" : "new";
         const no = (side === "old" ? line.oldNo : line.newNo)!;
-        const hit: Hit = { path: file.path, side, no, kind: line.kind, text: line.text, at: match.index, length: match[0].length, inDiff: true };
+        const text = side === "old" ? file.oldContent : file.newContent;
+        const place = text === null ? null : (places[side] ??= insideOf(text, side === "old" ? (file.oldPath ?? file.path) : file.path));
+        const inside = place?.(no) ?? null;
+        const hit: Hit = { path: file.path, side, no, kind: line.kind, text: line.text, at: match.index, length: match[0].length, inDiff: true, inside };
         if (!hits.length) found.groups.push({ path: file.path, hits });
         hits.push(hit);
         found.hits.push(hit);
@@ -95,7 +102,8 @@ export function searchSections(
     if (!lines) added.set(h.path, (lines = addedLines(file)));
     const match = word?.exec(h.text);
     const kind = lines.has(h.no) ? "add" : "context";
-    const hit: Hit = { path: h.path, side: "new", no: h.no, kind, text: h.text, at: match?.index ?? -1, length: match?.[0].length ?? 0, inDiff: false };
+    const at = match?.index ?? -1;
+    const hit: Hit = { path: h.path, side: "new", no: h.no, kind, text: h.text, at, length: match?.[0].length ?? 0, inDiff: false, inside: h.inside ?? null };
     const list = lists[key]!;
     list.set(h.path, [...(list.get(h.path) ?? []), hit]);
   }
@@ -117,7 +125,7 @@ export function definitionsFound(hits: RepoHit[], capped: boolean, files: FileDi
   const groups: Found["groups"] = [];
   for (const h of first) {
     const kind = addedLines(changed.get(h.path)).has(h.no) ? "add" : "context";
-    const hit: Hit = { path: h.path, side: "new", no: h.no, kind, text: h.text, at: h.at, length: h.at < 0 ? 0 : name.length, inDiff: false };
+    const hit: Hit = { path: h.path, side: "new", no: h.no, kind, text: h.text, at: h.at, length: h.at < 0 ? 0 : name.length, inDiff: false, inside: null };
     const last = groups[groups.length - 1];
     if (last?.path === h.path) last.hits.push(hit);
     else groups.push({ path: h.path, hits: [hit] });
@@ -204,11 +212,20 @@ function HitGroups({ groups, current, onOpen }: { groups: Found["groups"]; curre
         {basename(g.path)}
       </h3>
       <ul>
-        {g.hits.map((h) => (
-          <li key={`${h.side}${h.no}`}>
-            <HitButton hit={h} current={h === current} onOpen={onOpen} />
-          </li>
-        ))}
+        {g.hits.map((h, n) => {
+          // Lines of one function sit under its name. A line outside any function that follows them is set apart by a rule.
+          const starts = h.inside !== (g.hits[n - 1]?.inside ?? null);
+          return (
+            <li key={`${h.side}${h.no}`} className={starts && h.inside === null ? "search-outside" : undefined}>
+              {starts && h.inside !== null && (
+                <span className="search-inside" title={`These lines are in ${h.inside}`}>
+                  {h.inside}
+                </span>
+              )}
+              <HitButton hit={h} current={h === current} onOpen={onOpen} />
+            </li>
+          );
+        })}
       </ul>
     </section>
   ));

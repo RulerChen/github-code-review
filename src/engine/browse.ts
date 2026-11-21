@@ -4,12 +4,13 @@ import type { DiffRepo, DiffResult, RepoFile, RepoHit } from "../shared/types.js
 import { compareText } from "../shared/util.js";
 import { ABSENT, classify, type Content, MAX_CONTENT_BYTES, mapLimit, readWorkTree, REPO_LIMIT } from "./diff.js";
 import { git, gitLines } from "./git.js";
-import { GENERIC, LANGUAGES, languageOf, type Scoped, scopeOf } from "./scope.js";
+import { GENERIC, insideOf, LANGUAGES, languageOf, type Scoped, scopeOf } from "../shared/scope.js";
 
 export const MAX_HITS = 500;
 const MAX_DEFINITIONS = 50;
 const MAX_HIT_CHARS = 400;
 const LEAD_CHARS = 100;
+const MAX_READ_FILES = 200;
 const NOT_GENERATED = ":(exclude,attr:linguist-generated=true)";
 const IDENTIFIER = /^[\p{L}_$][\p{L}\p{N}_$]{0,199}$/u;
 
@@ -46,7 +47,7 @@ async function readBlobAt(root: string, rev: string, rest: string): Promise<Cont
 }
 
 // git grep runs a regular expression on every line. A plain string every match has, joined with --and, lets it skip most lines first.
-export function grepRepo(diff: DiffResult, query: string, whole: boolean, signal: AbortSignal): Promise<Found> {
+export async function grepRepo(diff: DiffResult, query: string, whole: boolean, signal: AbortSignal): Promise<Found> {
   const found = wordRegExp(query, whole);
   const pattern = wordPattern(query, whole);
   const plain = (query.match(/[A-Za-z0-9_]+/g) ?? []).reduce((a, b) => (b.length > a.length ? b : a), "");
@@ -55,7 +56,65 @@ export function grepRepo(diff: DiffResult, query: string, whole: boolean, signal
   const changed = new Set(diff.files.map((f) => f.path));
   const busy = searchable(diff).filter((r) => r.dir !== "" && diff.files.some((f) => f.path.startsWith(`${r.dir}/`)));
   const far = (p: string) => (changed.has(p) ? 0 : busy.length === 0 || busy.some((r) => p.startsWith(`${r.dir}/`)) ? 1 : 2);
-  return grepLines(diff, searchable(diff), ["-E", "-i", ...match], ["."], MAX_HITS, signal, (text) => found?.exec(text)?.index ?? -1, far);
+  const lines = await grepLines(diff, searchable(diff), ["-E", "-i", ...match], ["."], MAX_HITS, signal, (text) => found?.exec(text)?.index ?? -1, far);
+  if (!signal.aborted) await nameFunctions(diff, lines.hits);
+  return lines;
+}
+
+// Says which function each line is in, so a list of uses reads as a list of callers. The hits are in order of distance from the diff, so the files nearest it are the ones read.
+async function nameFunctions(diff: DiffResult, hits: RepoHit[]): Promise<void> {
+  const texts = await readTexts(diff, [...new Set(hits.map((h) => h.path))].slice(0, MAX_READ_FILES));
+  const files = new Map<string, (no: number) => string | null>();
+  for (const h of hits) {
+    const text = texts.get(h.path);
+    if (text === undefined) continue;
+    let inside = files.get(h.path);
+    if (!inside) files.set(h.path, (inside = insideOf(text, h.path)));
+    h.inside = inside(h.no);
+  }
+}
+
+// The text of files in the compared version: from the diff for a changed file, and two git cat-file runs per repository for the rest, one for the sizes and one for the files small enough to read.
+async function readTexts(diff: DiffResult, paths: string[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  const changed = new Map(diff.files.map((f) => [f.path, f]));
+  const wanted = new Map<DiffRepo, { root: string; rev: string; rests: string[] }>();
+  for (const p of paths) {
+    const file = changed.get(p);
+    if (file) {
+      if (file.newContent !== null) out.set(p, file.newContent);
+      continue;
+    }
+    // A file the diff does not change is the same in both versions, so the old commit has it when the new side is the work tree.
+    const where = repoOf(diff, p);
+    const rev = where && (where.repo.headCommit ?? where.repo.oldCommit);
+    if (!where || !rev) continue;
+    const list = wanted.get(where.repo) ?? { root: where.root, rev, rests: [] };
+    list.rests.push(where.rest);
+    wanted.set(where.repo, list);
+  }
+
+  await mapLimit([...wanted], REPO_LIMIT, async ([repo, { root, rev, rests }]) => {
+    const names = (list: string[]) => list.map((r) => `${rev}:${r}\n`).join("");
+    const sizes = (await git(root, ["cat-file", "--batch-check=%(objecttype) %(objectsize)"], [0], names(rests))).toString("utf8").split("\n");
+    const small = rests.filter((_, n) => {
+      const [type, size] = (sizes[n] ?? "").split(" ");
+      return type === "blob" && Number(size) <= MAX_CONTENT_BYTES;
+    });
+    if (!small.length) return;
+
+    const buf = await git(root, ["cat-file", "--batch"], [0], names(small));
+    let at = 0;
+    for (const rest of small) {
+      const eol = buf.indexOf(10, at);
+      if (eol < 0) break;
+      const size = Number(buf.toString("utf8", at, eol).split(" ")[2]);
+      const content = classify(buf.subarray(eol + 1, eol + 1 + size));
+      at = eol + 1 + size + 1;
+      if (content.kind === "text") out.set(repo.dir ? `${repo.dir}/${rest}` : rest, content.text);
+    }
+  });
+  return out;
 }
 
 type Found = { hits: RepoHit[]; capped: boolean };
