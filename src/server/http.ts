@@ -3,13 +3,14 @@ import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { type AddressInfo, isIP } from "node:net";
 import path from "node:path";
+import { pipeline } from "node:stream/promises";
 import { promisify } from "node:util";
 import { gzip } from "node:zlib";
-import { findDefinitions, findDefinitionsAnywhere, grepRepo, isIdentifier, listRepoFiles, readRepoFile } from "../engine/browse.js";
+import { findDefinitions, findDefinitionsAnywhere, grepRepo, isIdentifier, listRepoFiles, openRepoFile, readRepoFile } from "../engine/browse.js";
 import { computeDiff, listRefs, probeDiff } from "../engine/diff.js";
 import { comparisonFromQuery, comparisonQuery, isFor } from "../shared/comparison.js";
 import type { Comparison, DiffResult, FileDiff, Grouping, NotedTopic, Review, Thread, ThreadAnchor, ThreadContext, ViewData } from "../shared/types.js";
-import { errorMessage, isRecord, sum } from "../shared/util.js";
+import { errorMessage, imageTypeOf, isRecord, sum } from "../shared/util.js";
 import { groupChanges, mergeSync, needsClaude, syncTopics, type TopicSync, topicDelta } from "./group.js";
 import { changesOf, placeNote } from "./review.js";
 import { dropOldStates, loadState, saveState } from "./store.js";
@@ -65,7 +66,7 @@ const MAX_CACHED_CHARS = 64 * 1024 * 1024;
 const PING_MS = 25_000;
 const SAVE_DELAY_MS = 500;
 const PAGE = /^\/v\/[\w-]+$/;
-const API = /^\/api\/views\/([\w-]+)\/(diff|file|blob|tree|grep|defs|events|refs|threads|review|reviews|wait|version|topics)(?:\/([\w-]+)\/comments(?:\/([\w-]+))?)?$/;
+const API = /^\/api\/views\/([\w-]+)\/(diff|file|blob|raw|tree|grep|defs|events|refs|threads|review|reviews|wait|version|topics)(?:\/([\w-]+)\/comments(?:\/([\w-]+))?)?$/;
 const SHA = /^[0-9a-f]{40,64}$/;
 
 const sshAddress = process.env.SSH_CONNECTION?.split(" ")[2] ?? "";
@@ -394,6 +395,20 @@ export class ReviewServer {
         const filePath = query.get("path") ?? "";
         const file = await readRepoFile(diff, filePath);
         return file ? sendJson(res, 200, { file }) : sendJson(res, 404, { error: `${filePath} is not in the compared version.` });
+      }
+      case "GET raw": {
+        const { version, diff } = await this.loadDiff(view.repo, compare);
+        if (version !== query.get("version")) return sendJson(res, 409, { error: "The diff changed. Load the new changes first." });
+        const filePath = query.get("path") ?? "";
+        const file = await openRepoFile(diff, filePath);
+        if (!file) return sendJson(res, 404, { error: `${filePath} is not in the compared version.` });
+        res.writeHead(200, {
+          "Content-Type": imageTypeOf(filePath) ?? "application/octet-stream",
+          "Content-Length": file.size,
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
+        });
+        return pipeline(file.stream, res);
       }
       case "GET tree": {
         const { version, diff } = await this.loadDiff(view.repo, compare);

@@ -1,4 +1,5 @@
 import { execFile, spawn } from "node:child_process";
+import type { Readable } from "node:stream";
 import { StringDecoder } from "node:string_decoder";
 
 const MAX_OUTPUT = 512 * 1024 * 1024;
@@ -15,6 +16,10 @@ export function git(cwd: string, args: string[], okCodes: readonly number[] = [0
     child.stdin?.on("error", () => {});
     child.stdin?.end(input);
   });
+}
+
+export function gitStream(cwd: string, args: string[]): Readable {
+  return spawn("git", args, { cwd, env: gitEnv(), stdio: ["ignore", "pipe", "ignore"] }).stdout;
 }
 
 export async function gitText(cwd: string, args: string[], okCodes?: readonly number[]): Promise<string> {

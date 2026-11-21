@@ -174,6 +174,7 @@ export interface RepoFile {
   text: string | null;
   binary: boolean;
   tooLarge: boolean;
+  size: number | null;
 }
 
 export interface RepoHit {

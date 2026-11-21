@@ -23,7 +23,7 @@ const HUNK_RE = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)$/;
 const COMMIT_RE = /^([0-9a-f]{40,64}) commit /;
 const STATUS: Record<string, FileStatus> = { A: "added", D: "deleted", R: "renamed" };
 
-export type Content = { kind: "text"; text: string } | { kind: "binary" } | { kind: "tooLarge" } | { kind: "absent" };
+export type Content = { kind: "text"; text: string } | { kind: "binary" } | { kind: "tooLarge"; size: number } | { kind: "absent" };
 type RawBlock = Omit<Block, "id">;
 
 interface RepoPart {
@@ -394,7 +394,7 @@ async function readBlobs(root: string, ids: string[]): Promise<Map<string, Conte
       continue;
     }
     if (size > MAX_CONTENT_BYTES) {
-      out.set(id, { kind: "tooLarge" });
+      out.set(id, { kind: "tooLarge", size });
       continue;
     }
     if (bytes + size > BATCH_BYTES) {
@@ -524,7 +524,7 @@ function assignIds(filePath: string, raws: RawBlock[]): Block[] {
 }
 
 export function classify(buf: Buffer): Content {
-  if (buf.length > MAX_CONTENT_BYTES) return { kind: "tooLarge" };
+  if (buf.length > MAX_CONTENT_BYTES) return { kind: "tooLarge", size: buf.length };
   if (buf.subarray(0, 8000).includes(0)) return { kind: "binary" };
   return { kind: "text", text: buf.toString("utf8") };
 }
@@ -535,7 +535,7 @@ export async function readWorkTree(root: string, filePath: string): Promise<Cont
     const st = await lstat(abs);
     if (st.isSymbolicLink()) return { kind: "text", text: await readlink(abs) };
     if (!st.isFile()) return ABSENT;
-    if (st.size > MAX_CONTENT_BYTES) return { kind: "tooLarge" };
+    if (st.size > MAX_CONTENT_BYTES) return { kind: "tooLarge", size: st.size };
     return classify(await readFile(abs));
   } catch {
     return ABSENT;

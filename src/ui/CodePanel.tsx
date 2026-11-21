@@ -1,7 +1,8 @@
-import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Fragment, type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { splitLines } from "../shared/hunks";
 import type { DiffLine, DisplayHunk, FileDiff, RepoFile } from "../shared/types";
-import { errorMessage } from "../shared/util";
+import { errorMessage, imageTypeOf } from "../shared/util";
+import { fetchBytes } from "./api";
 import { ThreadView, useComments } from "./comments";
 import { CopyButton } from "./controls";
 import { DiffTable, type OnExpand } from "./DiffTable";
@@ -36,6 +37,7 @@ interface Props {
   revision: string;
   version: string;
   load: (path: string) => Promise<RepoFile>;
+  raw: (path: string) => string;
   trail: Peek[];
   onGo: (steps: number) => void;
   onClose: () => void;
@@ -45,7 +47,7 @@ interface Props {
 
 const placeOf = (p: Peek) => (p.line === null ? p.path : `${p.path}:${p.line}`);
 
-export function CodePanel({ peek, file, revision, version, load, trail, onGo, onClose, onShowDiff, full = false }: Props) {
+export function CodePanel({ peek, file, revision, version, load, raw, trail, onGo, onClose, onShowDiff, full = false }: Props) {
   const { path } = peek;
   const key = `${version}\0${path}`;
   const local = file?.newContent ?? null;
@@ -63,7 +65,23 @@ export function CodePanel({ peek, file, revision, version, load, trail, onGo, on
   }, [key, local === null]);
 
   const current = loaded?.key === key ? loaded : null;
-  const repoFile = local !== null ? { path, text: local, binary: false, tooLarge: false } : current && "file" in current ? current.file : null;
+  const repoFile = local !== null ? { path, text: local, binary: false, tooLarge: false, size: null } : current && "file" in current ? current.file : null;
+  const [fetching, setFetching] = useState<string | null>(null);
+  const [broken, setBroken] = useState<string | null>(null);
+  const loadWhole = () => {
+    setFetching(key);
+    const show = (next: Loaded) => {
+      setFetching(null);
+      setLoaded((l) => (l?.key === key ? next : l));
+    };
+    fetchBytes(raw(path)).then(
+      (bytes) => {
+        const binary = bytes.subarray(0, 8000).includes(0);
+        show({ key, file: { path, text: binary ? null : new TextDecoder().decode(bytes), binary, tooLarge: false, size: null } });
+      },
+      (e: unknown) => show({ key, error: errorMessage(e) }),
+    );
+  };
   const text = repoFile?.text ?? null;
   const lines = useMemo(() => (text === null ? [] : splitLines(text)), [text]);
 
@@ -132,12 +150,24 @@ export function CodePanel({ peek, file, revision, version, load, trail, onGo, on
   const fileThreads = file ? [] : threads.filter((t) => t.anchor.side === null);
 
   const error = local === null && current && "error" in current ? current.error : null;
-  let note: string | null = null;
+  const image = repoFile !== null && repoFile.text === null && imageTypeOf(path) !== null;
+  let note: ReactNode = null;
   if (error) note = error;
   else if (!repoFile) note = "Loading…";
+  else if (image) note = broken === key ? "Could not show the image." : null;
   else if (repoFile.binary) note = "Binary file not shown.";
-  else if (repoFile.tooLarge) note = "File too large to display.";
-  else if (lines.length === 0) note = "Empty file.";
+  else if (repoFile.tooLarge && fetching === key) note = "Loading…";
+  else if (repoFile.tooLarge) {
+    const size = repoFile.size === null ? "" : ` (${(repoFile.size / 1024 / 1024).toFixed(1)} MB)`;
+    note = (
+      <>
+        Large file{size} not loaded by default.{" "}
+        <button className="link-button" onClick={loadWhole}>
+          Load file
+        </button>
+      </>
+    );
+  } else if (lines.length === 0) note = "Empty file.";
 
   return (
     <aside className={`code-panel${full ? " is-full" : ""}`} aria-label={`Code of ${path}`}>
@@ -200,6 +230,10 @@ export function CodePanel({ peek, file, revision, version, load, trail, onGo, on
         )}
         {note !== null ? (
           <p className="file-note">{note}</p>
+        ) : image ? (
+          <div className="code-image">
+            <img src={raw(path)} alt={basename(path)} onError={() => setBroken(key)} />
+          </div>
         ) : (
           <DiffTable path={path} hunks={hunks} oldTokens={null} newTokens={newTokens} threads={threads} onExpand={expand} single panel={!full} />
         )}

@@ -1,9 +1,12 @@
+import { createReadStream } from "node:fs";
+import { lstat } from "node:fs/promises";
 import path from "node:path";
+import type { Readable } from "node:stream";
 import { plainOf, wordPattern, wordRegExp } from "../shared/search.js";
 import type { DiffRepo, DiffResult, RepoFile, RepoHit } from "../shared/types.js";
 import { compareText } from "../shared/util.js";
 import { ABSENT, classify, type Content, MAX_CONTENT_BYTES, mapLimit, readWorkTree, REPO_LIMIT } from "./diff.js";
-import { git, gitLines } from "./git.js";
+import { git, gitLines, gitStream } from "./git.js";
 import { GENERIC, insideOf, LANGUAGES, languageOf, rolesOf, type Scoped, scopeOf } from "../shared/scope.js";
 
 export const MAX_HITS = 500;
@@ -25,18 +28,37 @@ function repoOf(diff: DiffResult, filePath: string): { repo: DiffRepo; root: str
   return { repo, root: path.join(diff.repoRoot, repo.dir), rest: repo.dir ? filePath.slice(repo.dir.length + 1) : filePath };
 }
 
-export async function readRepoFile(diff: DiffResult, filePath: string): Promise<RepoFile | null> {
+function sourceOf(diff: DiffResult, filePath: string): { root: string; rest: string; rev: string | null } | null {
   const where = isRepoPath(filePath) ? repoOf(diff, filePath) : null;
   if (!where) return null;
   const changed = diff.files.find((f) => f.path === filePath);
   if (changed?.status === "deleted") return null;
-  if (changed && changed.newContent !== null) return { path: filePath, text: changed.newContent, binary: false, tooLarge: false };
+  const rev = where.repo.headCommit ?? (changed ? null : where.repo.oldCommit);
+  return rev || changed ? { root: where.root, rest: where.rest, rev } : null;
+}
 
-  const { repo, root, rest } = where;
-  const rev = repo.headCommit ?? (changed ? null : repo.oldCommit);
-  const c = rev ? await readBlobAt(root, rev, rest) : changed ? await readWorkTree(root, rest) : ABSENT;
+export async function readRepoFile(diff: DiffResult, filePath: string): Promise<RepoFile | null> {
+  const from = sourceOf(diff, filePath);
+  if (!from) return null;
+  const local = diff.files.find((f) => f.path === filePath)?.newContent ?? null;
+  if (local !== null) return { path: filePath, text: local, binary: false, tooLarge: false, size: null };
+
+  const c = from.rev ? await readBlobAt(from.root, from.rev, from.rest) : await readWorkTree(from.root, from.rest);
   if (c.kind === "absent") return null;
-  return { path: filePath, text: c.kind === "text" ? c.text : null, binary: c.kind === "binary", tooLarge: c.kind === "tooLarge" };
+  const size = c.kind === "tooLarge" ? c.size : null;
+  return { path: filePath, text: c.kind === "text" ? c.text : null, binary: c.kind === "binary", tooLarge: c.kind === "tooLarge", size };
+}
+
+export async function openRepoFile(diff: DiffResult, filePath: string): Promise<{ size: number; stream: Readable } | null> {
+  const from = sourceOf(diff, filePath);
+  if (!from) return null;
+  if (from.rev) {
+    const blob = await blobAt(from.root, from.rev, from.rest);
+    return blob && { size: blob.size, stream: gitStream(from.root, ["cat-file", "blob", blob.oid]) };
+  }
+  const abs = path.join(from.root, from.rest);
+  const st = await lstat(abs).catch(() => null);
+  return st?.isFile() ? { size: st.size, stream: createReadStream(abs) } : null;
 }
 
 export async function listRepoFiles(diff: DiffResult): Promise<string[]> {
@@ -54,12 +76,17 @@ export async function listRepoFiles(diff: DiffResult): Promise<string[]> {
   return [...new Set([...parts.flat().filter((p) => !gone.has(p)), ...diff.files.map((f) => f.path)])];
 }
 
-async function readBlobAt(root: string, rev: string, rest: string): Promise<Content> {
+async function blobAt(root: string, rev: string, rest: string): Promise<{ oid: string; size: number } | null> {
   const check = await git(root, ["cat-file", "--batch-check=%(objectname) %(objecttype) %(objectsize)"], [0], `${rev}:${rest}\n`);
   const [oid = "", type, size] = check.toString("utf8").trim().split(" ");
-  if (type !== "blob") return ABSENT;
-  if (Number(size) > MAX_CONTENT_BYTES) return { kind: "tooLarge" };
-  return classify(await git(root, ["cat-file", "blob", oid]));
+  return type === "blob" ? { oid, size: Number(size) } : null;
+}
+
+async function readBlobAt(root: string, rev: string, rest: string): Promise<Content> {
+  const blob = await blobAt(root, rev, rest);
+  if (!blob) return ABSENT;
+  if (blob.size > MAX_CONTENT_BYTES) return { kind: "tooLarge", size: blob.size };
+  return classify(await git(root, ["cat-file", "blob", blob.oid]));
 }
 
 export async function grepRepo(diff: DiffResult, query: string, whole: boolean, signal: AbortSignal): Promise<Found> {

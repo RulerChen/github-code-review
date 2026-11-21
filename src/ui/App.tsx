@@ -21,6 +21,7 @@ import {
   fetchVersion,
   fetchView,
   groupTopics,
+  rawFileUrl,
   replyToThread,
   searchDefinitions,
   searchRepo,
@@ -234,6 +235,7 @@ export function App({ viewId }: Props) {
     },
     [viewId],
   );
+  const codeUrl = useCallback((path: string) => rawFileUrl(viewId ?? "", requested.current, version.current ?? "", path), [viewId]);
 
   const showCode = useCallback((stack: Peek[], push: boolean) => {
     const state = { ...(history.state as object | null), code: toSave(stack) };
@@ -786,6 +788,7 @@ export function App({ viewId }: Props) {
       revision={revisionOf(actions.versions(peek.path).new)}
       version={loadedVersion ?? ""}
       load={loadCode}
+      raw={codeUrl}
       trail={full ? [peek] : code}
       onGo={(steps) => history.go(steps)}
       onClose={closeCode}

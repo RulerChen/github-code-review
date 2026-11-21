@@ -36674,6 +36674,19 @@ function plural2(n, word, many = `${word}s`) {
 function sum(items, value) {
   return items.reduce((total, item) => total + value(item), 0);
 }
+var IMAGE_TYPES = /* @__PURE__ */ new Map([
+  ["png", "image/png"],
+  ["jpg", "image/jpeg"],
+  ["jpeg", "image/jpeg"],
+  ["gif", "image/gif"],
+  ["webp", "image/webp"],
+  ["avif", "image/avif"],
+  ["bmp", "image/bmp"],
+  ["ico", "image/x-icon"]
+]);
+function imageTypeOf(path7) {
+  return IMAGE_TYPES.get(/\.([^./]+)$/.exec(path7)?.[1]?.toLowerCase() ?? "") ?? null;
+}
 var compareText = (a, b) => a < b ? -1 : a > b ? 1 : 0;
 function isRecord(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -36841,6 +36854,9 @@ function git(cwd, args, okCodes = [0], input2) {
     });
     child.stdin?.end(input2);
   });
+}
+function gitStream(cwd, args) {
+  return spawn("git", args, { cwd, env: gitEnv(), stdio: ["ignore", "pipe", "ignore"] }).stdout;
 }
 async function gitText(cwd, args, okCodes) {
   return (await git(cwd, args, okCodes)).toString("utf8").trim();
@@ -37150,7 +37166,7 @@ async function readBlobs(root, ids) {
       continue;
     }
     if (size > MAX_CONTENT_BYTES) {
-      out.set(id, { kind: "tooLarge" });
+      out.set(id, { kind: "tooLarge", size });
       continue;
     }
     if (bytes + size > BATCH_BYTES) {
@@ -37259,7 +37275,7 @@ function assignIds(filePath, raws) {
   });
 }
 function classify(buf) {
-  if (buf.length > MAX_CONTENT_BYTES) return { kind: "tooLarge" };
+  if (buf.length > MAX_CONTENT_BYTES) return { kind: "tooLarge", size: buf.length };
   if (buf.subarray(0, 8e3).includes(0)) return { kind: "binary" };
   return { kind: "text", text: buf.toString("utf8") };
 }
@@ -37269,7 +37285,7 @@ async function readWorkTree(root, filePath) {
     const st = await lstat(abs);
     if (st.isSymbolicLink()) return { kind: "text", text: await readlink(abs) };
     if (!st.isFile()) return ABSENT;
-    if (st.size > MAX_CONTENT_BYTES) return { kind: "tooLarge" };
+    if (st.size > MAX_CONTENT_BYTES) return { kind: "tooLarge", size: st.size };
     return classify(await readFile(abs));
   } catch {
     return ABSENT;
@@ -37478,10 +37494,13 @@ import { readFile as readFile2 } from "node:fs/promises";
 import { createServer } from "node:http";
 import { isIP } from "node:net";
 import path5 from "node:path";
+import { pipeline } from "node:stream/promises";
 import { promisify } from "node:util";
 import { gzip } from "node:zlib";
 
 // src/engine/browse.ts
+import { createReadStream } from "node:fs";
+import { lstat as lstat2 } from "node:fs/promises";
 import path3 from "node:path";
 
 // src/shared/search.ts
@@ -37983,17 +38002,34 @@ function repoOf(diff, filePath) {
   if (!repo) return null;
   return { repo, root: path3.join(diff.repoRoot, repo.dir), rest: repo.dir ? filePath.slice(repo.dir.length + 1) : filePath };
 }
-async function readRepoFile(diff, filePath) {
+function sourceOf(diff, filePath) {
   const where = isRepoPath(filePath) ? repoOf(diff, filePath) : null;
   if (!where) return null;
   const changed = diff.files.find((f) => f.path === filePath);
   if (changed?.status === "deleted") return null;
-  if (changed && changed.newContent !== null) return { path: filePath, text: changed.newContent, binary: false, tooLarge: false };
-  const { repo, root, rest } = where;
-  const rev = repo.headCommit ?? (changed ? null : repo.oldCommit);
-  const c = rev ? await readBlobAt(root, rev, rest) : changed ? await readWorkTree(root, rest) : ABSENT;
+  const rev = where.repo.headCommit ?? (changed ? null : where.repo.oldCommit);
+  return rev || changed ? { root: where.root, rest: where.rest, rev } : null;
+}
+async function readRepoFile(diff, filePath) {
+  const from = sourceOf(diff, filePath);
+  if (!from) return null;
+  const local = diff.files.find((f) => f.path === filePath)?.newContent ?? null;
+  if (local !== null) return { path: filePath, text: local, binary: false, tooLarge: false, size: null };
+  const c = from.rev ? await readBlobAt(from.root, from.rev, from.rest) : await readWorkTree(from.root, from.rest);
   if (c.kind === "absent") return null;
-  return { path: filePath, text: c.kind === "text" ? c.text : null, binary: c.kind === "binary", tooLarge: c.kind === "tooLarge" };
+  const size = c.kind === "tooLarge" ? c.size : null;
+  return { path: filePath, text: c.kind === "text" ? c.text : null, binary: c.kind === "binary", tooLarge: c.kind === "tooLarge", size };
+}
+async function openRepoFile(diff, filePath) {
+  const from = sourceOf(diff, filePath);
+  if (!from) return null;
+  if (from.rev) {
+    const blob = await blobAt(from.root, from.rev, from.rest);
+    return blob && { size: blob.size, stream: gitStream(from.root, ["cat-file", "blob", blob.oid]) };
+  }
+  const abs = path3.join(from.root, from.rest);
+  const st = await lstat2(abs).catch(() => null);
+  return st?.isFile() ? { size: st.size, stream: createReadStream(abs) } : null;
 }
 async function listRepoFiles(diff) {
   const gone = new Set(diff.files.flatMap((f) => f.status === "renamed" && f.oldPath !== null ? [f.oldPath] : []));
@@ -38009,13 +38045,17 @@ async function listRepoFiles(diff) {
   });
   return [.../* @__PURE__ */ new Set([...parts2.flat().filter((p) => !gone.has(p)), ...diff.files.map((f) => f.path)])];
 }
-async function readBlobAt(root, rev, rest) {
+async function blobAt(root, rev, rest) {
   const check2 = await git(root, ["cat-file", "--batch-check=%(objectname) %(objecttype) %(objectsize)"], [0], `${rev}:${rest}
 `);
   const [oid = "", type, size] = check2.toString("utf8").trim().split(" ");
-  if (type !== "blob") return ABSENT;
-  if (Number(size) > MAX_CONTENT_BYTES) return { kind: "tooLarge" };
-  return classify(await git(root, ["cat-file", "blob", oid]));
+  return type === "blob" ? { oid, size: Number(size) } : null;
+}
+async function readBlobAt(root, rev, rest) {
+  const blob = await blobAt(root, rev, rest);
+  if (!blob) return ABSENT;
+  if (blob.size > MAX_CONTENT_BYTES) return { kind: "tooLarge", size: blob.size };
+  return classify(await git(root, ["cat-file", "blob", blob.oid]));
 }
 async function grepRepo(diff, query, whole, signal) {
   const found = wordRegExp(query, whole);
@@ -38762,7 +38802,7 @@ var MAX_CACHED_CHARS = 64 * 1024 * 1024;
 var PING_MS = 25e3;
 var SAVE_DELAY_MS = 500;
 var PAGE = /^\/v\/[\w-]+$/;
-var API = /^\/api\/views\/([\w-]+)\/(diff|file|blob|tree|grep|defs|events|refs|threads|review|reviews|wait|version|topics)(?:\/([\w-]+)\/comments(?:\/([\w-]+))?)?$/;
+var API = /^\/api\/views\/([\w-]+)\/(diff|file|blob|raw|tree|grep|defs|events|refs|threads|review|reviews|wait|version|topics)(?:\/([\w-]+)\/comments(?:\/([\w-]+))?)?$/;
 var SHA = /^[0-9a-f]{40,64}$/;
 var sshAddress = process.env.SSH_CONNECTION?.split(" ")[2] ?? "";
 var SSH_HOST = isIP(sshAddress) ? sshAddress : null;
@@ -39044,6 +39084,20 @@ var ReviewServer = class {
         const filePath = query.get("path") ?? "";
         const file2 = await readRepoFile(diff, filePath);
         return file2 ? sendJson(res, 200, { file: file2 }) : sendJson(res, 404, { error: `${filePath} is not in the compared version.` });
+      }
+      case "GET raw": {
+        const { version: version2, diff } = await this.loadDiff(view.repo, compare);
+        if (version2 !== query.get("version")) return sendJson(res, 409, { error: "The diff changed. Load the new changes first." });
+        const filePath = query.get("path") ?? "";
+        const file2 = await openRepoFile(diff, filePath);
+        if (!file2) return sendJson(res, 404, { error: `${filePath} is not in the compared version.` });
+        res.writeHead(200, {
+          "Content-Type": imageTypeOf(filePath) ?? "application/octet-stream",
+          "Content-Length": file2.size,
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff"
+        });
+        return pipeline(file2.stream, res);
       }
       case "GET tree": {
         const { version: version2, diff } = await this.loadDiff(view.repo, compare);

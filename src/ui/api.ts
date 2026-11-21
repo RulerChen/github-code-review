@@ -68,11 +68,32 @@ export async function fetchFile(viewId: string, compare: Comparison | null, vers
   return (await request<{ file: FileDiff }>(`${viewUrl(viewId, "file")}?${params}`, (b) => !!b.file)).file;
 }
 
-export async function fetchRepoFile(viewId: string, compare: Comparison | null, version: string, path: string): Promise<RepoFile> {
+function fileQuery(compare: Comparison | null, version: string, path: string): URLSearchParams {
   const params = new URLSearchParams(compare ? comparisonQuery(compare) : "");
   params.set("path", path);
   params.set("version", version);
-  return (await request<{ file: RepoFile }>(`${viewUrl(viewId, "blob")}?${params}`, (b) => !!b.file)).file;
+  return params;
+}
+
+export async function fetchRepoFile(viewId: string, compare: Comparison | null, version: string, path: string): Promise<RepoFile> {
+  return (await request<{ file: RepoFile }>(`${viewUrl(viewId, "blob")}?${fileQuery(compare, version, path)}`, (b) => !!b.file)).file;
+}
+
+export const rawFileUrl = (viewId: string, compare: Comparison | null, version: string, path: string) =>
+  `${viewUrl(viewId, "raw")}?${fileQuery(compare, version, path)}`;
+
+export async function fetchBytes(url: string): Promise<Uint8Array> {
+  let res: Response;
+  try {
+    res = await fetch(url, { cache: "no-store" });
+  } catch {
+    throw new ApiError(UNREACHABLE, 0);
+  }
+  if (!res.ok) {
+    const body = (await res.json().catch(() => null)) as { error?: string } | null;
+    throw new ApiError(body?.error ?? `HTTP ${res.status}`, res.status);
+  }
+  return new Uint8Array(await res.arrayBuffer());
 }
 
 export async function fetchTree(viewId: string, compare: Comparison | null, version: string): Promise<string[]> {

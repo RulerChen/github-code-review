@@ -156,3 +156,16 @@ button.code-crumb:hover {
   color: var(--fg-muted);
   text-align: center;
 }
+
+.code-image {
+  display: flex;
+  justify-content: center;
+  padding: 24px 16px;
+}
+
+.code-image img {
+  max-width: 100%;
+  height: auto;
+  border: 1px solid var(--border-muted);
+  background: repeating-conic-gradient(var(--bg-subtle) 0 25%, var(--bg) 0 50%) 0 0 / 16px 16px;
+}
