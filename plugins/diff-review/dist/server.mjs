@@ -1328,7 +1328,7 @@ var require_errors = __commonJS({
         gen.return(false);
       }
     }
-    var E = {
+    var E2 = {
       keyword: new codegen_1.Name("keyword"),
       schemaPath: new codegen_1.Name("schemaPath"),
       // also used in JTD errors
@@ -1362,20 +1362,20 @@ var require_errors = __commonJS({
       if (schemaPath) {
         schPath = (0, codegen_1.str)`${schPath}${(0, util_1.getErrorPath)(schemaPath, util_1.Type.Str)}`;
       }
-      return [E.schemaPath, schPath];
+      return [E2.schemaPath, schPath];
     }
     function extraErrorProps(cxt, { params, message }, keyValues) {
       const { keyword, data, schemaValue, it } = cxt;
       const { opts, propertyName, topSchemaRef, schemaPath } = it;
-      keyValues.push([E.keyword, keyword], [E.params, typeof params == "function" ? params(cxt) : params || (0, codegen_1._)`{}`]);
+      keyValues.push([E2.keyword, keyword], [E2.params, typeof params == "function" ? params(cxt) : params || (0, codegen_1._)`{}`]);
       if (opts.messages) {
-        keyValues.push([E.message, typeof message == "function" ? message(cxt) : message]);
+        keyValues.push([E2.message, typeof message == "function" ? message(cxt) : message]);
       }
       if (opts.verbose) {
-        keyValues.push([E.schema, schemaValue], [E.parentSchema, (0, codegen_1._)`${topSchemaRef}${schemaPath}`], [names_1.default.data, data]);
+        keyValues.push([E2.schema, schemaValue], [E2.parentSchema, (0, codegen_1._)`${topSchemaRef}${schemaPath}`], [names_1.default.data, data]);
       }
       if (propertyName)
-        keyValues.push([E.propertyName, propertyName]);
+        keyValues.push([E2.propertyName, propertyName]);
     }
   }
 });
@@ -12336,12 +12336,12 @@ var NEVER = /* @__PURE__ */ Object.freeze({
 var _zodDesc = { value: void 0, enumerable: false };
 var _E = "captureStackTrace" in Error ? Error : null;
 function newError(Definition) {
-  const E = _E;
-  if (E) {
-    const saved = E.stackTraceLimit;
+  const E2 = _E;
+  if (E2) {
+    const saved = E2.stackTraceLimit;
     if (typeof saved === "number") {
       try {
-        E.stackTraceLimit = 0;
+        E2.stackTraceLimit = 0;
       } catch {
         _E = null;
         return new Definition();
@@ -12349,7 +12349,7 @@ function newError(Definition) {
       try {
         return new Definition();
       } finally {
-        E.stackTraceLimit = saved;
+        E2.stackTraceLimit = saved;
       }
     }
   }
@@ -37506,21 +37506,40 @@ function wordPattern(query, whole) {
   return `${wordStart ? `(^|[^${WORD}])` : ""}${words.join("[[:space:]]+")}${wordEnd ? `([^${WORD}]|$)` : ""}`;
 }
 
-// src/engine/browse.ts
-var MAX_HITS = 500;
-var MAX_DEFINITIONS = 50;
-var MAX_HIT_CHARS = 400;
-var LEAD_CHARS = 100;
-var NOT_GENERATED = ":(exclude,attr:linguist-generated=true)";
-var IDENTIFIER = /^[\p{L}_$][\p{L}\p{N}_$]{0,199}$/u;
+// src/engine/scope.ts
 var S = "[[:space:]]";
 var START = "(^|[^[:alnum:]_$])";
 var END = "([^[:alnum:]_$]|$)";
 var OPENS = "\\(([^;]*$|[^;{]*\\)[^;{]*\\{)";
+var B = "(?<![\\w$.])";
+var E = "(?![\\w$])";
+var named = (n, mods = "") => `\\((?:[^()]*?(?:[,{\\[]|\\.\\.\\.))?\\s*${mods}${n}${E}\\s*\\??\\s*(?:[,:}\\]][^()]*|=(?![=>])[^()]*)?\\)`;
+var JS_MODS = "(?:(?:public|private|protected|readonly|override)\\s+)*";
+var JS_HEAD = "(?:(?:export|default|public|private|protected|static|async|override|abstract|get|set)\\s+)*";
+var JS_CONTROL = "(?:if|for|while|switch|catch|return|with|do|else|function|await|new|typeof|void)";
+var C_MODS = "(?:(?:const|static|volatile|unsigned|signed|struct|enum|union|class|register|extern|final|mutable|constexpr|inline|typename|long|short|public|private|protected|internal|readonly|abstract|virtual|override|sealed|synchronized|transient|native|unsafe|ref|out|in|params)\\s+)*";
+var C_KEYWORD = "(?:return|goto|delete|throw|new|else|case|typedef|using|namespace|package|import|break|continue|co_return|co_await|co_yield|await|yield|sizeof|if|while|for|switch|do|catch|try)";
+var C_TYPE = `(?!${C_KEYWORD}\\b)${C_MODS}[A-Za-z_][\\w:.]*(?:<[^;(){}]*>)?(?:\\[\\s*\\])*`;
+var LOWER = "(?=[a-z_])";
+var typed = (n) => `${C_TYPE}(?:\\s*[*&]+\\s*|\\s+)(?:const\\s+)?${n}${E}`;
 var LANGUAGES = [
   {
     exts: ["py", "pyi"],
-    patterns: (n) => [`^${S}*(async${S}+)?def${S}+${n}${S}*\\(`, `^${S}*class${S}+${n}${END}`, `^${n}${S}*(:[^=]*)?=([^=]|$)`]
+    patterns: (n) => [`^${S}*(async${S}+)?def${S}+${n}${S}*\\(`, `^${S}*class${S}+${n}${END}`, `^${n}${S}*(:[^=]*)?=([^=]|$)`],
+    locals: (n) => [
+      `^\\s*(?:[\\w.\\[\\]*]+\\s*,\\s*)*\\*?${n}${E}\\s*(?:,\\s*\\*?[\\w.\\[\\]]+\\s*)*,?\\s*(?::[^=]+)?=(?!=)(?!.*,\\s*$)`,
+      `\\bfor\\s+(?:[^:]*?[\\s,(])?${n}${E}(?:\\s*[,)][^:]*?)?\\s+in\\b`,
+      `\\b(?:with|except|import)\\b.*\\bas\\s+\\(?(?:\\w+\\s*,\\s*)*${n}${E}`,
+      `^\\s*import\\s+(?:[\\w.]+(?:\\s+as\\s+\\w+)?\\s*,\\s*)*${n}${E}(?!\\s+as\\b)`,
+      `^\\s*from\\s+[\\w.]+\\s+import\\b(?:.*[\\s,(])?${n}${E}(?!\\s+as\\b)`,
+      `${B}${n}\\s*:=`
+    ],
+    binders: (n) => [
+      `\\bdef\\s+\\w+\\s*\\((?:[^()]*?,)?\\s*\\*{0,2}${n}${E}\\s*(?:[,:)]|=(?!=))`,
+      `\\blambda\\b(?:[^:]*?,)?\\s*\\*{0,2}${n}${E}\\s*(?:[,:]|=(?!=))`
+    ],
+    params: (n) => [`^\\s*\\*{0,2}${n}${E}\\s*(?:[,:)]|=(?!=)|$)`],
+    module: /^\s*from\s+([\w.]+)\s+import\b|^\s*import\s+([\w.]+)/
   },
   {
     exts: ["js", "jsx", "mjs", "cjs", "ts", "tsx", "mts", "cts"],
@@ -37530,11 +37549,42 @@ var LANGUAGES = [
       `${START}(const|let|var)${S}+${n}${S}*(:[^=]*)?=([^=]|$)`,
       `^${S}*((public|private|protected|static|async|readonly|override|abstract|get|set)${S}+)*\\*?${n}${S}*(<[^>]*>)?\\([^;]*\\)[^;]*\\{${S}*$`,
       `^${S}*((public|private|protected|static|readonly|override)${S}+)*${n}${S}*(:[^=]*)?=${S}*(async${S}*)?(\\(|[[:alnum:]_$]+${S}*=>)`
-    ]
+    ],
+    locals: (n) => [
+      `^\\s*(?:export\\s+)?(?:declare\\s+)?(?:const|let|var)\\s+${n}${E}`,
+      `^\\s*(?:export\\s+)?(?:const|let|var)\\s*[{\\[](?:[^=]*?(?:[,{\\[\\s:]|\\.\\.\\.))?${n}${E}\\s*(?:=[^,}\\]]*)?[,}\\]]`,
+      `^\\s*import\\b[^"'\`]*?${B}${n}${E}`
+    ],
+    binders: (n) => [
+      `${named(n, JS_MODS)}\\s*(?::[^=()]*?)?\\s*=>`,
+      `${B}${n}\\s*=>`,
+      `\\bfunction\\b[^(]*${named(n, JS_MODS)}`,
+      `^\\s*${JS_HEAD}\\*?(?!${JS_CONTROL}\\b)[\\w$#]+\\s*(?:<[^>()]*>)?${named(n, JS_MODS)}[^;]*\\{\\s*$`,
+      `\\bcatch\\s*\\(\\s*${n}${E}`,
+      `\\bfor\\s*(?:await\\s*)?\\(\\s*(?:const|let|var)\\s*(?:[{\\[](?:[^=;)]*?[,\\s{\\[:])?)?${n}${E}`,
+      `(?:\\bfunction\\b\\s*\\*?\\s*[\\w$]*|\\b(?:class|interface|type)\\s+[\\w$]+|^\\s*${JS_HEAD}[\\w$#]+)\\s*<(?:[^<>()]*,)?\\s*(?:const\\s+|in\\s+|out\\s+)?${n}${E}[^<>()]*>`
+    ],
+    params: (n) => [
+      `^\\s*(?:\\.\\.\\.)?${JS_MODS}${n}${E}\\s*\\??\\s*(?:[,:)]|=(?![=>])|$)`,
+      `^\\s*[{\\[](?:[^=()]*?[,{\\[\\s:])?${n}${E}\\s*(?:=[^,}\\]]*)?[,}\\]]`
+    ],
+    module: /\bfrom\s*["']([^"']+)["']|\brequire\s*\(\s*["']([^"']+)["']/
   },
   {
     exts: ["go"],
-    patterns: (n) => [`^func${S}*(\\([^)]*\\)${S}*)?${n}${S}*[([]`, `^${S}*type${S}+${n}${END}`, `^(var|const)${S}+${n}${END}`]
+    patterns: (n) => [`^func${S}*(\\([^)]*\\)${S}*)?${n}${S}*[([]`, `^${S}*type${S}+${n}${END}`, `^(var|const)${S}+${n}${END}`],
+    locals: (n) => [
+      `^\\s*(?:\\w+\\s*,\\s*)*${n}${E}\\s*(?:,\\s*\\w+\\s*)*:=`,
+      `^\\s*(?:var|const)\\s+${n}${E}`,
+      `^\\s*(?:import\\s+)?${n}\\s+"[^"]+"`
+    ],
+    binders: (n) => [
+      `\\bfunc\\b[^(]*\\((?:[^()]*?,)?\\s*${n}${E}(?:\\s*,|\\s+[\\w*\\[\\]<.(]|\\s*\\.\\.\\.)`,
+      `\\bfunc\\s*\\([^()]*\\)\\s*\\w+\\s*(?:\\[[^\\]]*\\])?\\((?:[^()]*?,)?\\s*${n}${E}(?:\\s*,|\\s+[\\w*\\[\\]<.(]|\\s*\\.\\.\\.)`,
+      `\\b(?:if|for|switch|case)\\b.*?[\\s,;]${n}${E}\\s*(?:,\\s*\\w+\\s*)*:=`
+    ],
+    params: (n) => [`^\\s*${n}${E}(?:\\s*,|\\s+[\\w*\\[\\]<.(])`],
+    module: /^\s*(?:import\s+)?[\w.]*\s*"([^"]+)"\s*$/
   },
   {
     exts: ["rs"],
@@ -37542,7 +37592,22 @@ var LANGUAGES = [
       `${START}fn${S}+${n}${S}*[(<]`,
       `${START}(struct|enum|trait|type|union|mod|const|static)${S}+${n}${END}`,
       `macro_rules!${S}*${n}${END}`
-    ]
+    ],
+    locals: (n) => [
+      `^\\s*let\\s+(?:mut\\s+)?${n}${E}`,
+      `^\\s*let\\s+(?:mut\\s+)?[^=]*?[\\s({\\[,&]\\s*(?:mut\\s+|ref\\s+)*${LOWER}${n}${E}\\s*[,)}\\]:]`,
+      `^\\s*(?:pub(?:\\([^)]*\\))?\\s+)?use\\b[^;]*?(?:::|[\\s{,])${n}${E}\\s*(?:[,;}]|$)`,
+      `^\\s*(?:pub(?:\\([^)]*\\))?\\s+)?use\\b.*\\bas\\s+${n}${E}`
+    ],
+    binders: (n) => [
+      `\\bfn\\b[^(]*\\((?:[^()]*?,)?\\s*(?:mut\\s+)?${n}${E}\\s*:`,
+      `\\|(?:[^|]*?,)?\\s*(?:mut\\s+|&)*${n}${E}\\s*(?:[:,][^|]*)?\\|`,
+      `\\bfor\\s+(?:[^{]*?[\\s,(&])?(?:mut\\s+)?${n}${E}(?:\\s*[,)][^{]*?)?\\s+in\\b`,
+      `\\b(?:if|while)\\s+let\\b[^=]*?[\\s({,&]${LOWER}${n}${E}[^=]*=(?!=)`,
+      `[(\\s{,&|]${LOWER}${n}${E}\\s*(?:[,)}]|@)[^=]*=>`
+    ],
+    params: (n) => [`^\\s*(?:mut\\s+)?${n}${E}\\s*:`],
+    module: /^\s*(?:pub(?:\([^)]*\))?\s+)?use\s+([\w:]+)/
   },
   {
     exts: ["c", "h", "cc", "cpp", "cxx", "c++", "hpp", "hh", "hxx", "h++", "ipp", "inl", "cu", "cuh", "m", "mm", "java", "cs"],
@@ -37554,11 +37619,136 @@ var LANGUAGES = [
       `${START}(struct|class|union|enum|interface|record)${S}+([[:alnum:]_]+${S}+)*${n}${S}*([{:<]|$)`,
       `^${S}*typedef[^;]*[^[:alnum:]_]${n}${S}*;`,
       `${START}using${S}+${n}${S}*=`
-    ]
+    ],
+    locals: (n) => [
+      `^\\s*${typed(n)}\\s*(?:[=;,\\[({:]|$)`,
+      `^\\s*${C_TYPE}(?:\\s*[*&]+\\s*|\\s+)[^;=(]*,\\s*[*&]*\\s*${n}${E}\\s*(?:[=;,\\[]|$)`,
+      `^\\s*template\\s*<[^>]*\\b(?:typename|class)\\s+(?:\\.\\.\\.\\s*)?${n}${E}`
+    ],
+    binders: (n) => [
+      `^\\s*(?!(?:\\}\\s*)?(?:if|else|for|while|switch|do|return)\\b).*[(,]\\s*${typed(n)}\\s*(?:\\[[^\\]]*\\])?\\s*(?:[,)=]|$)`,
+      `\\b(?:for|if|while|switch|foreach|using|catch|lock|fixed)\\s*\\(\\s*${typed(n)}\\s*(?:[=:;,)]|\\bin\\b|$)`,
+      `${B}${n}(?:\\s+->|\\s*=>)`,
+      `\\((?:[^()]*?,)?\\s*(?:${C_TYPE}(?:\\s*[*&]+\\s*|\\s+))?${n}${E}\\s*(?:,[^()]*)?\\)(?:\\s+->|\\s*=>)`
+    ],
+    params: (n) => [`(?:^|[(,])\\s*${typed(n)}\\s*(?:\\[[^\\]]*\\])?\\s*(?:[,)=]|$)`]
   }
 ];
 var KEYWORDS = "def|defp|defmodule|fn|fun|func|function|sub|proc|class|struct|interface|trait|object|module|type|enum|macro";
-var anyLanguage = (n) => [`${START}(${KEYWORDS})${S}+${n}${END}`];
+var GENERIC = {
+  exts: [],
+  patterns: (n) => [`${START}(${KEYWORDS})${S}+${n}${END}`],
+  locals: (n) => [
+    `^\\s*(?:(?:export|pub|public|private|protected|internal|open|override|static|final|readonly|declare(?:\\s+-\\w+)*)\\s+)*(?:let|var|val|const|local|my|our|alias)\\s+(?:mut\\s+)?[$@%]?${n}${E}`,
+    `^\\s*(?:(?:export|local|readonly|declare(?:\\s+-\\w+)*)\\s+)?[$@%]?${n}\\s*=(?![=~>])`,
+    `^\\s*(?:function\\s+)?${n}\\s*\\(\\s*\\)\\s*\\{?\\s*$`
+  ],
+  binders: (n) => [
+    `\\b(?:def|fn|fun|func|function|sub|proc|lambda|init)\\b[^(]*\\((?:[^()]*?,)?\\s*(?:\\w+\\s+)?[$@%&*]*${n}${E}\\s*(?:[,:)]|=(?!=)|$)`,
+    `\\|(?:[^|]*?,)?\\s*${n}${E}\\s*(?:,[^|]*)?\\|`,
+    `\\bfor(?:each)?\\s+\\(?(?:\\w+\\s*,\\s*)*[$]?${n}${E}(?:\\s*,\\s*\\w+)*\\s+in\\b`
+  ],
+  params: (n) => [`^\\s*(?:\\w+\\s+)?[$@%&*]*${n}${E}\\s*(?:[,:)]|=(?!=)|$)`]
+};
+function languageOf(filePath) {
+  const base = filePath.slice(filePath.lastIndexOf("/") + 1);
+  const ext = base.includes(".") ? base.slice(base.lastIndexOf(".") + 1).toLowerCase() : "";
+  return LANGUAGES.find((l) => l.exts.includes(ext)) ?? GENERIC;
+}
+var fromPosix = (pattern) => pattern.replaceAll("[:space:]", "\\s").replaceAll("[:alnum:]", "A-Za-z0-9");
+var finder = (sources) => {
+  const all = sources.map((s) => new RegExp(s, "d"));
+  return (line) => all.flatMap((r) => {
+    const at = r.exec(line)?.indices?.groups?.n?.[0];
+    return at === void 0 ? [] : [at];
+  });
+};
+function indentOf(line) {
+  let n = 0;
+  for (const c of line) {
+    if (c === " ") n++;
+    else if (c === "	") n += 8 - n % 8;
+    else break;
+  }
+  return n;
+}
+var NO_SCOPE = /^(?:$|\/\/|\/\*|\*(?:\s|\/|$)|--|#(?!\s*define\b)|(?:case\b.*|\w+)\s*:\s*(?:(?:\/\/|#).*)?$)/;
+var CONTROL = /^(?:\}\s*)?(?:if|else|elif|for|foreach|while|until|unless|switch|return|assert)\b/;
+function closesList(t) {
+  if (t === "{") return true;
+  return /^[)\]}]/.test(t) && !/^[)\]}]+\s*[.;,]/.test(t) && !/^\}\s*(?:else|catch|finally|while|elif|except)\b/.test(t) && /(?:\{|=>\s*\(?|:)\s*$/.test(t);
+}
+function opener(lines, closer, indent2) {
+  for (let k = closer - 1; k >= 1; k--) {
+    const t = lines[k - 1].trim();
+    if (!NO_SCOPE.test(t) && indentOf(lines[k - 1]) <= indent2) return t;
+  }
+  return "";
+}
+function scopeOf(text, no, col, name, filePath) {
+  const lines = text.split("\n");
+  const line = lines[no - 1];
+  if (line === void 0 || line.slice(col, col + name.length) !== name) return { kind: "free" };
+  const before = line.slice(0, col);
+  if (/(?:\.|->|::)\s*$/.test(before) && !/\.\.\.\s*$/.test(before)) {
+    return { kind: "member", own: /(?<![\w$.])(?:this|self|cls)\s*(?:\.|->)\s*$/.test(before) };
+  }
+  const lang = languageOf(filePath);
+  const n = `(?<n>${name.replaceAll("$", "\\$")})`;
+  const declared = finder([...lang.patterns(n).map(fromPosix), ...lang.locals(n)]);
+  const bound = finder(lang.binders(n));
+  const listed = finder(lang.params(n));
+  const declares = (l) => declared(l).length > 0;
+  const binds = (l) => bound(l).length > 0;
+  const param = (l) => listed(l).length > 0;
+  const at = (k) => {
+    const found = k === no ? null : lang.module?.exec(lines[k - 1]);
+    return { kind: "bound", line: k, module: found?.slice(1).find((m) => m !== void 0) ?? null };
+  };
+  const here = [...declared(line), ...bound(line), ...inList(lines, no) ? listed(line) : []];
+  if (here.includes(col)) return { kind: "declared" };
+  if (here.some((c) => c < col)) return at(no);
+  let min = indentOf(line);
+  let list = null;
+  for (let k = no - 1; k >= 1; k--) {
+    const l = lines[k - 1];
+    const t = l.trim();
+    if (NO_SCOPE.test(t)) continue;
+    const i = indentOf(l);
+    if (list && i > list.indent) {
+      if (list.params && param(l)) return at(k);
+      continue;
+    }
+    const opened = list;
+    list = null;
+    if (i > min) continue;
+    const encloses = i < min || opened !== null;
+    min = i;
+    if (declares(l) || encloses && binds(l)) return at(k);
+    if (opened?.params && l.slice(l.lastIndexOf("(") + 1).split(",").some(param)) return at(k);
+    if (encloses && !opened && closesList(t)) list = { indent: i, params: !CONTROL.test(opener(lines, k, i)) };
+  }
+  return here.length ? at(no) : { kind: "free" };
+}
+function inList(lines, no) {
+  const indent2 = indentOf(lines[no - 1]);
+  for (let k = no + 1; k <= lines.length; k++) {
+    const t = lines[k - 1].trim();
+    if (NO_SCOPE.test(t)) continue;
+    const i = indentOf(lines[k - 1]);
+    if (i >= indent2) continue;
+    return t !== "{" && closesList(t) && !CONTROL.test(opener(lines, k, i));
+  }
+  return false;
+}
+
+// src/engine/browse.ts
+var MAX_HITS = 500;
+var MAX_DEFINITIONS = 50;
+var MAX_HIT_CHARS = 400;
+var LEAD_CHARS = 100;
+var NOT_GENERATED = ":(exclude,attr:linguist-generated=true)";
+var IDENTIFIER = /^[\p{L}_$][\p{L}\p{N}_$]{0,199}$/u;
 function isRepoPath(p) {
   return p !== "" && !/[\0\n\r]/.test(p) && p.split("/").every((s) => s !== "" && s !== "." && s !== "..");
 }
@@ -37604,21 +37794,51 @@ async function nearestFirst(groups, find) {
 }
 var defines = (name, patterns) => ["-E", "-e", name, "--and", "(", ...patterns.flatMap((p) => ["-e", p]), ")"];
 var isIdentifier = (name) => IDENTIFIER.test(name);
-async function findDefinitions(diff, name, from, line, signal) {
-  const base = from.slice(from.lastIndexOf("/") + 1);
-  const ext = base.includes(".") ? base.slice(base.lastIndexOf(".") + 1).toLowerCase() : "";
-  const language = LANGUAGES.find((l) => l.exts.includes(ext));
+async function findDefinitions(diff, name, from, click, signal) {
+  const text = click ? (await readRepoFile(diff, from))?.text ?? null : null;
+  const scoped = click && text !== null ? scopeOf(text, click.line, click.col, name, from) : { kind: "free" };
+  const only = (hits) => ({ hits, capped: false, declared: false });
+  const lineOf = (no) => {
+    const line = text.split("\n")[no - 1];
+    return hitOf(from, no, line, line.indexOf(name));
+  };
+  if (scoped.kind === "declared") return { hits: [], capped: false, declared: true };
+  if (scoped.kind === "bound" && scoped.module === null) return only([lineOf(scoped.line)]);
+  const language = languageOf(from);
   const escaped = name.replaceAll("$", "\\$");
-  const patterns = language ? language.patterns(escaped) : anyLanguage(escaped);
-  const exts = language?.exts ?? (ext ? [ext] : []);
-  const pathspecs = exts.length ? exts.map((e) => `*.${e}`) : ["."];
+  const pathspecs = language.exts.length ? language.exts.map((e) => `*.${e}`) : ["."];
   const own2 = repoOf(diff, from)?.repo;
   const all = searchable(diff);
   const found = await nearestFirst(
     own2 ? [[own2], all.filter((r) => r !== own2)] : [all],
-    (repos) => grepLines(diff, repos, defines(escaped, patterns), pathspecs, MAX_DEFINITIONS, signal, (text) => text.indexOf(name))
+    (repos) => grepLines(diff, repos, defines(escaped, language.patterns(escaped)), pathspecs, MAX_DEFINITIONS, signal, (line) => line.indexOf(name))
   );
-  return { ...found, declared: found.hits.some((h) => h.path === from && h.no === line) };
+  const clicked = click && text !== null ? text.split("\n")[click.line - 1] ?? "" : "";
+  if (click && clicked.indexOf(name) === click.col && found.hits.some((h) => h.path === from && h.no === click.line)) {
+    return { hits: [], capped: false, declared: true };
+  }
+  if (scoped.kind === "bound") {
+    const imported = inModule(found.hits, scoped.module, from);
+    return only(imported.length ? imported : found.hits.length === 1 ? found.hits : [lineOf(scoped.line)]);
+  }
+  const here = scoped.kind === "free" || scoped.own ? found.hits.filter((h) => h.path === from) : [];
+  return here.length === 1 ? only(here) : { ...found, declared: false };
+}
+function inModule(hits, module, from) {
+  const bare = (p) => p.replace(/\.[^./]+$/, "").replace(/\/(?:index|__init__|mod)$/, "");
+  if (module.startsWith(".") && module.includes("/")) {
+    const target = bare(path3.posix.join(path3.posix.dirname(from), module));
+    return hits.filter((h) => bare(h.path) === target);
+  }
+  const words = module.split(/[./:]+/).filter((w) => w && w !== "crate" && w !== "self" && w !== "super");
+  for (let take = words.length; take > 0; take--) {
+    for (let start = 0; start + take <= words.length; start++) {
+      const tail = `/${words.slice(start, start + take).join("/")}`;
+      const inFile = hits.filter((h) => `/${bare(h.path)}`.endsWith(tail));
+      if (inFile.length) return inFile;
+    }
+  }
+  return [];
 }
 function findDefinitionsAnywhere(diff, name, signal) {
   const escaped = name.replaceAll("$", "\\$");
@@ -37629,7 +37849,7 @@ function findDefinitionsAnywhere(diff, name, signal) {
     const find = (patterns, pathspecs) => grepLines(diff, repos, ["-i", ...defines(escaped, patterns)], pathspecs, MAX_DEFINITIONS, signal, (text) => text.toLowerCase().indexOf(lower));
     const found = await Promise.all([
       ...LANGUAGES.map((l) => find(l.patterns(escaped), l.exts.map((e) => `*.${e}`))),
-      find(anyLanguage(escaped), [".", ...LANGUAGES.flatMap((l) => l.exts).map((e) => `:(exclude)*.${e}`)])
+      find(GENERIC.patterns(escaped), [".", ...LANGUAGES.flatMap((l) => l.exts).map((e) => `:(exclude)*.${e}`)])
     ]);
     const hits = found.flatMap((f) => f.hits).sort((a, b) => compareText(a.path, b.path) || a.no - b.no);
     return { hits: hits.slice(0, MAX_DEFINITIONS), capped: hits.length > MAX_DEFINITIONS || found.some((f) => f.capped) };
@@ -38593,9 +38813,11 @@ var ReviewServer = class {
         const from = query.get("path");
         if (!isIdentifier(name) || (from?.length ?? 0) > MAX_PATH) return sendJson(res, 400, { error: "Invalid name" });
         const line = Number(query.get("line"));
+        const col = Number(query.get("col"));
+        const click = Number.isInteger(line) && line > 0 && Number.isInteger(col) && col >= 0 ? { line, col } : null;
         const { version: version2, diff } = await this.loadDiff(view.repo, compare);
         if (from === null) return sendFound(res, version2, (signal) => findDefinitionsAnywhere(diff, name, signal));
-        return sendFound(res, version2, (signal) => findDefinitions(diff, name, from, Number.isInteger(line) && line > 0 ? line : null, signal));
+        return sendFound(res, version2, (signal) => findDefinitions(diff, name, from, click, signal));
       }
       case "GET version":
         return sendJson(res, 200, { version: (await probeDiff(view.repo, compare)).version });

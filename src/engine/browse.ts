@@ -4,6 +4,7 @@ import type { DiffRepo, DiffResult, RepoFile, RepoHit } from "../shared/types.js
 import { compareText } from "../shared/util.js";
 import { ABSENT, classify, type Content, MAX_CONTENT_BYTES, mapLimit, readWorkTree, REPO_LIMIT } from "./diff.js";
 import { git, gitLines } from "./git.js";
+import { GENERIC, LANGUAGES, languageOf, type Scoped, scopeOf } from "./scope.js";
 
 export const MAX_HITS = 500;
 const MAX_DEFINITIONS = 50;
@@ -11,55 +12,6 @@ const MAX_HIT_CHARS = 400;
 const LEAD_CHARS = 100;
 const NOT_GENERATED = ":(exclude,attr:linguist-generated=true)";
 const IDENTIFIER = /^[\p{L}_$][\p{L}\p{N}_$]{0,199}$/u;
-
-const S = "[[:space:]]";
-const START = "(^|[^[:alnum:]_$])";
-const END = "([^[:alnum:]_$]|$)";
-const OPENS = "\\(([^;]*$|[^;{]*\\)[^;{]*\\{)";
-
-const LANGUAGES: { exts: string[]; patterns: (name: string) => string[] }[] = [
-  {
-    exts: ["py", "pyi"],
-    patterns: (n) => [`^${S}*(async${S}+)?def${S}+${n}${S}*\\(`, `^${S}*class${S}+${n}${END}`, `^${n}${S}*(:[^=]*)?=([^=]|$)`],
-  },
-  {
-    exts: ["js", "jsx", "mjs", "cjs", "ts", "tsx", "mts", "cts"],
-    patterns: (n) => [
-      `${START}function${S}*\\*?${S}*${n}${S}*[(<]`,
-      `${START}(class|interface|type|enum|namespace)${S}+${n}${END}`,
-      `${START}(const|let|var)${S}+${n}${S}*(:[^=]*)?=([^=]|$)`,
-      `^${S}*((public|private|protected|static|async|readonly|override|abstract|get|set)${S}+)*\\*?${n}${S}*(<[^>]*>)?\\([^;]*\\)[^;]*\\{${S}*$`,
-      `^${S}*((public|private|protected|static|readonly|override)${S}+)*${n}${S}*(:[^=]*)?=${S}*(async${S}*)?(\\(|[[:alnum:]_$]+${S}*=>)`,
-    ],
-  },
-  {
-    exts: ["go"],
-    patterns: (n) => [`^func${S}*(\\([^)]*\\)${S}*)?${n}${S}*[([]`, `^${S}*type${S}+${n}${END}`, `^(var|const)${S}+${n}${END}`],
-  },
-  {
-    exts: ["rs"],
-    patterns: (n) => [
-      `${START}fn${S}+${n}${S}*[(<]`,
-      `${START}(struct|enum|trait|type|union|mod|const|static)${S}+${n}${END}`,
-      `macro_rules!${S}*${n}${END}`,
-    ],
-  },
-  {
-    exts: ["c", "h", "cc", "cpp", "cxx", "c++", "hpp", "hh", "hxx", "h++", "ipp", "inl", "cu", "cuh", "m", "mm", "java", "cs"],
-    patterns: (n) => [
-      `^[^[:space:]#/][^;=]*[^[:alnum:]_$]${n}${S}*${OPENS}`,
-      `^${n}${S}*${OPENS}`,
-      `^${S}+([[:alnum:]_][[:alnum:]_:<>,*&]*${S}+)+[*&]*${n}${S}*${OPENS}`,
-      `^${S}*#${S}*define${S}+${n}${END}`,
-      `${START}(struct|class|union|enum|interface|record)${S}+([[:alnum:]_]+${S}+)*${n}${S}*([{:<]|$)`,
-      `^${S}*typedef[^;]*[^[:alnum:]_]${n}${S}*;`,
-      `${START}using${S}+${n}${S}*=`,
-    ],
-  },
-];
-
-const KEYWORDS = "def|defp|defmodule|fn|fun|func|function|sub|proc|class|struct|interface|trait|object|module|type|enum|macro";
-const anyLanguage = (n: string) => [`${START}(${KEYWORDS})${S}+${n}${END}`];
 
 export function isRepoPath(p: string): boolean {
   return p !== "" && !/[\0\n\r]/.test(p) && p.split("/").every((s) => s !== "" && s !== "." && s !== "..");
@@ -119,27 +71,63 @@ const defines = (name: string, patterns: string[]) => ["-E", "-e", name, "--and"
 
 export const isIdentifier = (name: string) => IDENTIFIER.test(name);
 
-// declared says the clicked line is one of the definitions, so the question is who uses the name.
-export async function findDefinitions(
-  diff: DiffResult,
-  name: string,
-  from: string,
-  line: number | null,
-  signal: AbortSignal,
-): Promise<Found & { declared: boolean }> {
-  const base = from.slice(from.lastIndexOf("/") + 1);
-  const ext = base.includes(".") ? base.slice(base.lastIndexOf(".") + 1).toLowerCase() : "";
-  const language = LANGUAGES.find((l) => l.exts.includes(ext));
+export interface Click {
+  line: number;
+  col: number;
+}
+
+type Defined = Found & { declared: boolean };
+
+// The file of the click settles what it can: the name is declared right there, or by a line that encloses the click. Only an imported name, or one the file does not declare, is looked up in the repositories. declared says the click is on a definition, so the question is who uses the name.
+export async function findDefinitions(diff: DiffResult, name: string, from: string, click: Click | null, signal: AbortSignal): Promise<Defined> {
+  const text = click ? ((await readRepoFile(diff, from))?.text ?? null) : null;
+  const scoped: Scoped = click && text !== null ? scopeOf(text, click.line, click.col, name, from) : { kind: "free" };
+  const only = (hits: RepoHit[]): Defined => ({ hits, capped: false, declared: false });
+  const lineOf = (no: number) => {
+    const line = text!.split("\n")[no - 1]!;
+    return hitOf(from, no, line, line.indexOf(name));
+  };
+  if (scoped.kind === "declared") return { hits: [], capped: false, declared: true };
+  if (scoped.kind === "bound" && scoped.module === null) return only([lineOf(scoped.line)]);
+
+  const language = languageOf(from);
   const escaped = name.replaceAll("$", "\\$");
-  const patterns = language ? language.patterns(escaped) : anyLanguage(escaped);
-  const exts = language?.exts ?? (ext ? [ext] : []);
-  const pathspecs = exts.length ? exts.map((e) => `*.${e}`) : ["."];
+  const pathspecs = language.exts.length ? language.exts.map((e) => `*.${e}`) : ["."];
   const own = repoOf(diff, from)?.repo;
   const all = searchable(diff);
   const found = await nearestFirst(own ? [[own], all.filter((r) => r !== own)] : [all], (repos) =>
-    grepLines(diff, repos, defines(escaped, patterns), pathspecs, MAX_DEFINITIONS, signal, (text) => text.indexOf(name)),
+    grepLines(diff, repos, defines(escaped, language.patterns(escaped)), pathspecs, MAX_DEFINITIONS, signal, (line) => line.indexOf(name)),
   );
-  return { ...found, declared: found.hits.some((h) => h.path === from && h.no === line) };
+  const clicked = click && text !== null ? (text.split("\n")[click.line - 1] ?? "") : "";
+  if (click && clicked.indexOf(name) === click.col && found.hits.some((h) => h.path === from && h.no === click.line)) {
+    return { hits: [], capped: false, declared: true };
+  }
+
+  if (scoped.kind === "bound") {
+    const imported = inModule(found.hits, scoped.module!, from);
+    return only(imported.length ? imported : found.hits.length === 1 ? found.hits : [lineOf(scoped.line)]);
+  }
+  // A single definition in the clicked file wins over the same name defined in other files.
+  const here = scoped.kind === "free" || scoped.own ? found.hits.filter((h) => h.path === from) : [];
+  return here.length === 1 ? only(here) : { ...found, declared: false };
+}
+
+// The definitions in the file an import names: "./diff.js" next to the importing file, or "airflow.models.dag" and "crate::engine::diff" as the end of a path.
+function inModule(hits: RepoHit[], module: string, from: string): RepoHit[] {
+  const bare = (p: string) => p.replace(/\.[^./]+$/, "").replace(/\/(?:index|__init__|mod)$/, "");
+  if (module.startsWith(".") && module.includes("/")) {
+    const target = bare(path.posix.join(path.posix.dirname(from), module));
+    return hits.filter((h) => bare(h.path) === target);
+  }
+  const words = module.split(/[./:]+/).filter((w) => w && w !== "crate" && w !== "self" && w !== "super");
+  for (let take = words.length; take > 0; take--) {
+    for (let start = 0; start + take <= words.length; start++) {
+      const tail = `/${words.slice(start, start + take).join("/")}`;
+      const inFile = hits.filter((h) => `/${bare(h.path)}`.endsWith(tail));
+      if (inFile.length) return inFile;
+    }
+  }
+  return [];
 }
 
 export function findDefinitionsAnywhere(diff: DiffResult, name: string, signal: AbortSignal): Promise<Found> {
@@ -152,7 +140,7 @@ export function findDefinitionsAnywhere(diff: DiffResult, name: string, signal: 
       grepLines(diff, repos, ["-i", ...defines(escaped, patterns)], pathspecs, MAX_DEFINITIONS, signal, (text) => text.toLowerCase().indexOf(lower));
     const found = await Promise.all([
       ...LANGUAGES.map((l) => find(l.patterns(escaped), l.exts.map((e) => `*.${e}`))),
-      find(anyLanguage(escaped), [".", ...LANGUAGES.flatMap((l) => l.exts).map((e) => `:(exclude)*.${e}`)]),
+      find(GENERIC.patterns(escaped), [".", ...LANGUAGES.flatMap((l) => l.exts).map((e) => `:(exclude)*.${e}`)]),
     ]);
     const hits = found.flatMap((f) => f.hits).sort((a, b) => compareText(a.path, b.path) || a.no - b.no);
     return { hits: hits.slice(0, MAX_DEFINITIONS), capped: hits.length > MAX_DEFINITIONS || found.some((f) => f.capped) };

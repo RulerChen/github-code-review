@@ -85,7 +85,10 @@ export function fetchDefinitions(viewId: string, compare: Comparison | null, nam
   const params = new URLSearchParams(compare ? comparisonQuery(compare) : "");
   params.set("name", name);
   params.set("path", from.path);
-  if (from.line !== null) params.set("line", String(from.line));
+  if (from.line !== null) {
+    params.set("line", String(from.line));
+    params.set("col", String(from.col));
+  }
   return request<Definitions>(`${viewUrl(viewId, "defs")}?${params}`, (b) => Array.isArray(b.hits));
 }
 

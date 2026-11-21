@@ -405,9 +405,11 @@ export class ReviewServer {
         const from = query.get("path");
         if (!isIdentifier(name) || (from?.length ?? 0) > MAX_PATH) return sendJson(res, 400, { error: "Invalid name" });
         const line = Number(query.get("line"));
+        const col = Number(query.get("col"));
+        const click = Number.isInteger(line) && line > 0 && Number.isInteger(col) && col >= 0 ? { line, col } : null;
         const { version, diff } = await this.loadDiff(view.repo, compare);
         if (from === null) return sendFound(res, version, (signal) => findDefinitionsAnywhere(diff, name, signal));
-        return sendFound(res, version, (signal) => findDefinitions(diff, name, from, Number.isInteger(line) && line > 0 ? line : null, signal));
+        return sendFound(res, version, (signal) => findDefinitions(diff, name, from, click, signal));
       }
       case "GET version":
         return sendJson(res, 200, { version: (await probeDiff(view.repo, compare)).version });
