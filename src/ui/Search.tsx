@@ -16,6 +16,7 @@ export interface Hit {
   path: string;
   side: "old" | "new";
   no: number;
+  order: number;
   kind: DiffLine["kind"];
   text: string;
   at: number;
@@ -56,7 +57,8 @@ export function searchChanges(files: FileDiff[], query: string, whole: boolean):
         const text = side === "old" ? file.oldContent : file.newContent;
         const place = text === null ? null : (places[side] ??= insideOf(text, side === "old" ? (file.oldPath ?? file.path) : file.path));
         const inside = place?.(no) ?? null;
-        const hit: Hit = { path: file.path, side, no, kind: line.kind, text: line.text, at: match.index, length: match[0].length, inDiff: true, inside };
+        const order = line.newNo ?? (file.blocks.find((b) => b.id === line.blockId)?.newStart ?? 0) + 0.5;
+        const hit: Hit = { path: file.path, side, no, order, kind: line.kind, text: line.text, at: match.index, length: match[0].length, inDiff: true, inside };
         if (!hits.length) found.groups.push({ path: file.path, hits });
         hits.push(hit);
         found.hits.push(hit);
@@ -67,10 +69,11 @@ export function searchChanges(files: FileDiff[], query: string, whole: boolean):
 }
 
 const SECTIONS = [
-  ["writes", "Writes", "Lines that give the name a value: an assignment, a key of an object, an argument passed by name. A line opens its file on the right."],
-  ["changes", "In the changes", "Lines the diff adds or removes. A line goes to its place in the diff."],
-  ["files", "Rest of the changed files", "Lines the diff leaves as they are, in the files it changes. A line opens its file on the right."],
-  ["repo", "Unchanged files", "Files the diff does not touch. A line opens its file on the right."],
+  [
+    "references",
+    "References",
+    "Every other line with the name: the files the diff changes come first, each read from top to bottom, then the files it leaves alone. A line the diff adds or removes goes to its place in the diff. Any other line opens its file on the right.",
+  ],
   ["repos", "Other repositories", "Repositories with no changes in the diff. A line opens its file on the right."],
 ] as const;
 
@@ -90,27 +93,32 @@ export function searchSections(
   const changing = new Set(changes.hits.filter((h) => h.side === "new").map(idOf));
   const quiet = repos.filter((r) => r.dir !== "" && !files.some((f) => f.path.startsWith(`${r.dir}/`)));
   const added = new Map<string, Set<number>>();
-  const lists: Record<string, Map<string, Hit[]>> = { writes: new Map(), files: new Map(), repo: new Map(), repos: new Map() };
+  const lists: Record<string, Map<string, Hit[]>> = { references: new Map(), repos: new Map() };
+  const put = (key: string, hit: Hit) => {
+    const list = lists[key]!;
+    const hits = list.get(hit.path);
+    if (hits) hits.push(hit);
+    else list.set(hit.path, [hit]);
+  };
 
+  for (const h of changes.hits) if (h.side === "old" || !defined.has(idOf(h))) put("references", h);
   for (const h of repo?.hits ?? []) {
-    const write = h.role === "write";
-    if (defined.has(idOf(h)) || (!write && changing.has(idOf(h)))) continue;
-    const file = changed.get(h.path);
-    const key = write ? "writes" : file ? "files" : quiet.some((r) => h.path.startsWith(`${r.dir}/`)) ? "repos" : "repo";
+    if (defined.has(idOf(h)) || changing.has(idOf(h))) continue;
     let lines = added.get(h.path);
-    if (!lines) added.set(h.path, (lines = addedLines(file)));
+    if (!lines) added.set(h.path, (lines = addedLines(changed.get(h.path))));
     const match = word?.exec(h.text);
     const kind = lines.has(h.no) ? "add" : "context";
     const at = match?.index ?? -1;
-    const hit: Hit = { path: h.path, side: "new", no: h.no, kind, text: h.text, at, length: match?.[0].length ?? 0, inDiff: false, inside: h.inside ?? null };
-    const list = lists[key]!;
-    list.set(h.path, [...(list.get(h.path) ?? []), hit]);
+    const hit: Hit = { path: h.path, side: "new", no: h.no, order: h.no, kind, text: h.text, at, length: match?.[0].length ?? 0, inDiff: false, inside: h.inside ?? null };
+    put(quiet.some((r) => h.path.startsWith(`${r.dir}/`)) ? "repos" : "references", hit);
   }
 
   const out: Section[] = [];
   for (const [key, title, hint] of SECTIONS) {
-    const groups = key === "changes" ? changes.groups : [...lists[key]!].sort(([a], [b]) => comparePaths(a, b)).map(([path, hits]) => ({ path, hits }));
-    const capped = key === "changes" ? changes.capped : (repo?.capped ?? false);
+    const groups = [...lists[key]!]
+      .sort(([a], [b]) => Number(!changed.has(a)) - Number(!changed.has(b)) || comparePaths(a, b))
+      .map(([path, hits]) => ({ path, hits: hits.sort((a, b) => a.order - b.order) }));
+    const capped = (repo?.capped ?? false) || (key === "references" && changes.capped);
     if (groups.length) out.push({ key, title, hint, found: { groups, hits: groups.flatMap((g) => g.hits), capped } });
   }
   return out;
@@ -127,7 +135,7 @@ export function definitionsFound(hits: RepoHit[], capped: boolean, files: FileDi
     const kind = addedLines(changed.get(h.path)).has(h.no) ? "add" : "context";
     const match = word?.exec(h.text);
     const length = h.at < 0 ? 0 : match?.index === h.at ? match[0].length : name.length;
-    const hit: Hit = { path: h.path, side: "new", no: h.no, kind, text: h.text, at: h.at, length, inDiff: false, inside: null };
+    const hit: Hit = { path: h.path, side: "new", no: h.no, order: h.no, kind, text: h.text, at: h.at, length, inDiff: false, inside: null };
     const last = groups[groups.length - 1];
     if (last?.path === h.path) last.hits.push(hit);
     else groups.push({ path: h.path, hits: [hit] });
