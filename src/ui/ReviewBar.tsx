@@ -302,7 +302,7 @@ function ReviewPicker({ reviews, current, repoRoot, onPick, onRemove, onCreate }
           {confirming && (
             <div className="comment-confirm review-confirm" role="alertdialog" aria-label="Remove these topics">
               <span className="comment-confirm-text">
-                Remove the topics for “{shorten(reviewLabel(confirming))}” and Claude's notes on their lines?
+                Remove the topics for “{shorten(reviewLabel(confirming))}”?
               </span>
               <button className="button" ref={focusInPlace} onClick={() => setConfirming(null)}>
                 Cancel

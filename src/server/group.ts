@@ -1,5 +1,5 @@
 import { changeIds, editedInto, oldCommitOf } from "../shared/hunks.js";
-import type { DiffResult, NotedTopic, Review, Topic, TopicNote } from "../shared/types.js";
+import type { DiffResult, Review, Topic } from "../shared/types.js";
 import { isRecord, plural } from "../shared/util.js";
 import { ask } from "./claude.js";
 import { checkTopics, formatChanges, formatFiles } from "./review.js";
@@ -16,12 +16,9 @@ interface GroupOptions extends AskOptions {
   names: string[] | null;
 }
 
-const NOTES =
-  '- "notes": comments you leave on the lines a reviewer most needs explained, such as a subtle invariant, a non-obvious reason, an edge case or a risk to check. Each is {"id": a change id, "line": a line number inside that change or null for the whole change, "body": one to four sentences of Markdown}. A change\'s added lines are numbered from the + number in its @@ header, and its removed lines from the - number; use a removed line only when the change adds none. Leave a note only where it says something the summary and the code do not, at most three in a topic, and give an empty array when nothing needs one.';
-const REPLY =
-  'Reply with only a JSON object and no other text: {"topics": [{"title": "...", "summary": "...", "ids": ["..."], "notes": [{"id": "...", "line": 12, "body": "..."}]}]}';
+const REPLY = 'Reply with only a JSON object and no other text: {"topics": [{"title": "...", "summary": "...", "ids": ["..."]}]}';
 
-async function askTopics(o: AskOptions, prompt: string, allowEmpty: boolean, check: (topics: NotedTopic[]) => string | null): Promise<NotedTopic[]> {
+async function askTopics(o: AskOptions, prompt: string, allowEmpty: boolean, check: (topics: Topic[]) => string | null): Promise<Topic[]> {
   const run = (resume: string | null, fork: boolean, prompt: string) =>
     ask({ cwd: o.cwd, resume, fork, prompt, onText: () => {}, onActivity: o.onActivity });
 
@@ -44,7 +41,7 @@ async function askTopics(o: AskOptions, prompt: string, allowEmpty: boolean, che
   return topics;
 }
 
-export async function groupChanges(o: GroupOptions): Promise<NotedTopic[]> {
+export async function groupChanges(o: GroupOptions): Promise<Topic[]> {
   const focused = o.focus !== null || o.names !== null;
   const topics = await askTopics(o, buildPrompt(o.diff, o.focus, o.names), focused, (t) => unknownIds(o.diff, t));
 
@@ -72,9 +69,8 @@ function buildPrompt(diff: DiffResult, focus: string | null, names: string[] | n
     '- "title": a few words.',
     '- "summary": two to six sentences of Markdown on what changed and why, naming the files and functions involved and anything the reviewer should check closely.',
     '- "ids": the ids of all changes in the topic, exactly as listed below.',
-    NOTES,
     scope,
-    "Order the topics the way a reviewer should read them. Write titles, summaries and notes in the language the user writes in.",
+    "Order the topics the way a reviewer should read them. Write titles and summaries in the language the user writes in.",
     REPLY,
     "",
     formatChanges(diff),
@@ -105,18 +101,13 @@ interface SyncOptions extends AskOptions {
   delta: TopicDelta;
 }
 
-export interface TopicSync {
-  topics: Topic[];
-  notes: TopicNote[];
-}
-
-export async function syncTopics(o: SyncOptions): Promise<TopicSync> {
+export async function syncTopics(o: SyncOptions): Promise<Topic[]> {
   const { review, diff, delta } = o;
   const answer = await askTopics(o, buildSyncPrompt(review, diff, delta), true, (t) => syncProblem(t, delta.added, review.focus !== null));
   return mergeSync(review, diff, delta, answer);
 }
 
-export function mergeSync(review: Review, diff: DiffResult, delta: TopicDelta, answer: NotedTopic[]): TopicSync {
+export function mergeSync(review: Review, diff: DiffResult, delta: TopicDelta, answer: Topic[]): Topic[] {
   const now = new Set(diff.files.flatMap(changeIds));
   const added = (ids: string[]) => ids.filter((id) => delta.added.has(id));
   const updates = new Map<string, { summary: string; ids: string[] }>();
@@ -131,9 +122,7 @@ export function mergeSync(review: Review, diff: DiffResult, delta: TopicDelta, a
     return { title: t.title, summary: u?.summary || t.summary, ids: [...new Set([...t.ids.filter((id) => now.has(id)), ...(u?.ids ?? [])])] };
   });
   for (const [title, u] of updates) topics.push({ title, summary: u.summary, ids: [...new Set(u.ids)] });
-
-  const notes = answer.flatMap((t) => t.notes).filter((n) => delta.added.has(n.id));
-  return { topics: topics.filter((t) => t.ids.length > 0), notes };
+  return topics.filter((t) => t.ids.length > 0);
 }
 
 function buildSyncPrompt(review: Review, diff: DiffResult, delta: TopicDelta): string {
@@ -177,21 +166,20 @@ function buildSyncPrompt(review: Review, diff: DiffResult, delta: TopicDelta): s
     '- "title": the title exactly as above, or a few words for a new topic.',
     '- "summary": two to six sentences of Markdown on what the topic changes now and why, naming the files and functions involved and anything the reviewer should check closely.',
     '- "ids": the ids of the new and edited changes that belong in the topic. Leave out the ids it already has.',
-    NOTES,
-    `${scope} Leave notes only on the new and edited changes, and leave out the topics that neither gain nor lose changes. Write in the language of the summaries above.`,
+    `${scope} Leave out the topics that neither gain nor lose changes. Write in the language of the summaries above.`,
     REPLY,
   ].join("\n");
 }
 
-function syncProblem(topics: NotedTopic[], added: Set<string>, focused: boolean): string | null {
+function syncProblem(topics: Topic[], added: Set<string>, focused: boolean): string | null {
   const used = new Set(topics.flatMap((t) => t.ids));
-  const unknown = [...new Set([...used, ...topics.flatMap((t) => t.notes.map((n) => n.id))])].filter((id) => !added.has(id));
+  const unknown = [...used].filter((id) => !added.has(id));
   if (unknown.length) return `These ids are not new or edited changes: ${unknown.join(", ")}.`;
   const missing = focused ? [] : [...added].filter((id) => !used.has(id));
   return missing.length ? `Put these ids in a topic too: ${missing.join(", ")}.` : null;
 }
 
-function parseTopics(text: string, allowEmpty: boolean): NotedTopic[] | string {
+function parseTopics(text: string, allowEmpty: boolean): Topic[] | string {
   const value = parseJson(text);
   if (value === undefined) return "The answer was not a JSON object.";
   const list = Array.isArray(value) ? value : isRecord(value) ? value.topics : undefined;
@@ -200,21 +188,15 @@ function parseTopics(text: string, allowEmpty: boolean): NotedTopic[] | string {
   if (topics.some((t) => t === null)) {
     return 'Each topic needs a "title" and a "summary" string and an "ids" array of strings.';
   }
-  return topics as NotedTopic[];
+  return topics as Topic[];
 }
 
-function toTopic(t: unknown): NotedTopic | null {
+function toTopic(t: unknown): Topic | null {
   if (!isRecord(t)) return null;
-  const { title, summary, ids, notes } = t;
+  const { title, summary, ids } = t;
   if (typeof title !== "string" || !title.trim() || typeof summary !== "string") return null;
   if (!Array.isArray(ids) || !ids.every((id) => typeof id === "string")) return null;
-  return { title: title.trim(), summary: summary.trim(), ids, notes: Array.isArray(notes) ? notes.flatMap(toNote) : [] };
-}
-
-function toNote(n: unknown): TopicNote[] {
-  if (!isRecord(n) || typeof n.id !== "string" || typeof n.body !== "string" || !n.body.trim()) return [];
-  const line = typeof n.line === "number" && Number.isInteger(n.line) && n.line > 0 ? n.line : null;
-  return [{ id: n.id, line, body: n.body.trim() }];
+  return { title: title.trim(), summary: summary.trim(), ids };
 }
 
 function parseJson(text: string): unknown {
@@ -229,7 +211,7 @@ function parseJson(text: string): unknown {
   return undefined;
 }
 
-function unknownIds(diff: DiffResult, topics: NotedTopic[]): string | null {
+function unknownIds(diff: DiffResult, topics: Topic[]): string | null {
   const { unknown } = checkTopics(diff, topics);
   return unknown.length ? `These ids are not in the list of changes: ${unknown.join(", ")}.` : null;
 }

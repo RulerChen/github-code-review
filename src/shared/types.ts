@@ -63,16 +63,6 @@ export interface Topic {
   ids: string[];
 }
 
-export interface TopicNote {
-  id: string;
-  line: number | null;
-  body: string;
-}
-
-export interface NotedTopic extends Topic {
-  notes: TopicNote[];
-}
-
 export interface BaseRange {
   path: string;
   commit: string | null;
@@ -151,7 +141,6 @@ export interface Thread {
   snippet: string;
   context: ThreadContext | null;
   comments: ThreadComment[];
-  noteOf?: string;
 }
 
 export interface ViewData {

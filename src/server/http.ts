@@ -9,10 +9,10 @@ import { gzip } from "node:zlib";
 import { findDefinitions, findDefinitionsAnywhere, grepRepo, isIdentifier, listRepoFiles, openRepoFile, readRepoFile } from "../engine/browse.js";
 import { computeDiff, listRefs, probeDiff } from "../engine/diff.js";
 import { comparisonFromQuery, comparisonQuery, isFor } from "../shared/comparison.js";
-import type { Comparison, DiffResult, FileDiff, Grouping, NotedTopic, Review, Thread, ThreadAnchor, ThreadContext, ViewData } from "../shared/types.js";
+import type { Comparison, DiffResult, FileDiff, Grouping, Review, Thread, ThreadAnchor, ThreadContext, Topic, ViewData } from "../shared/types.js";
 import { errorMessage, imageTypeOf, isRecord, sum } from "../shared/util.js";
-import { groupChanges, mergeSync, needsClaude, syncTopics, type TopicSync, topicDelta } from "./group.js";
-import { changesOf, placeNote } from "./review.js";
+import { groupChanges, mergeSync, needsClaude, syncTopics, topicDelta } from "./group.js";
+import { changesOf } from "./review.js";
 import { dropOldStates, loadState, saveState } from "./store.js";
 import { RepoThreads } from "./threads.js";
 
@@ -125,10 +125,10 @@ export class ReviewServer {
   addView(
     repo: string,
     compare: Comparison,
-    grouped: { focus: string | null; topics: NotedTopic[]; diff: DiffResult } | null,
+    grouped: { focus: string | null; topics: Topic[]; diff: DiffResult } | null,
     cwd: string,
     session: string | null,
-  ): { view: View; restored: Restored | null; dropped: number } {
+  ): { view: View; restored: Restored | null } {
     let id: string;
     do id = Array.from({ length: 8 }, () => String.fromCharCode(97 + randomInt(26))).join("");
     while (this.views.has(id));
@@ -144,9 +144,9 @@ export class ReviewServer {
     threads.cwd = cwd;
     const restored = session !== null && session !== threads.parentSession ? this.restore(view, threads, session) : null;
     if (session) threads.parentSession = session;
-    const dropped = grouped ? this.addReview(view, compare, grouped.focus, grouped.topics, grouped.diff, null) : 0;
+    if (grouped) this.addReview(view, compare, grouped.focus, grouped.topics, grouped.diff, null);
     this.broadcast("view", { view: id, repo, compare });
-    return { view, restored, dropped };
+    return { view, restored };
   }
 
   private restore(view: View, threads: RepoThreads, session: string): Restored | null {
@@ -213,35 +213,25 @@ export class ReviewServer {
     return `curl -sSf "http://127.0.0.1:${this.port}/api/views/${view.id}/wait?after=${after}&token=${this.token}"`;
   }
 
-  private addReview(view: View, compare: Comparison, focus: string | null, topics: NotedTopic[], diff: DiffResult, replaces: string | null): number {
+  private addReview(view: View, compare: Comparison, focus: string | null, topics: Topic[], diff: DiffResult, replaces: string | null): void {
     const same = isFor(view.repo, compare);
-    const threads = this.repos.get(view.repo)!;
     if (replaces !== null) this.removeReview(view.repo, replaces);
 
     const createdAt = new Date().toISOString();
     const stored = topics.map(({ title, summary, ids }) => ({ title, summary, ids }));
     this.reviews.push({ repo: view.repo, compare, focus, topics: stored, changes: changesOf(diff), createdAt, view: view.id });
 
-    let dropped = 0;
-    for (const note of topics.flatMap((t) => t.notes)) {
-      const placed = placeNote(diff, note);
-      if (placed) threads.addNote(placed.anchor, placed.snippet, placed.context, note.body, createdAt);
-      else dropped++;
-    }
-
     const failed = this.groupings.findIndex((g) => same(g) && g.error !== null);
     if (failed >= 0) this.groupings.splice(failed, 1);
     this.broadcast("reviews", this.reviews);
     this.broadcast("groupings", this.groupings);
     this.saveSoon(view.repo);
-    return dropped;
   }
 
   private removeReview(repo: string, createdAt: string): void {
     const i = this.reviews.findIndex((r) => r.repo === repo && r.createdAt === createdAt);
     if (i < 0) return;
     this.reviews.splice(i, 1);
-    this.repos.get(repo)?.removeNotes(createdAt);
     this.broadcast("reviews", this.reviews);
     this.saveSoon(repo);
   }
@@ -282,13 +272,9 @@ export class ReviewServer {
     const delta = topicDelta(review, diff);
     if (!delta) return;
 
-    const apply = ({ topics, notes }: TopicSync) => {
+    const apply = (topics: Topic[]) => {
       review.topics = topics;
       review.changes = changesOf(diff);
-      for (const note of notes) {
-        const placed = placeNote(diff, note);
-        if (placed) threads.addNote(placed.anchor, placed.snippet, placed.context, note.body, createdAt);
-      }
       this.broadcast("reviews", this.reviews);
       this.saveSoon(view.repo);
     };
