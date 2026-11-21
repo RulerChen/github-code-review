@@ -72,7 +72,6 @@ interface CommitRange {
 
 const savedRange = () => (history.state as { range?: CommitRange } | null)?.range ?? null;
 
-// The stops of the trace in the code panel are kept in the history entry, so the browser's back and forward walk the trace and a reload keeps it.
 type SavedPeek = Omit<Peek, "seq">;
 let peeks = 0;
 const savedCode = (): Peek[] => ((history.state as { code?: SavedPeek[] } | null)?.code ?? []).map((p) => ({ ...p, seq: ++peeks }));
@@ -115,7 +114,6 @@ export function App({ viewId }: Props) {
   const [range, setRange] = useState(savedRange);
 
   const requested = useRef<Comparison | null>(comparisonFromQuery(new URLSearchParams(location.search)));
-  // The comparison last asked for, which is the loaded one once it arrives.
   const asked = useRef(requested.current);
   const seq = useRef(0);
   const version = useRef<string | null>(null);
@@ -139,7 +137,6 @@ export function App({ viewId }: Props) {
       requested.current = target;
       version.current = result.version;
       if (push && other) {
-        // The open file stays open in the other comparison. The stops before it belong to the entry left behind.
         codeNow.current = codeNow.current.slice(-1);
         setCode(codeNow.current);
         history.pushState({ range: nextRange, code: toSave(codeNow.current) }, "", target ? `?${comparisonQuery(target)}` : location.pathname);
@@ -239,7 +236,6 @@ export function App({ viewId }: Props) {
     codeNow.current = stack;
     setCode(stack);
   }, []);
-  // A name followed in the code panel adds a stop after the one it was clicked in, and that stop keeps the clicked line to come back to. A name followed in the diff starts a new trace. Lines picked from a list, which is from null, share one stop.
   const openCode = useCallback(
     (path: string, line: number | null, from: ClickedAt | null = null, name?: string) => {
       const stack = codeNow.current;
@@ -294,7 +290,6 @@ export function App({ viewId }: Props) {
           return;
         }
         const hits = rankDefinitions(r.hits, from.path);
-        // Nothing declares the member, as with data that comes from somewhere else. The list of its lines starts with the ones that write it.
         if (hits.length === 0 && r.member) {
           closeLookup();
           searchFor(text);
@@ -547,7 +542,6 @@ export function App({ viewId }: Props) {
   const repos = diff?.repos;
   const definitions = useMemo(() => {
     const result = defined?.name === searchedName && defined.result.version === loadedVersion ? defined.result : null;
-    // A line that declares a field of the name defines it too.
     const fields = (repoResult?.hits ?? []).filter((f) => f.role === "field" && !result?.hits.some((h) => h.path === f.path && h.no === f.no));
     const hits = [...(result?.hits ?? []), ...fields];
     return hits.length ? definitionsFound(hits, result?.capped ?? false, repoFiles ?? [], searched.trim()) : null;

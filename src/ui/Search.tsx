@@ -20,9 +20,7 @@ export interface Hit {
   text: string;
   at: number;
   length: number;
-  // A changed line goes to its place in the diff. Any other line opens its file in the code panel.
   inDiff: boolean;
-  // The function, method or class the line is in. Null at the top level and when that is not known.
   inside: string | null;
 }
 
@@ -39,7 +37,6 @@ export interface Section {
   found: Found;
 }
 
-// The lines the diff adds or removes that match.
 export function searchChanges(files: FileDiff[], query: string, whole: boolean): Found {
   const word = wordRegExp(query, whole);
   const found: Found = { groups: [], hits: [], capped: false };
@@ -77,7 +74,6 @@ const SECTIONS = [
   ["repos", "Other repositories", "Repositories with no changes in the diff. A line opens its file on the right."],
 ] as const;
 
-// Puts the lines that write the name first, since they answer where a value comes from, then orders the rest by how close they are to the diff: its changed lines, the rest of its files, the files it does not touch, and the repositories with no changes at all. A line listed as a definition is left out of the lines that open the same way.
 export function searchSections(
   changes: Found,
   repo: { hits: RepoHit[]; capped: boolean } | null,
@@ -176,7 +172,6 @@ const MARK = { add: "+", del: "-", context: "" } as const;
 interface Props {
   definitions: Found | null;
   sections: Section[];
-  // What is still missing from the list, or that nothing matched.
   note: string | null;
   current: Hit | null;
   onOpen: (hit: Hit) => void;
@@ -219,7 +214,6 @@ function HitGroups({ groups, current, onOpen }: { groups: Found["groups"]; curre
       </h3>
       <ul>
         {g.hits.map((h, n) => {
-          // Lines of one function sit under its name. A line outside any function that follows them is set apart by a rule.
           const starts = h.inside !== (g.hits[n - 1]?.inside ?? null);
           return (
             <li key={`${h.side}${h.no}`} className={starts && h.inside === null ? "search-outside" : undefined}>

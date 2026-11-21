@@ -74,12 +74,10 @@ export function searchRepo(viewId: string, compare: Comparison | null, query: st
   return request<RepoHits>(`${viewUrl(viewId, "grep")}?${params}`, (b) => Array.isArray(b.hits), "GET", undefined, signal);
 }
 
-// Where a name was clicked. The line is null on the old side of a diff and for selected text.
 export interface ClickedAt {
   path: string;
   line: number | null;
   col: number;
-  // The click was in the code panel, not in the diff.
   panel: boolean;
 }
 

@@ -47,12 +47,10 @@ async function readBlobAt(root: string, rev: string, rest: string): Promise<Cont
   return classify(await git(root, ["cat-file", "blob", oid]));
 }
 
-// git grep runs a regular expression on every line. A plain string every match has, joined with --and, lets it skip most lines first.
 export async function grepRepo(diff: DiffResult, query: string, whole: boolean, signal: AbortSignal): Promise<Found> {
   const found = wordRegExp(query, whole);
   const pattern = wordPattern(query, whole);
   const match = [...plainOf(query).filter((p) => p !== pattern.toLowerCase()).flatMap((p) => ["-e", p, "--and"]), "-e", pattern];
-  // When there are more matches than are kept, keep the ones nearest the diff: its files, then the repositories it changes.
   const changed = new Set(diff.files.map((f) => f.path));
   const busy = searchable(diff).filter((r) => r.dir !== "" && diff.files.some((f) => f.path.startsWith(`${r.dir}/`)));
   const far = (p: string) => (changed.has(p) ? 0 : busy.length === 0 || busy.some((r) => p.startsWith(`${r.dir}/`)) ? 1 : 2);
@@ -61,7 +59,6 @@ export async function grepRepo(diff: DiffResult, query: string, whole: boolean, 
   return lines;
 }
 
-// Says which function each line is in, so a list of uses reads as a list of callers, and whether the line writes the name or only reads it. The hits are in order of distance from the diff, so the files nearest it are the ones read.
 async function describe(diff: DiffResult, hits: RepoHit[], found: RegExp | null): Promise<void> {
   const texts = await readTexts(diff, [...new Set(hits.map((h) => h.path))].slice(0, MAX_READ_FILES));
   const files = new Map<string, { lines: string[]; inside: ReturnType<typeof insideOf>; roles: ReturnType<typeof rolesOf> }>();
@@ -72,7 +69,6 @@ async function describe(diff: DiffResult, hits: RepoHit[], found: RegExp | null)
     let file = files.get(h.path);
     if (!file) files.set(h.path, (file = { lines: text.split("\n"), inside: insideOf(text, h.path), roles: rolesOf(text, h.path) }));
     h.inside = file.inside(h.no);
-    // The whole line, since the text of a hit is cut when it is long. A line can have the name more than once: a place that declares a field counts first, then one that writes.
     const line = file.lines[h.no - 1] ?? "";
     for (const m of every ? line.matchAll(every) : []) {
       if (!SPELLED.test(m[0]) || /[\w$]/.test((line[m.index - 1] ?? "") + (line[m.index + m[0].length] ?? ""))) continue;
@@ -82,7 +78,6 @@ async function describe(diff: DiffResult, hits: RepoHit[], found: RegExp | null)
   }
 }
 
-// The text of files in the compared version: from the diff for a changed file, and two git cat-file runs per repository for the rest, one for the sizes and one for the files small enough to read.
 async function readTexts(diff: DiffResult, paths: string[]): Promise<Map<string, string>> {
   const out = new Map<string, string>();
   const changed = new Map(diff.files.map((f) => [f.path, f]));
@@ -93,7 +88,6 @@ async function readTexts(diff: DiffResult, paths: string[]): Promise<Map<string,
       if (file.newContent !== null) out.set(p, file.newContent);
       continue;
     }
-    // A file the diff does not change is the same in both versions, so the old commit has it when the new side is the work tree.
     const where = repoOf(diff, p);
     const rev = where && (where.repo.headCommit ?? where.repo.oldCommit);
     if (!where || !rev) continue;
@@ -129,7 +123,6 @@ type Found = { hits: RepoHit[]; capped: boolean };
 
 const searchable = (diff: DiffResult) => diff.repos.filter((r) => r.error === null);
 
-// Takes the definitions from the first group of repositories that has any, so the nearest repositories win and the rest are only searched when those have none.
 async function nearestFirst(groups: DiffRepo[][], find: (repos: DiffRepo[]) => Promise<Found>): Promise<Found> {
   for (const repos of groups) {
     const found = repos.length ? await find(repos) : null;
@@ -149,7 +142,6 @@ export interface Click {
 
 type Defined = Found & { declared: boolean; member: boolean; byName: boolean };
 
-// The file of the click settles what it can: the name is declared right there, or by a line that encloses the click. Only an imported name, or one the file does not declare, is looked up in the repositories. declared says the click is on a definition, so the question is who uses the name.
 export async function findDefinitions(diff: DiffResult, name: string, from: string, click: Click | null, signal: AbortSignal): Promise<Defined> {
   const text = click ? ((await readRepoFile(diff, from))?.text ?? null) : null;
   const scoped: Scoped = click && text !== null ? scopeOf(text, click.line, click.col, name, from) : { kind: "free" };
@@ -172,7 +164,6 @@ export async function findDefinitions(diff: DiffResult, name: string, from: stri
     nearestFirst(own ? [[own], all.filter((r) => r !== own)] : [all], (repos) =>
       grepLines(diff, repos, defines([escaped], patterns), pathspecs, MAX_DEFINITIONS, signal, (line) => line.indexOf(name)),
     );
-  // A member is a method, or a field that some type declares. Which one is looked for first follows from whether the member is called.
   const fields = async (): Promise<Found> => {
     const lines = await grepRepo(diff, name, true, signal);
     const hits = lines.hits.filter((h) => h.role === "field" && h.text.slice(h.at, h.at + name.length) === name);
@@ -189,7 +180,6 @@ export async function findDefinitions(diff: DiffResult, name: string, from: stri
       byName = found.hits.length > 0;
     }
   } else {
-    // Both at once: a member that no type declares would otherwise wait for one search after the other.
     const [declared, defined] = await Promise.all([fields(), methods()]);
     byName = declared.hits.length > 0;
     found = byName ? declared : defined;
@@ -201,12 +191,10 @@ export async function findDefinitions(diff: DiffResult, name: string, from: stri
     const imported = inModule(found.hits, scoped.module!, from);
     return only(imported.length ? imported : found.hits.length === 1 ? found.hits : [lineOf(scoped.line)]);
   }
-  // A single definition in the clicked file wins over the same name defined in other files.
   const here = scoped.kind === "free" || scoped.own ? found.hits.filter((h) => h.path === from) : [];
   return here.length === 1 ? only(here) : { ...found, declared: false, member, byName };
 }
 
-// The definitions in the file an import names: "./diff.js" next to the importing file, or "airflow.models.dag" and "crate::engine::diff" as the end of a path.
 function inModule(hits: RepoHit[], module: string, from: string): RepoHit[] {
   const bare = (p: string) => p.replace(/\.[^./]+$/, "").replace(/\/(?:index|__init__|mod)$/, "");
   if (module.startsWith(".") && module.includes("/")) {

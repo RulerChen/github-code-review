@@ -1,31 +1,18 @@
-// Works out what a clicked name refers to from the text of its file alone. The lines above the click are read by their indentation: a line indented less than everything passed so far encloses the click, a line at that same indentation is an earlier statement of an enclosing block, and deeper lines belong to blocks that closed before the click.
-
 export interface Language {
   exts: string[];
-  // POSIX extended expressions for git grep: the lines that define the name for a whole repository.
   patterns: (name: string) => string[];
-  // The same for a plain variable. A member is never one, so a lookup of a member leaves these out.
   values: (name: string) => string[];
-  // The rest are JavaScript expressions. Statements that declare the name for the lines after them in their block.
   locals: (name: string) => string[];
-  // Lines that open a block and bind the name inside it: the parameters of a function, the variable of a loop.
   binders: (name: string) => string[];
-  // One line of a parameter list wrapped over several lines.
   params: (name: string) => string[];
-  // The module an import line takes its names from.
   module?: RegExp;
-  // "{ name }" in an object is short for "{ name: name }".
   shorthand?: boolean;
-  // Lines that open a place a reader would name: a function, a method, a class. The name is the group n, and o is what owns it, as the receiver of a Go method.
   scopes: RegExp[];
 }
 
 export type Scoped =
-  // After "." "->" or "::", or the key of an object or of a type. Scope says nothing about a member. own is set for this.name and self.name, and call when the member is called.
   | { kind: "member"; own: boolean; call: boolean }
-  // The click is on the declaration itself.
   | { kind: "declared" }
-  // module is set when that line imports the name.
   | { kind: "bound"; line: number; module: string | null }
   | { kind: "free" };
 
@@ -34,11 +21,9 @@ const START = "(^|[^[:alnum:]_$])";
 const END = "([^[:alnum:]_$]|$)";
 const OPENS = "\\(([^;]*$|[^;{]*\\)[^;{]*\\{)";
 
-// The name starts here and is not a member of something.
 const B = "(?<![\\w$.])";
 const E = "(?![\\w$])";
 
-// A parameter that starts with its name, inside one pair of parentheses with none nested.
 const named = (n: string, mods = "") =>
   `\\((?:[^()]*?(?:[,{\\[]|\\.\\.\\.))?\\s*${mods}${n}${E}\\s*\\??\\s*(?:[,:}\\]][^()]*|=(?![=>])[^()]*)?\\)`;
 
@@ -51,17 +36,12 @@ const C_MODS =
 const C_KEYWORD =
   "(?:return|goto|delete|throw|new|else|case|typedef|using|namespace|package|import|break|continue|co_return|co_await|co_yield|await|yield|sizeof|if|while|for|switch|do|catch|try)";
 const C_TYPE = `(?!${C_KEYWORD}\\b)${C_MODS}[A-Za-z_][\\w:.]*(?:<[^;(){}]*>)?(?:\\[\\s*\\])*`;
-// In a Rust pattern a lower-case name is a binding, and an upper-case one is a variant or a type.
 const LOWER = "(?=[a-z_])";
-// A type, then the name.
 const typed = (n: string) => `${C_TYPE}(?:\\s*[*&]+\\s*|\\s+)(?:const\\s+)?${n}${E}`;
 
-// A parameter list with at most one pair of parentheses inside it, so a call that takes a function, as in "useEffect(() => {", is not a method.
 const ARGS = "\\((?:[^()]|\\([^()]*\\))*\\)";
-// What follows "=" or ":" when the value is a function.
 const JS_FUNCTION = `(?:async\\s*)?(?:(?:<[^>]*>\\s*)?${ARGS}\\s*(?::[^=]*)?=>|[\\w$]+\\s*=>|function\\b)`;
 const JS_VAR = "(?:const|let|var)\\s+(?<n>[\\w$]+)";
-// A name with what qualifies it, as "SkipList<Key>::Insert", "Env::~Env" and "operator==".
 const C_ARGS = "(?:<[^;(){}]*>)?";
 const C_NAME = `(?<n>(?!${C_KEYWORD}\\b)~?[A-Za-z_]\\w*${C_ARGS}(?:::~?\\w+${C_ARGS})*(?:(?<=\\boperator)\\s*(?:\\(\\)|\\[\\]|[^\\s\\w()]{1,3}))?)`;
 const C_OPENS = "\\((?:[^;]*$|[^;{]*\\)[^;{]*\\{)";
@@ -119,7 +99,6 @@ export const LANGUAGES: Language[] = [
     scopes: [
       /\bfunction\s*\*?\s*(?<n>[\w$]+)\s*[(<]/,
       /^\s*(?:(?:export|default|declare|abstract)\s+)*(?:class|interface|type|enum|namespace)\s+(?<n>[\w$]+)/,
-      // Any variable at the top level. Inside a function, one that holds a function or what a React hook returns: a reader names the place by the function around it, not by a value.
       new RegExp(`^(?:export\\s+)?(?:declare\\s+)?${JS_VAR}`),
       new RegExp(`^\\s+${JS_VAR}\\s*(?::[^=]*)?=\\s*(?:${JS_FUNCTION}|(?:React\\.)?use[A-Z]\\w*\\s*(?:<.*>)?\\()`),
       new RegExp(`^\\s*${JS_HEAD}\\*?(?<n>(?!${JS_CONTROL}\\b)[\\w$#]+)\\s*(?:<[^>()]*>)?${ARGS}(?:\\s*:.+?)?\\s*\\{\\s*$`),
@@ -201,12 +180,9 @@ export const LANGUAGES: Language[] = [
     ],
     params: (n) => [`(?:^|[(,])\\s*${typed(n)}\\s*(?:\\[[^\\]]*\\])?\\s*(?:[,)=]|$)`],
     scopes: [
-      // A function at the top level: the first name followed by "(" on a line that is not a statement.
       new RegExp(`^(?![\\s#/}])(?:[^;=(]*?[^\\w$:~])?${C_NAME}\\s*${C_OPENS}`),
-      // A method in a class body: at least one word of type before the name, so a call or a loop macro is not one.
       new RegExp(`^\\s+(?!${C_KEYWORD}\\b)(?:[\\w@<][\\w:<>,.?*&\\[\\]]*\\s+)+[*&]*${C_NAME}\\s*${C_OPENS}`),
       /^\s*(?:(?:typedef|public|private|protected|internal|static|final|abstract|sealed|partial|export)\s+)*(?:struct|class|union|enum(?:\s+(?:class|struct))?|interface|record|namespace)\s+(?:[A-Z][A-Z0-9_]*(?:\([^)]*\))?\s+)?(?<n>\w+(?:::\w+)*)\s*(?:[{:<]|$|(?:final|extends|implements|permits|where)\b)/,
-      // A table at the top level: "static struct option opts[] = {".
       /^(?![\s#/}])[^;=(]*?[^\w$](?<n>\w+)\s*(?:\[[^\]]*\]\s*)*=\s*\{?\s*$/,
     ],
   },
@@ -214,7 +190,6 @@ export const LANGUAGES: Language[] = [
 
 const KEYWORDS = "def|defp|defmodule|fn|fun|func|function|sub|proc|class|struct|interface|trait|object|module|type|enum|macro";
 
-// Any other file: the keywords most languages share.
 export const GENERIC: Language = {
   exts: [],
   patterns: (n) => [`${START}(${KEYWORDS})${S}+${n}${END}`],
@@ -246,7 +221,6 @@ export function languageOf(filePath: string): Language {
 
 const fromPosix = (pattern: string) => pattern.replaceAll("[:space:]", "\\s").replaceAll("[:alnum:]", "A-Za-z0-9");
 
-// Where in a line the expressions put the name: its column for each one that matches. The name is the group n.
 const finder = (sources: string[]) => {
   const all = sources.map((s) => new RegExp(s, "d"));
   return (line: string): number[] =>
@@ -266,11 +240,9 @@ function indentOf(line: string): number {
   return n;
 }
 
-// Lines that open or close no scope: blank lines, comments, preprocessor lines and labels such as "default:" or "else:".
 const NO_SCOPE = /^(?:$|\/\/|\/\*|\*(?:\s|\/|$)|--|#(?!\s*define\b)|(?:case\b.*|\w+)\s*:\s*(?:(?:\/\/|#|\/\*).*)?$)/;
 const CONTROL = /^(?:\}\s*)?(?:if|else|elif|for|foreach|while|until|unless|switch|return|assert)\b/;
 
-// A line that ends a parameter list wrapped over several lines and opens the block: ") {", "}: Props) {", ") => (", ") -> int:", or the lone "{" under a header. A closing bracket on its own ends a call, not a parameter list.
 function closesList(t: string): boolean {
   if (t === "{") return true;
   return (
@@ -281,7 +253,6 @@ function closesList(t: string): boolean {
   );
 }
 
-// The line a wrapped list starts on: the first one above that is not indented deeper than the line that closes it.
 function opener(lines: string[], closer: number, indent: number): string {
   for (let k = closer - 1; k >= 1; k--) {
     const t = lines[k - 1]!.trim();
@@ -313,15 +284,12 @@ export function scopeOf(text: string, no: number, col: number, name: string, fil
     return { kind: "bound", line: k, module: found?.slice(1).find((m) => m !== undefined) ?? null };
   };
 
-  // On the clicked line the name counts as declared only from where the line declares it: in "t.Run(func(t *testing.T) {" the first t is not the parameter.
   const here = [...declared(line), ...bound(line), ...(inList(lines, no) ? listed(line) : [])];
   if (here.includes(col)) return { kind: "declared" };
   if (here.some((c) => c < col)) return at(no);
-  // "{ hits: [] }", "hits: RepoHit[];" and "<List hits={found} />" name a member, not the variable of that name above them.
   if (usesOf(text, filePath)(no, col, name).key) return { kind: "member", own: false, call: false };
 
   let min = indentOf(line);
-  // While walking up through a wrapped parameter list: the indentation of the line that closed it, and whether its lines are parameters.
   let list: { indent: number; params: boolean } | null = null;
   for (let k = no - 1; k >= 1; k--) {
     const l = lines[k - 1]!;
@@ -342,11 +310,9 @@ export function scopeOf(text: string, no: number, col: number, name: string, fil
     if (opened?.params && l.slice(l.lastIndexOf("(") + 1).split(",").some(param)) return at(k);
     if (encloses && !opened && closesList(t)) list = { indent: i, params: !CONTROL.test(opener(lines, k, i)) };
   }
-  // A name declared later on its own line and nowhere above, as in a Python comprehension.
   return here.length ? at(no) : { kind: "free" };
 }
 
-// Whether a line is one of a parameter list wrapped over several lines: the next line indented less closes such a list.
 function inList(lines: string[], no: number): boolean {
   const indent = indentOf(lines[no - 1]!);
   for (let k = no + 1; k <= lines.length; k++) {
@@ -362,8 +328,6 @@ function inList(lines: string[], no: number): boolean {
 const NAMES = 2;
 const MACRO = /^\s*#\s*define\s+(\w+)/;
 
-// Reads a file once for many of its lines. Says where a line is by the names of the definitions around it, the outer one first: "Server › handle".
-// The lines of a file with the indentation of each, or -1 when the line opens or closes no scope. A "#define" at the margin inside a function is such a line.
 function reader(text: string) {
   const lines = text.split("\n");
   const indents: number[] = [];
@@ -374,7 +338,6 @@ function reader(text: string) {
 export function insideOf(text: string, filePath: string): (no: number) => string | null {
   const { lines, indentAt } = reader(text);
   const scopes = languageOf(filePath).scopes;
-  // A header whose parameters are wrapped is read with the line that closes them: "addView(" and "): View {" make "addView(): View {". A wrapped call closes with ");" and makes no header.
   const header = (k: number, indent: number): string => {
     const l = lines[k - 1]!.trimEnd();
     if (!l.endsWith("(")) return l;
@@ -388,16 +351,13 @@ export function insideOf(text: string, filePath: string): (no: number) => string
   return (no) => {
     const line = lines[no - 1];
     if (line === undefined) return null;
-    // The body of a macro: the lines a backslash joins to "#define NAME".
     let top = no;
     while (top > 1 && lines[top - 2]!.trimEnd().endsWith("\\")) top--;
     const macro = top < no ? MACRO.exec(lines[top - 1]!)?.[1] : undefined;
     if (macro) return macro;
-    // A comment or a preprocessor line is as deep as the code under it: "#ifdef" sits at the margin inside a function.
     let next = no;
     while (next <= lines.length && indentAt(next) < 0) next++;
     let min = Math.max(indentOf(line), next <= lines.length ? indentAt(next) : 0);
-    // The line that closes a wrapped parameter list belongs to the definition the list started.
     let opened = closesList(line.trim());
 
     const names: string[] = [];
@@ -414,54 +374,41 @@ export function insideOf(text: string, filePath: string): (no: number) => string
       let found: Record<string, string | undefined> | undefined;
       for (const r of scopes) if ((found = r.exec(l)?.groups)) break;
       if (found?.n) names.unshift((found.o ? `${found.o}.${found.n}` : found.n).replace(/<[^<>]*>/g, ""));
-      // Between a lone "{" and its header there can be more of the header: ") -> T" and "where".
       else opened = closesList(l.trim()) || (under && /^(?:[)\]]|where\b)/.test(l.trim()));
     }
     return names.length ? names.join(" \u203a ") : null;
   };
 }
 
-// What a line does with a name: declares a field of that name, or gives the name a value. Anything else only reads it.
 export type Role = "field" | "write";
 
 const ASSIGN = "(?:[-+*/%&|^:]|<<|>>>?|\\*\\*|\\?\\?|\\|\\||&&)?=(?![=>~])";
-// "name = v", "name[i] += v", "name := v", and the first of several targets as in "name, err := f()".
 const ASSIGNED = new RegExp(`^\\s*(?:\\[[^\\]]*\\]\\s*)*${ASSIGN}|^\\s*(?:\\+\\+|--)`);
 const ASSIGNED_WITH = new RegExp(`^\\s*(?:,\\s*[\\w$.*]+\\s*)+${ASSIGN}`);
-// "name: T = v", a declaration that has a value.
 const ANNOTATED = /^\s*:[^=:(){}]*[^=!<>:(){}]=(?![=>])/;
 const MODS = "(?:(?:readonly|public|private|protected|internal|static|declare|override|abstract|final|pub(?:\\([^)]*\\))?|mut|const|volatile|export|default|-|\\+)\\s+)*";
 const ONLY_MODS = new RegExp(`^\\s*${MODS}$`);
-// A type and nothing else in front, as in "struct foo *name;".
 const C_FIELD_LEAD = /^\s*(?:[\w@][\w:<>,.?*&[\]]*\s+)+[*&\s]*$/;
 const C_FIELD_REST = /^\s*(?:\[[^\]]*\]\s*)*(?:=[^;]*)?[;,]/;
 const TYPE_HEAD = /\b(?:interface|class|struct|union|enum|trait)\b[^=]*$|\btype\s+[\w$]+(?:<[^=]*>)?\s*=(?!=)[^;]*$/;
 const PATTERN_HEAD = /(?:^|[\s(,;])(?:const|let|var|import|export)(?:\s+type)?\s*$|\bfunction\b[^)]*\($|=\s*(?:async\s*)?\($/;
-// Braces after these hold a type: a return type, the type of a variable or of a parameter, a type argument.
 const TYPE_BEFORE = /[<|&]\s*$|\b(?:as|satisfies|extends)\s*$|\):\s*$|(?:\b(?:const|let|var)\s+|\(\s*)[\w$]+\??\s*:\s*$/;
-// The braces of a JSX expression or of "${}" in a template hold no keys.
 const NOT_KEYS = /(?:>|\$)$/;
 const JSX_VALUE = /[\w-]=$/;
-// In a file with JSX, braces hold an object only after these. After a word they are an expression in the text of an element.
 const VALUE_BEFORE = /(?:^|[=(,[:?{|&]|\breturn|=>)\s*$/;
-// A member of a type ends with ";" or has a built-in type.
 const TYPE_VALUE = /^\s*(?:readonly\s+)?(?:string|number|boolean|bigint|symbol|unknown|any|never)\b|^[^,;{}()]*;/;
-// Where a field gets the name it has outside the program: a Go struct tag, a serialization annotation, an alias.
 const ANNOTATION = /`[^`]*\b\w+:$|@(?:JsonProperty|JsonAlias|JsonKey|SerializedName|SerialName)\s*\((?:[^)]*=\s*)?$|\b(?:\w*alias|rename)\s*=\s*$/;
 const DEFINES = /\b(?:def|function|fn|func|fun|sub|lambda)\b[^()]*$/;
-// What follows the braces that hold the parameters of an arrow function, as in "({ a, b }: Props, i) => ...".
 const ARROW_PARAMS = /^\s*(?::[^=()]*)?(?:,[^()]*)?\)\s*(?::[^=]+)?=>/;
 
 const STRING = /(["'`])(?:\\.|(?!\1).)*\1/g;
 
-// The bracket a name is directly inside, what its line has before that bracket, and what is between the bracket and the name.
 interface Around {
   open: string;
   head: string;
   inner: string;
 }
 
-// The bracket a column is directly inside on its own line.
 function enclosure(lead: string): Around | null {
   const stack: number[] = [];
   let quote = "";
@@ -478,7 +425,6 @@ function enclosure(lead: string): Around | null {
   return at === undefined ? null : { open: lead[at]!, head: lead.slice(0, at).trimEnd(), inner: lead.slice(at + 1) };
 }
 
-// What a line has after the bracket that closes the group its start is in. Null when the group does not close on the line.
 function afterGroup(rest: string): string | null {
   let depth = 0;
   for (let i = 0; i < rest.length; i++) {
@@ -489,18 +435,15 @@ function afterGroup(rest: string): string | null {
   return null;
 }
 
-// Reads a file once for many of its lines. col is where the name starts in its line.
 export function rolesOf(text: string, filePath: string): (no: number, col: number, name: string) => Role | null {
   const uses = usesOf(text, filePath);
   return (no, col, name) => uses(no, col, name).role;
 }
 
-// key says the name is a member where it stands: a key, a field, an attribute. A variable that is assigned to is not.
 function usesOf(text: string, filePath: string): (no: number, col: number, name: string) => { role: Role | null; key: boolean } {
   const { lines, indentAt } = reader(text);
   const lang = languageOf(filePath);
 
-  // What the line is directly inside: the bracket and the text before it, on the line itself or on the nearest line above that is indented less.
   const jsx = /\.[jt]sx$/.test(filePath);
   const yaml = /\.ya?ml$/.test(filePath);
   const around = (no: number, lead: string): Around => {
@@ -522,14 +465,11 @@ function usesOf(text: string, filePath: string): (no: number, col: number, name:
     if (TYPE_HEAD.test(head) || TYPE_BEFORE.test(head)) return "type";
     if (open === ":") return "other";
     if (PATTERN_HEAD.test(head)) return "pattern";
-    // After ":" the braces are a type, as in "(opts: { name: string })", or a value, as in "{ a: { name: 1 } }".
     if (/:\s*$/.test(head) && TYPE_VALUE.test(value)) return "type";
-    // An object has no ";" between its keys.
     if (/;/.test(`${inner} ${/^[^,{}()]*/.exec(value)![0]}`.replace(STRING, ""))) return "type";
     return jsx && !VALUE_BEFORE.test(head) ? "other" : "literal";
   };
 
-  // What follows the brace that closes the group a name is in: on its own line, or on the line that closes a group wrapped over several.
   const closing = (no: number, lead: string, rest: string): string => {
     if (enclosure(lead)) return afterGroup(rest) ?? "";
     const indent = indentOf(lines[no - 1]!);
@@ -551,13 +491,11 @@ function usesOf(text: string, filePath: string): (no: number, col: number, name:
     let rest = line.slice(col + name.length);
     const quoted = /["'`]$/.test(lead) && /^["'`]/.test(rest);
     if (quoted) {
-      // The name written in a struct tag or an annotation is what the field is called outside the program.
       if (ANNOTATION.test(lead.slice(0, -1))) return field;
       if (/^.\]\s*(?:[-+*/%&|^]|\?\?)?=(?![=>])/.test(rest)) return { role: "write", key: true };
       lead = lead.slice(0, -1);
       rest = rest.slice(1);
     }
-    // A type in "x: A | B = v" and the name in "type T = ..." are not what gets the value.
     if (/(?:^|[\s(,])[\w$]+\??\s*:(?!:)[^=,;(){}]*$|\btype\s+$/.test(lead)) return none;
     if (/(?:\+\+|--)\s*(?:[\w$]+(?:\.|->))*$/.test(lead) && !/^(?:\.|->|\[)/.test(rest)) return { role: "write", key: false };
     const start = ONLY_MODS.test(lead);
@@ -567,20 +505,16 @@ function usesOf(text: string, filePath: string): (no: number, col: number, name:
 
     if (!quoted && (ASSIGNED.test(rest) || ANNOTATED.test(rest) || (start && ASSIGNED_WITH.test(rest)))) {
       const at = around(no, lead);
-      // A parameter with a default value is not written to: its list opens a definition, on this line or wrapped over several.
       if (at.open === "(" && (DEFINES.test(at.head) || (start && inList(lines, no) && !/^(?:async\s+)?(?:with|class)\b/.test(at.head)))) return none;
       if (start && kindOf(at, "") === "type") return field;
-      // An attribute of an element: "<List hits={found} />".
       return { role: "write", key: jsx && /^=[{"']/.test(rest) };
     }
     if (yaml && key && /^\s*(?:-\s+)*$/.test(lead)) return { role: "write", key: true };
     if ((key || short) && placed) {
       const kind = kindOf(around(no, lead), rest.replace(/^\??\s*:/, ""));
       if (kind === "type") return key ? field : none;
-      // The braces of "({ a, b }) => ..." take a value apart. They do not make one.
       return kind === "literal" && !ARROW_PARAMS.test(closing(no, lead, rest)) ? { role: "write", key } : none;
     }
-    // A field with its type in front and no colon, as in C, or with its type after it, as in Go.
     if (!quoted && !line.includes("(") && kindOf(around(no, lead), "") === "type") {
       if (C_FIELD_LEAD.test(lead) && !/(?<!:):(?!:)/.test(lead) && C_FIELD_REST.test(rest)) return field;
       if (start && /^\s+[\w*[\]<.]/.test(rest)) return field;

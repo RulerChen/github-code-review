@@ -10,14 +10,11 @@ import { ArrowLeftIcon, CloseIcon } from "./icons";
 import { basename, dirPrefix } from "./paths";
 import "./code-panel.css";
 
-// One stop of a trace through the code.
 export interface Peek {
   path: string;
   line: number | null;
   seq: number;
-  // The name that was followed to get here.
   name?: string;
-  // Picked from a list of lines. The next line picked from a list takes its place.
   listed?: boolean;
 }
 
@@ -39,9 +36,7 @@ interface Props {
   revision: string;
   version: string;
   load: (path: string) => Promise<RepoFile>;
-  // The stops that led here, this one last.
   trail: Peek[];
-  // Moves along the trail: -1 is the stop before this one.
   onGo: (steps: number) => void;
   onClose: () => void;
   onShowDiff: () => void;

@@ -60,7 +60,6 @@ export function rankDefinitions(hits: RepoHit[], from: string): RepoHit[] {
 export interface DefinitionLookup {
   name: string;
   from: ClickedAt;
-  // The hits are fields found by their name alone.
   byName: boolean;
   x: number;
   y: number;
