@@ -54,17 +54,18 @@ export async function fetchRepoFile(viewId: string, compare: Comparison | null, 
   return (await request<{ file: RepoFile }>(`${viewUrl(viewId, "blob")}?${params}`, (b) => !!b.file)).file;
 }
 
-export function searchRepo(viewId: string, compare: Comparison | null, query: string, signal: AbortSignal): Promise<RepoHits> {
+export function searchRepo(viewId: string, compare: Comparison | null, query: string, whole: boolean, signal: AbortSignal): Promise<RepoHits> {
   const params = new URLSearchParams(compare ? comparisonQuery(compare) : "");
   params.set("q", query);
+  if (!whole) params.set("word", "0");
   return request<RepoHits>(`${viewUrl(viewId, "grep")}?${params}`, (b) => Array.isArray(b.hits), "GET", undefined, signal);
 }
 
-export function fetchDefinitions(viewId: string, compare: Comparison | null, name: string, path: string): Promise<RepoHits> {
+export function fetchDefinitions(viewId: string, compare: Comparison | null, name: string, from: string | null, signal?: AbortSignal): Promise<RepoHits> {
   const params = new URLSearchParams(compare ? comparisonQuery(compare) : "");
   params.set("name", name);
-  params.set("path", path);
-  return request<RepoHits>(`${viewUrl(viewId, "defs")}?${params}`, (b) => Array.isArray(b.hits));
+  if (from !== null) params.set("path", from);
+  return request<RepoHits>(`${viewUrl(viewId, "defs")}?${params}`, (b) => Array.isArray(b.hits), "GET", undefined, signal);
 }
 
 export async function fetchVersion(viewId: string, compare: Comparison | null): Promise<string> {

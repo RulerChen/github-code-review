@@ -75,7 +75,6 @@
   overscroll-behavior: contain;
 }
 
-.code-body .unplaced,
 .code-body .file-threads {
   padding: 8px;
 }

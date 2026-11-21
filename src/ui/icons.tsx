@@ -177,6 +177,15 @@ export const FileIcon = ({ className }: { className: string }) => (
   />
 );
 
+export const WholeWordIcon = () => (
+  <Svg>
+    <text x="8" y="9.5" textAnchor="middle" fontSize="9" fontWeight="600" fill="currentColor">
+      ab
+    </text>
+    <path d="M1.75 11v2.25h12.5V11" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+  </Svg>
+);
+
 const DIR = {
   closed:
     "M1.75 1A1.75 1.75 0 0 0 0 2.75v10.5C0 14.216.784 15 1.75 15h12.5A1.75 1.75 0 0 0 16 13.25v-8.5A1.75 1.75 0 0 0 14.25 3H7.5a.25.25 0 0 1-.2-.1l-.9-1.2C6.07 1.26 5.55 1 5 1H1.75Z",

@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { splitLines } from "../shared/hunks";
 import type { DiffLine, DisplayHunk, FileDiff, RepoFile } from "../shared/types";
 import { errorMessage } from "../shared/util";
-import { onShownVersion, ThreadView, useComments } from "./comments";
+import { ThreadView, useComments } from "./comments";
 import { CopyButton } from "./controls";
 import { DiffTable, type OnExpand } from "./DiffTable";
 import { highlight, languageFor, type TokenLines } from "./highlight";
@@ -121,15 +121,9 @@ export function CodePanel({ peek, file, revision, version, load, canGoBack, onBa
     };
   }, [path, peek.seq, ready]);
 
-  const { threadsFor, versions } = useComments();
+  const { threadsFor } = useComments();
   const threads = threadsFor(path);
   const fileThreads = file ? [] : threads.filter((t) => t.anchor.side === null);
-  const unplaced = file
-    ? []
-    : threads.filter((t) => {
-        const { side, end } = t.anchor;
-        return side !== null && !(side === "new" && onShownVersion(t, versions) && end !== null && end > from && end <= to);
-      });
 
   const error = local === null && current && "error" in current ? current.error : null;
   let note: string | null = null;
@@ -170,14 +164,6 @@ export function CodePanel({ peek, file, revision, version, load, canGoBack, onBa
           <div className="file-threads">
             {fileThreads.map((t) => (
               <ThreadView key={t.id} thread={t} />
-            ))}
-          </div>
-        )}
-        {unplaced.length > 0 && (
-          <div className="unplaced">
-            <p className="file-note inline">Comments on lines not shown here</p>
-            {unplaced.map((t) => (
-              <ThreadView key={t.id} thread={t} withVersion />
             ))}
           </div>
         )}

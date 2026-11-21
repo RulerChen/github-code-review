@@ -26,6 +26,6 @@ Arguments: $ARGUMENTS
 7. When the wait command finishes:
    - If it failed, the viewer has closed. Say so and stop waiting.
    - Call `get_review_comments` with `repo` and `after` set to what the command printed. Address every comment: change the code where the user asks for a change, and answer questions or unclear requests instead of guessing. A comment's path is relative to the directory the wait command names: the repository's root, or the directory holding the repositories, where the path starts with the repository's directory. Its line numbers and quoted lines are from when it was written, so find the code by the quoted lines if it has moved. A comment on the whole file has neither and is about the file as a whole. A comment on a topic is about that topic as a whole.
-   - Call `reply_to_review` once with a reply of a sentence or two on each thread, saying what you changed or answering it, in the language of the comment.
+   - Call `reply_to_review` once with a reply on each thread: a short paragraph of plain sentences that says what you changed or answers it, in the language of the comment.
    - Tell the user in the terminal what you changed, and that Refresh in the page shows the new diff.
    - Run the wait command that `get_review_comments` printed in the background again.

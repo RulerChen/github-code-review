@@ -27,17 +27,18 @@ import {
 } from "./api";
 import { CodePanel, type Peek } from "./CodePanel";
 import { type DefinitionLookup, DefinitionMenu, type FindDefinition, FindDefinitionContext, isName, rankDefinitions } from "./definition";
-import { type CommentActions, CommentActionsContext, type CommentsApi, CommentsContext } from "./comments";
+import { type CommentActions, CommentActionsContext, type CommentsApi, CommentsContext, onShownVersion } from "./comments";
 import { CommitBar, CommitList, CompareControls, refLabel, RepoComparisons } from "./Compare";
 import { ConversationsButton, ConversationsPanel, type Place, useConversations } from "./Conversations";
+import { hasLine } from "./DiffTable";
 import { FileCard, FileLoader } from "./FileCard";
 import { dirPaths, FileTree } from "./FileTree";
-import { FoldIcon } from "./icons";
+import { FoldIcon, WholeWordIcon } from "./icons";
 import { go, KeyboardButton, ShortcutHelp, stepSection, useShortcuts } from "./keyboard";
 import { locate } from "./locate";
 import { comparePaths } from "./paths";
 import { ReviewBar } from "./ReviewBar";
-import { type Hit, repoFound, revealLine, searchDiff, SearchResults } from "./Search";
+import { definitionsFound, type Hit, repoFound, revealLine, searchDiff, SearchResults } from "./Search";
 import { useStoredState, useViewed } from "./storage";
 import { SubmitReview } from "./SubmitReview";
 import { ChangeStats, RefreshButton, SidebarToggle, type Tab, ThemeToggle, ViewTabs } from "./TopBar";
@@ -92,7 +93,9 @@ export function App({ viewId }: Props) {
   const [query, setQuery] = useState("");
   const [hit, setHit] = useState<Hit | null>(null);
   const [scope, setScope] = useState<"diff" | "repo">("diff");
+  const [wholeWord, setWholeWord] = useState(true);
   const [repoSearch, setRepoSearch] = useState<RepoSearch | null>(null);
+  const [defined, setDefined] = useState<{ name: string; result: RepoHits } | null>(null);
   const [code, setCode] = useState<Peek[]>([]);
   const peekSeq = useRef(0);
   const [lookup, setLookup] = useState<DefinitionLookup | null>(null);
@@ -231,7 +234,7 @@ export function App({ viewId }: Props) {
         setLookup((l) => (l && seq === lookupSeq.current ? update(l) : l));
       const fail = (e: unknown) => current((l) => ({ ...l, error: errorMessage(e) }));
       const findLines = () =>
-        searchRepo(viewId, requested.current, text, new AbortController().signal).then(
+        searchRepo(viewId, requested.current, text, true, new AbortController().signal).then(
           (r) => current((l) => ({ ...l, hits: rankDefinitions(r.hits, from), lines: true, capped: r.capped })),
           fail,
         );
@@ -255,6 +258,7 @@ export function App({ viewId }: Props) {
   const searchLookup = () => {
     if (!lookup) return;
     setScope("repo");
+    setWholeWord(true);
     setQuery(lookup.name);
     setHit(null);
     setSidebarOpen(true);
@@ -456,39 +460,63 @@ export function App({ viewId }: Props) {
 
   const searched = useDeferredValue(query);
   const repoQuery = scope === "repo" ? searched.trim() : "";
+  const repoKey = `${wholeWord}\0${repoQuery}`;
   const loadedVersion = data?.version ?? null;
   useEffect(() => {
     if (!repoQuery || !viewId || loadedVersion === null) return;
     const aborted = new AbortController();
     const timer = window.setTimeout(() => {
-      searchRepo(viewId, requested.current, repoQuery, aborted.signal).then(
-        (result) => setRepoSearch({ query: repoQuery, result, error: null }),
-        (e: unknown) => !aborted.signal.aborted && setRepoSearch({ query: repoQuery, result: null, error: errorMessage(e) }),
+      searchRepo(viewId, requested.current, repoQuery, wholeWord, aborted.signal).then(
+        (result) => setRepoSearch({ query: repoKey, result, error: null }),
+        (e: unknown) => !aborted.signal.aborted && setRepoSearch({ query: repoKey, result: null, error: errorMessage(e) }),
       );
     }, REPO_SEARCH_MS);
     return () => {
       clearTimeout(timer);
       aborted.abort();
     };
-  }, [repoQuery, viewId, loadedVersion]);
-  const repoResult = repoSearch?.query === repoQuery && repoSearch.result?.version === loadedVersion ? repoSearch.result : null;
-  const repoError = repoSearch?.query === repoQuery ? repoSearch.error : null;
-  const repoStale = repoSearch?.query === repoQuery && repoSearch.result !== null && repoSearch.result.version !== loadedVersion;
+  }, [repoKey, viewId, loadedVersion]);
+  const repoResult = repoSearch?.query === repoKey && repoSearch.result?.version === loadedVersion ? repoSearch.result : null;
+  const repoError = repoSearch?.query === repoKey ? repoSearch.error : null;
+  const repoStale = repoSearch?.query === repoKey && repoSearch.result !== null && repoSearch.result.version !== loadedVersion;
 
-  const diffFound = useMemo(() => searchDiff(shown.map((e) => e.file), scope === "diff" ? searched : ""), [shown, searched, scope]);
+  const searchedName = isName(searched.trim()) ? searched.trim() : "";
+  useEffect(() => {
+    if (!searchedName || !viewId || loadedVersion === null) return;
+    const aborted = new AbortController();
+    const timer = window.setTimeout(() => {
+      fetchDefinitions(viewId, requested.current, searchedName, null, aborted.signal).then(
+        (result) => setDefined({ name: searchedName, result }),
+        () => {},
+      );
+    }, REPO_SEARCH_MS);
+    return () => {
+      clearTimeout(timer);
+      aborted.abort();
+    };
+  }, [searchedName, viewId, loadedVersion]);
+
+  const diffFound = useMemo(
+    () => searchDiff(shown.map((e) => e.file), scope === "diff" ? searched : "", wholeWord),
+    [shown, searched, scope, wholeWord],
+  );
   const repoFiles = diff?.files;
   const found = useMemo(
-    () => (scope === "repo" ? repoFound(repoResult?.hits ?? [], repoResult?.capped ?? false, repoFiles ?? [], repoQuery) : diffFound),
-    [scope, repoResult, repoFiles, repoQuery, diffFound],
+    () => (scope === "repo" ? repoFound(repoResult?.hits ?? [], repoResult?.capped ?? false, repoFiles ?? [], repoQuery, wholeWord) : diffFound),
+    [scope, repoResult, repoFiles, repoQuery, wholeWord, diffFound],
   );
+  const definitions = useMemo(() => {
+    const result = defined?.name === searchedName && defined.result.version === loadedVersion ? defined.result : null;
+    return result?.hits.length ? definitionsFound(result.hits, result.capped, repoFiles ?? [], searchedName) : null;
+  }, [defined, searchedName, loadedVersion, repoFiles]);
   const openHit = (next: Hit) => {
     setHit(next);
-    if (scope === "repo") return openCode(next.path, next.no);
+    if (scope === "repo" || definitions?.hits.includes(next)) return openCode(next.path, next.no);
     if (view !== "files") setTab("files");
     revealLine(next);
   };
   const stepHit = (dir: 1 | -1) => {
-    const { hits } = found;
+    const hits = [...(definitions?.hits ?? []), ...found.hits];
     const i = hit ? hits.indexOf(hit) : -1;
     const next = hits[i < 0 ? (dir > 0 ? 0 : hits.length - 1) : (i + dir + hits.length) % hits.length];
     if (next) openHit(next);
@@ -540,10 +568,17 @@ export function App({ viewId }: Props) {
         return i < 0 ? null : { tab: "topics", rank: topicTab ? i : i - topics.length };
       }
       const fileIndex = entries.findIndex((e) => e.file.path === anchor.path);
-      if (fileIndex < 0) return anchor.side === "old" ? null : { tab: "code", rank: topics.length + entries.length };
-      if (!topicTab) return { tab: "files", rank: fileIndex };
+      const shownVersion = onShownVersion(t, comments.versions);
+      const inCode = anchor.side !== "old" && shownVersion;
+      if (fileIndex < 0) return inCode ? { tab: "code", rank: topics.length + entries.length } : null;
+      const { file } = entries[fileIndex]!;
+      const rank = topicTab ? topics.length + fileIndex : fileIndex;
+      if (anchor.side !== null && !file.lazy && !(shownVersion && hasLine(file.hunks, anchor.side, anchor.end))) {
+        return inCode ? { tab: "code", rank } : null;
+      }
+      if (!topicTab) return { tab: "files", rank };
       const topicIndex = topics.findIndex((topic) => topicShows(topic, t, comments.versions));
-      return topicIndex >= 0 ? { tab: "topics", rank: topicIndex } : { tab: "files", rank: topics.length + fileIndex };
+      return topicIndex >= 0 ? { tab: "topics", rank: topicIndex } : { tab: "files", rank };
     },
     [entries, topics, topicTab, comments.versions, current],
   );
@@ -698,23 +733,37 @@ export function App({ viewId }: Props) {
                       )}
                     </div>
                     <div className="filter-row">
-                      <input
-                        className="filter"
-                        type="search"
-                        placeholder={scope === "repo" ? "Search the repo" : "Search the diff"}
-                        value={query}
-                        onChange={(e) => {
-                          setQuery(e.target.value);
-                          setHit(null);
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key !== "Enter" || e.nativeEvent.isComposing) return;
-                          e.preventDefault();
-                          stepHit(e.shiftKey ? -1 : 1);
-                        }}
-                        aria-label={scope === "repo" ? "Search in the repository" : "Search in the diff"}
-                        title="Enter goes to the next match, Shift+Enter to the previous one"
-                      />
+                      <div className="search-box">
+                        <input
+                          className="filter"
+                          type="search"
+                          placeholder={scope === "repo" ? "Search the repo" : "Search the diff"}
+                          value={query}
+                          onChange={(e) => {
+                            setQuery(e.target.value);
+                            setHit(null);
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key !== "Enter" || e.nativeEvent.isComposing) return;
+                            e.preventDefault();
+                            stepHit(e.shiftKey ? -1 : 1);
+                          }}
+                          aria-label={scope === "repo" ? "Search in the repository" : "Search in the diff"}
+                          title="Enter goes to the next match, Shift+Enter to the previous one"
+                        />
+                        <button
+                          className="search-option"
+                          aria-pressed={wholeWord}
+                          aria-label="Match whole word"
+                          title={wholeWord ? "Matching whole words only. Click to also match parts of words." : "Matching parts of words. Click to match whole words only."}
+                          onClick={() => {
+                            setWholeWord((w) => !w);
+                            setHit(null);
+                          }}
+                        >
+                          <WholeWordIcon />
+                        </button>
+                      </div>
                       <div className="search-scope" role="radiogroup" aria-label="Search in">
                         {(["diff", "repo"] as const).map((s) => (
                           <button
@@ -744,6 +793,7 @@ export function App({ viewId }: Props) {
                     ) : searched.trim() ? (
                       <SearchResults
                         found={found}
+                        definitions={definitions}
                         current={hit}
                         onOpen={openHit}
                         empty={scope === "repo" ? "No matches in the repository." : "No matches in the lines shown in the diff."}

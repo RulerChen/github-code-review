@@ -9,9 +9,9 @@ const EMIT_INTERVAL_MS = 100;
 const REVIEWING = "The user is reviewing the code changes in a diff viewer";
 const STOPPED = "The viewer stopped before Claude answered. Ask again for an answer.";
 const ANSWER =
-  "Answer the last comment in the language it is written in. Keep it short: put the answer in the first sentence and stop after two or three sentences, unless they ask for more. " +
-  "Answer only what was asked: no extra observations, caveats or suggestions, no preamble, no restating the question, no closing summary and no headings. " +
-  "Use Markdown only where it helps, such as a short code block. " +
+  "Answer the last comment in the language it is written in, the way a colleague replies in a review thread: go straight to the answer and stop once the question is answered. " +
+  "Write a short paragraph of plain sentences. Use more than one paragraph, a list, a table or a code block only when the comment asks for that much. " +
+  "Do not add notes on other things you noticed in the code, or advice they did not ask for. " +
   "To check details you can read files, run read-only git commands such as git diff, git log and git show, and search or fetch the web. Do not change anything.";
 
 const newId = () => randomBytes(6).toString("base64url");

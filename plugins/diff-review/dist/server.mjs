@@ -37488,21 +37488,21 @@ import path3 from "node:path";
 // src/shared/search.ts
 var WORD = "A-Za-z0-9_";
 var IS_WORD = new RegExp(`[${WORD}]`);
-function parts(query, special) {
+function parts(query, whole, special) {
   const q = query.trim();
   return {
     words: q.split(/\s+/).map((w) => w.replace(special, "\\$&")),
-    wordStart: IS_WORD.test(q[0] ?? ""),
-    wordEnd: IS_WORD.test(q[q.length - 1] ?? "")
+    wordStart: whole && IS_WORD.test(q[0] ?? ""),
+    wordEnd: whole && IS_WORD.test(q[q.length - 1] ?? "")
   };
 }
-function wordRegExp(query) {
+function wordRegExp(query, whole) {
   if (!query.trim()) return null;
-  const { words, wordStart, wordEnd } = parts(query, /[.*+?^${}()|[\]\\]/g);
+  const { words, wordStart, wordEnd } = parts(query, whole, /[.*+?^${}()|[\]\\]/g);
   return new RegExp(`${wordStart ? `(?<![${WORD}])` : ""}${words.join("\\s+")}${wordEnd ? `(?![${WORD}])` : ""}`, "i");
 }
-function wordPattern(query) {
-  const { words, wordStart, wordEnd } = parts(query, /[.*+?^${()|[\\]/g);
+function wordPattern(query, whole) {
+  const { words, wordStart, wordEnd } = parts(query, whole, /[.*+?^${()|[\\]/g);
   return `${wordStart ? `(^|[^${WORD}])` : ""}${words.join("[[:space:]]+")}${wordEnd ? `([^${WORD}]|$)` : ""}`;
 }
 
@@ -37587,10 +37587,14 @@ async function readBlobAt(root, rev, rest) {
   if (Number(size) > MAX_CONTENT_BYTES) return { kind: "tooLarge" };
   return classify(await git(root, ["cat-file", "blob", oid]));
 }
-function grepRepo(diff, query, signal) {
-  const found = wordRegExp(query);
-  return grepLines(diff, ["-E", "-i", "-e", wordPattern(query)], ["."], MAX_HITS, signal, (text) => found?.exec(text)?.index ?? -1);
+function grepRepo(diff, query, whole, signal) {
+  const found = wordRegExp(query, whole);
+  const pattern = wordPattern(query, whole);
+  const plain = (query.match(/[A-Za-z0-9_]+/g) ?? []).reduce((a, b) => b.length > a.length ? b : a, "");
+  const match = plain && plain !== pattern ? ["-e", plain, "--and", "-e", pattern] : ["-e", pattern];
+  return grepLines(diff, ["-E", "-i", ...match], ["."], MAX_HITS, signal, (text) => found?.exec(text)?.index ?? -1);
 }
+var defines = (name, patterns) => ["-E", "-e", name, "--and", "(", ...patterns.flatMap((p) => ["-e", p]), ")"];
 var isIdentifier = (name) => IDENTIFIER.test(name);
 function findDefinitions(diff, name, from, signal) {
   const base = from.slice(from.lastIndexOf("/") + 1);
@@ -37600,7 +37604,18 @@ function findDefinitions(diff, name, from, signal) {
   const patterns = language ? language.patterns(escaped) : anyLanguage(escaped);
   const exts = language?.exts ?? (ext ? [ext] : []);
   const pathspecs = exts.length ? exts.map((e) => `*.${e}`) : ["."];
-  return grepLines(diff, ["-E", ...patterns.flatMap((p) => ["-e", p])], pathspecs, MAX_DEFINITIONS, signal, (text) => text.indexOf(name));
+  return grepLines(diff, defines(escaped, patterns), pathspecs, MAX_DEFINITIONS, signal, (text) => text.indexOf(name));
+}
+async function findDefinitionsAnywhere(diff, name, signal) {
+  const escaped = name.replaceAll("$", "\\$");
+  const lower = name.toLowerCase();
+  const find = (patterns, pathspecs) => grepLines(diff, ["-i", ...defines(escaped, patterns)], pathspecs, MAX_DEFINITIONS, signal, (text) => text.toLowerCase().indexOf(lower));
+  const found = await Promise.all([
+    ...LANGUAGES.map((l) => find(l.patterns(escaped), l.exts.map((e) => `*.${e}`))),
+    find(anyLanguage(escaped), [".", ...LANGUAGES.flatMap((l) => l.exts).map((e) => `:(exclude)*.${e}`)])
+  ]);
+  const hits = found.flatMap((f) => f.hits).sort((a, b) => compareText(a.path, b.path) || a.no - b.no);
+  return { hits: hits.slice(0, MAX_DEFINITIONS), capped: hits.length > MAX_DEFINITIONS || found.some((f) => f.capped) };
 }
 async function grepLines(diff, match, pathspecs, max, signal, atOf) {
   const repos = diff.repos.filter((r) => r.error === null);
@@ -37999,7 +38014,7 @@ import { randomBytes } from "node:crypto";
 var EMIT_INTERVAL_MS = 100;
 var REVIEWING = "The user is reviewing the code changes in a diff viewer";
 var STOPPED = "The viewer stopped before Claude answered. Ask again for an answer.";
-var ANSWER = "Answer the last comment in the language it is written in. Keep it short: put the answer in the first sentence and stop after two or three sentences, unless they ask for more. Answer only what was asked: no extra observations, caveats or suggestions, no preamble, no restating the question, no closing summary and no headings. Use Markdown only where it helps, such as a short code block. To check details you can read files, run read-only git commands such as git diff, git log and git show, and search or fetch the web. Do not change anything.";
+var ANSWER = "Answer the last comment in the language it is written in, the way a colleague replies in a review thread: go straight to the answer and stop once the question is answered. Write a short paragraph of plain sentences. Use more than one paragraph, a list, a table or a code block only when the comment asks for that much. Do not add notes on other things you noticed in the code, or advice they did not ask for. To check details you can read files, run read-only git commands such as git diff, git log and git show, and search or fetch the web. Do not change anything.";
 var newId = () => randomBytes(6).toString("base64url");
 var now = () => (/* @__PURE__ */ new Date()).toISOString();
 var RepoThreads = class {
@@ -38554,13 +38569,14 @@ var ReviewServer = class {
         const q = (query.get("q") ?? "").trim();
         if (!isText(q, MAX_QUERY, true) || /[\0\n\r]/.test(q)) return sendJson(res, 400, { error: "Invalid search" });
         const { version: version2, diff } = await this.loadDiff(view.repo, compare);
-        return sendFound(res, version2, (signal) => grepRepo(diff, q, signal));
+        return sendFound(res, version2, (signal) => grepRepo(diff, q, query.get("word") !== "0", signal));
       }
       case "GET defs": {
         const name = query.get("name") ?? "";
-        const from = query.get("path") ?? "";
-        if (!isIdentifier(name) || from.length > MAX_PATH) return sendJson(res, 400, { error: "Invalid name" });
+        const from = query.get("path");
+        if (!isIdentifier(name) || (from?.length ?? 0) > MAX_PATH) return sendJson(res, 400, { error: "Invalid name" });
         const { version: version2, diff } = await this.loadDiff(view.repo, compare);
+        if (from === null) return sendFound(res, version2, (signal) => findDefinitionsAnywhere(diff, name, signal));
         return sendFound(res, version2, (signal) => findDefinitions(diff, name, from, signal));
       }
       case "GET version":
@@ -38980,12 +38996,12 @@ When you have addressed it, reply on each thread with reply_to_review. Then wait
     "reply_to_review",
     {
       title: "Reply to review",
-      description: "Reply on comment threads in the diff viewer after addressing the user's review, saying what you changed or answering the comment in a sentence or two. The replies show in the page.",
+      description: "Reply on comment threads in the diff viewer after addressing the user's review, saying what you changed or answering the comment, in a short paragraph of plain sentences. The replies show in the page.",
       inputSchema: {
         replies: external_exports.array(
           external_exports.object({
             thread: external_exports.string().describe("A thread id from get_review_comments."),
-            body: external_exports.string().min(1).describe("Markdown, a sentence or two: what you changed, or your answer.")
+            body: external_exports.string().min(1).describe("Markdown: what you changed, or your answer, in a short paragraph of plain sentences.")
           })
         ).min(1)
       },

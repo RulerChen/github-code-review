@@ -7,6 +7,7 @@ import { addedLines } from "./CodePanel";
 import { basename, comparePaths, dirPrefix } from "./paths";
 
 const MAX_HITS = 500;
+const MAX_DEFINITIONS = 5;
 const LEAD_CHARS = 16;
 const FOUND_MS = 2500;
 
@@ -26,8 +27,8 @@ interface Found {
   capped: boolean;
 }
 
-export function searchDiff(files: FileDiff[], query: string): Found {
-  const word = wordRegExp(query);
+export function searchDiff(files: FileDiff[], query: string, whole: boolean): Found {
+  const word = wordRegExp(query, whole);
   const found: Found = { groups: [], hits: [], capped: false };
   if (!word) return found;
 
@@ -51,8 +52,8 @@ export function searchDiff(files: FileDiff[], query: string): Found {
   return found;
 }
 
-export function repoFound(hits: RepoHit[], capped: boolean, files: FileDiff[], query: string): Found {
-  const word = wordRegExp(query);
+export function repoFound(hits: RepoHit[], capped: boolean, files: FileDiff[], query: string, whole: boolean): Found {
+  const word = wordRegExp(query, whole);
   const changed = new Map(files.map((f) => [f.path, f]));
   const groups = new Map<string, Hit[]>();
   let added = new Set<number>();
@@ -69,6 +70,22 @@ export function repoFound(hits: RepoHit[], capped: boolean, files: FileDiff[], q
   }
   const ordered = [...groups].sort(([a], [b]) => comparePaths(a, b)).map(([path, list]) => ({ path, hits: list }));
   return { groups: ordered, hits: ordered.flatMap((g) => g.hits), capped };
+}
+
+export function definitionsFound(hits: RepoHit[], capped: boolean, files: FileDiff[], name: string): Found {
+  const changed = new Map(files.map((f) => [f.path, f]));
+  const first = [...hits]
+    .sort((a, b) => Number(!changed.has(a.path)) - Number(!changed.has(b.path)) || comparePaths(a.path, b.path) || a.no - b.no)
+    .slice(0, MAX_DEFINITIONS);
+  const groups: Found["groups"] = [];
+  for (const h of first) {
+    const kind = addedLines(changed.get(h.path)).has(h.no) ? "add" : "context";
+    const hit: Hit = { path: h.path, side: "new", no: h.no, kind, text: h.text, at: h.at, length: h.at < 0 ? 0 : name.length };
+    const last = groups[groups.length - 1];
+    if (last?.path === h.path) last.hits.push(hit);
+    else groups.push({ path: h.path, hits: [hit] });
+  }
+  return { groups, hits: groups.flatMap((g) => g.hits), capped: capped || first.length < hits.length };
 }
 
 let target: Hit | null = null;
@@ -107,37 +124,55 @@ const MARK = { add: "+", del: "-", context: "" } as const;
 
 interface Props {
   found: Found;
+  definitions: Found | null;
   current: Hit | null;
   onOpen: (hit: Hit) => void;
   empty: string;
 }
 
-export function SearchResults({ found, current, onOpen, empty }: Props) {
-  if (found.hits.length === 0) return <p className="tree-empty">{empty}</p>;
-
+export function SearchResults({ found, definitions, current, onOpen, empty }: Props) {
   return (
     <div className="search-results">
-      <p className="search-count">
-        {found.capped ? "First " : ""}
-        {plural(found.hits.length, "line")} in {plural(found.groups.length, "file")}
-      </p>
-      {found.groups.map((g) => (
-        <section key={g.path}>
-          <h3 className="search-file" title={g.path}>
-            <span className="search-dir">{dirPrefix(g.path)}</span>
-            {basename(g.path)}
-          </h3>
-          <ul>
-            {g.hits.map((h) => (
-              <li key={`${h.side}${h.no}`}>
-                <HitButton hit={h} current={h === current} onOpen={onOpen} />
-              </li>
-            ))}
-          </ul>
-        </section>
-      ))}
+      {definitions && (
+        <div className="search-definitions">
+          <p className="search-count" title="Where the name is defined in the compared version. A definition opens its file on the right.">
+            {definitions.capped ? "First " : ""}
+            {plural(definitions.hits.length, "definition")}
+          </p>
+          <HitGroups groups={definitions.groups} current={current} onOpen={onOpen} />
+        </div>
+      )}
+      {found.hits.length === 0 ? (
+        <p className="tree-empty">{empty}</p>
+      ) : (
+        <>
+          <p className="search-count">
+            {found.capped ? "First " : ""}
+            {plural(found.hits.length, "line")} in {plural(found.groups.length, "file")}
+          </p>
+          <HitGroups groups={found.groups} current={current} onOpen={onOpen} />
+        </>
+      )}
     </div>
   );
+}
+
+function HitGroups({ groups, current, onOpen }: { groups: Found["groups"]; current: Hit | null; onOpen: (hit: Hit) => void }) {
+  return groups.map((g) => (
+    <section key={g.path}>
+      <h3 className="search-file" title={g.path}>
+        <span className="search-dir">{dirPrefix(g.path)}</span>
+        {basename(g.path)}
+      </h3>
+      <ul>
+        {g.hits.map((h) => (
+          <li key={`${h.side}${h.no}`}>
+            <HitButton hit={h} current={h === current} onOpen={onOpen} />
+          </li>
+        ))}
+      </ul>
+    </section>
+  ));
 }
 
 function HitButton({ hit, current, onOpen }: { hit: Hit; current: boolean; onOpen: (hit: Hit) => void }) {

@@ -5,7 +5,7 @@ import { type AddressInfo, isIP } from "node:net";
 import path from "node:path";
 import { promisify } from "node:util";
 import { gzip } from "node:zlib";
-import { findDefinitions, grepRepo, isIdentifier, readRepoFile } from "../engine/browse.js";
+import { findDefinitions, findDefinitionsAnywhere, grepRepo, isIdentifier, readRepoFile } from "../engine/browse.js";
 import { computeDiff, listRefs, probeDiff } from "../engine/diff.js";
 import { comparisonFromQuery, comparisonQuery, isFor } from "../shared/comparison.js";
 import type { Comparison, DiffResult, FileDiff, Grouping, NotedTopic, Review, Thread, ThreadAnchor, ThreadContext, ViewData } from "../shared/types.js";
@@ -398,13 +398,14 @@ export class ReviewServer {
         const q = (query.get("q") ?? "").trim();
         if (!isText(q, MAX_QUERY, true) || /[\0\n\r]/.test(q)) return sendJson(res, 400, { error: "Invalid search" });
         const { version, diff } = await this.loadDiff(view.repo, compare);
-        return sendFound(res, version, (signal) => grepRepo(diff, q, signal));
+        return sendFound(res, version, (signal) => grepRepo(diff, q, query.get("word") !== "0", signal));
       }
       case "GET defs": {
         const name = query.get("name") ?? "";
-        const from = query.get("path") ?? "";
-        if (!isIdentifier(name) || from.length > MAX_PATH) return sendJson(res, 400, { error: "Invalid name" });
+        const from = query.get("path");
+        if (!isIdentifier(name) || (from?.length ?? 0) > MAX_PATH) return sendJson(res, 400, { error: "Invalid name" });
         const { version, diff } = await this.loadDiff(view.repo, compare);
+        if (from === null) return sendFound(res, version, (signal) => findDefinitionsAnywhere(diff, name, signal));
         return sendFound(res, version, (signal) => findDefinitions(diff, name, from, signal));
       }
       case "GET version":

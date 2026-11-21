@@ -285,8 +285,8 @@ function ConversationItem({ thread, inDiff, current, unread, onOpen }: ItemProps
       <li ref={ref}>
         <div className={`${className} is-static`}>
           {head}
-          <span className="conv-status">{anchor.path === null ? "This topic is not on the page." : "This file is no longer in the diff."}</span>
-          <ThreadView thread={thread} />
+          <span className="conv-status">{anchor.path === null ? "This topic is not on the page." : "Its lines are not in the diff on the page."}</span>
+          <ThreadView thread={thread} withVersion />
         </div>
       </li>
     );
