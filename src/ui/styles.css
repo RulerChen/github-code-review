@@ -317,34 +317,6 @@ button {
   color: var(--fg);
 }
 
-.search-scope {
-  display: flex;
-  flex: none;
-  margin-bottom: 8px;
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-}
-
-.search-scope > button {
-  padding: 0 10px;
-  border: 0;
-  background: var(--bg);
-  color: var(--fg-muted);
-  font: inherit;
-  cursor: pointer;
-}
-
-.search-scope > button + button {
-  border-left: 1px solid var(--border);
-}
-
-.search-scope > button.is-on {
-  background: var(--accent-subtle);
-  color: var(--fg);
-  font-weight: 600;
-}
-
 .filter:focus {
   outline: 2px solid var(--accent);
   outline-offset: -1px;
@@ -482,10 +454,16 @@ button {
   list-style: none;
 }
 
-.search-definitions {
-  margin-bottom: 12px;
-  padding-bottom: 12px;
-  border-bottom: 1px solid var(--border-muted);
+.search-section + .search-section {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-muted);
+}
+
+.search-title {
+  margin-right: 6px;
+  color: var(--fg);
+  font-weight: 600;
 }
 
 .search-count {

@@ -51,7 +51,11 @@ export function grepRepo(diff: DiffResult, query: string, whole: boolean, signal
   const pattern = wordPattern(query, whole);
   const plain = (query.match(/[A-Za-z0-9_]+/g) ?? []).reduce((a, b) => (b.length > a.length ? b : a), "");
   const match = plain && plain !== pattern ? ["-e", plain, "--and", "-e", pattern] : ["-e", pattern];
-  return grepLines(diff, searchable(diff), ["-E", "-i", ...match], ["."], MAX_HITS, signal, (text) => found?.exec(text)?.index ?? -1);
+  // When there are more matches than are kept, keep the ones nearest the diff: its files, then the repositories it changes.
+  const changed = new Set(diff.files.map((f) => f.path));
+  const busy = searchable(diff).filter((r) => r.dir !== "" && diff.files.some((f) => f.path.startsWith(`${r.dir}/`)));
+  const far = (p: string) => (changed.has(p) ? 0 : busy.length === 0 || busy.some((r) => p.startsWith(`${r.dir}/`)) ? 1 : 2);
+  return grepLines(diff, searchable(diff), ["-E", "-i", ...match], ["."], MAX_HITS, signal, (text) => found?.exec(text)?.index ?? -1, far);
 }
 
 type Found = { hits: RepoHit[]; capped: boolean };
@@ -155,6 +159,7 @@ async function grepLines(
   max: number,
   signal: AbortSignal,
   atOf: (text: string) => number,
+  far: (filePath: string) => number = () => 0,
 ): Promise<Found> {
   const parts = await mapLimit(repos, REPO_LIMIT, async (repo) => {
     const prefix = repo.dir ? `${repo.dir}/` : "";
@@ -181,7 +186,7 @@ async function grepLines(
     return hits;
   });
 
-  const all = parts.flat().sort((a, b) => compareText(a.path, b.path) || a.no - b.no);
+  const all = parts.flat().sort((a, b) => far(a.path) - far(b.path) || compareText(a.path, b.path) || a.no - b.no);
   return { hits: all.slice(0, max), capped: all.length > max };
 }
 

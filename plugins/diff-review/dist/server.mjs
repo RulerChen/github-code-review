@@ -37782,7 +37782,10 @@ function grepRepo(diff, query, whole, signal) {
   const pattern = wordPattern(query, whole);
   const plain = (query.match(/[A-Za-z0-9_]+/g) ?? []).reduce((a, b) => b.length > a.length ? b : a, "");
   const match = plain && plain !== pattern ? ["-e", plain, "--and", "-e", pattern] : ["-e", pattern];
-  return grepLines(diff, searchable(diff), ["-E", "-i", ...match], ["."], MAX_HITS, signal, (text) => found?.exec(text)?.index ?? -1);
+  const changed = new Set(diff.files.map((f) => f.path));
+  const busy = searchable(diff).filter((r) => r.dir !== "" && diff.files.some((f) => f.path.startsWith(`${r.dir}/`)));
+  const far = (p) => changed.has(p) ? 0 : busy.length === 0 || busy.some((r) => p.startsWith(`${r.dir}/`)) ? 1 : 2;
+  return grepLines(diff, searchable(diff), ["-E", "-i", ...match], ["."], MAX_HITS, signal, (text) => found?.exec(text)?.index ?? -1, far);
 }
 var searchable = (diff) => diff.repos.filter((r) => r.error === null);
 async function nearestFirst(groups, find) {
@@ -37855,7 +37858,7 @@ function findDefinitionsAnywhere(diff, name, signal) {
     return { hits: hits.slice(0, MAX_DEFINITIONS), capped: hits.length > MAX_DEFINITIONS || found.some((f) => f.capped) };
   });
 }
-async function grepLines(diff, repos, match, pathspecs, max, signal, atOf) {
+async function grepLines(diff, repos, match, pathspecs, max, signal, atOf, far = () => 0) {
   const parts2 = await mapLimit(repos, REPO_LIMIT, async (repo) => {
     const prefix = repo.dir ? `${repo.dir}/` : "";
     const rev = repo.headCommit;
@@ -37880,7 +37883,7 @@ async function grepLines(diff, repos, match, pathspecs, max, signal, atOf) {
     );
     return hits;
   });
-  const all = parts2.flat().sort((a, b) => compareText(a.path, b.path) || a.no - b.no);
+  const all = parts2.flat().sort((a, b) => far(a.path) - far(b.path) || compareText(a.path, b.path) || a.no - b.no);
   return { hits: all.slice(0, max), capped: all.length > max };
 }
 function hitOf(filePath, no, text, at) {

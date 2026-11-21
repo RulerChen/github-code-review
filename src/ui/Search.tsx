@@ -1,6 +1,6 @@
 import { useEffect, useRef, useSyncExternalStore } from "react";
 import { wordRegExp } from "../shared/search";
-import type { DiffLine, FileDiff, RepoHit } from "../shared/types";
+import type { DiffLine, DiffRepo, FileDiff, RepoHit } from "../shared/types";
 import { plural } from "../shared/util";
 import { pin } from "./anchor";
 import { addedLines } from "./CodePanel";
@@ -19,6 +19,8 @@ export interface Hit {
   text: string;
   at: number;
   length: number;
+  // A changed line goes to its place in the diff. Any other line opens its file in the code panel.
+  inDiff: boolean;
 }
 
 interface Found {
@@ -27,7 +29,15 @@ interface Found {
   capped: boolean;
 }
 
-export function searchDiff(files: FileDiff[], query: string, whole: boolean): Found {
+export interface Section {
+  key: string;
+  title: string;
+  hint: string;
+  found: Found;
+}
+
+// The lines the diff adds or removes that match.
+export function searchChanges(files: FileDiff[], query: string, whole: boolean): Found {
   const word = wordRegExp(query, whole);
   const found: Found = { groups: [], hits: [], capped: false };
   if (!word) return found;
@@ -36,13 +46,13 @@ export function searchDiff(files: FileDiff[], query: string, whole: boolean): Fo
     const hits: Hit[] = [];
     for (const hunk of file.hunks) {
       for (const line of hunk.lines) {
-        const match = word.exec(line.text);
+        const match = line.kind === "context" ? null : word.exec(line.text);
         if (!match) continue;
         if (found.hits.length === MAX_HITS) return { ...found, capped: true };
 
         const side = line.kind === "del" ? "old" : "new";
         const no = (side === "old" ? line.oldNo : line.newNo)!;
-        const hit: Hit = { path: file.path, side, no, kind: line.kind, text: line.text, at: match.index, length: match[0].length };
+        const hit: Hit = { path: file.path, side, no, kind: line.kind, text: line.text, at: match.index, length: match[0].length, inDiff: true };
         if (!hits.length) found.groups.push({ path: file.path, hits });
         hits.push(hit);
         found.hits.push(hit);
@@ -52,24 +62,51 @@ export function searchDiff(files: FileDiff[], query: string, whole: boolean): Fo
   return found;
 }
 
-export function repoFound(hits: RepoHit[], capped: boolean, files: FileDiff[], query: string, whole: boolean): Found {
+const SECTIONS = [
+  ["changes", "In the changes", "Lines the diff adds or removes. A line goes to its place in the diff."],
+  ["files", "Rest of the changed files", "Lines the diff leaves as they are, in the files it changes. A line opens its file on the right."],
+  ["repo", "Unchanged files", "Files the diff does not touch. A line opens its file on the right."],
+  ["repos", "Other repositories", "Repositories with no changes in the diff. A line opens its file on the right."],
+] as const;
+
+// Orders the matches by how close they are to the diff: its changed lines, the rest of its files, the files it does not touch, and the repositories with no changes at all. A line listed as a definition is left out of the lines that open the same way.
+export function searchSections(
+  changes: Found,
+  repo: { hits: RepoHit[]; capped: boolean } | null,
+  files: FileDiff[],
+  repos: DiffRepo[],
+  query: string,
+  whole: boolean,
+  definitions: Found | null,
+): Section[] {
   const word = wordRegExp(query, whole);
   const changed = new Map(files.map((f) => [f.path, f]));
-  const groups = new Map<string, Hit[]>();
-  let added = new Set<number>();
-  for (const h of hits) {
-    let list = groups.get(h.path);
-    if (!list) {
-      list = [];
-      groups.set(h.path, list);
-      added = addedLines(changed.get(h.path));
-    }
+  const idOf = (h: { path: string; no: number }) => `${h.path}\0${h.no}`;
+  const listed = new Set([...(definitions?.hits ?? []), ...changes.hits.filter((h) => h.side === "new")].map(idOf));
+  const quiet = repos.filter((r) => r.dir !== "" && !files.some((f) => f.path.startsWith(`${r.dir}/`)));
+  const added = new Map<string, Set<number>>();
+  const lists: Record<string, Map<string, Hit[]>> = { files: new Map(), repo: new Map(), repos: new Map() };
+
+  for (const h of repo?.hits ?? []) {
+    if (listed.has(idOf(h))) continue;
+    const file = changed.get(h.path);
+    const key = file ? "files" : quiet.some((r) => h.path.startsWith(`${r.dir}/`)) ? "repos" : "repo";
+    let lines = added.get(h.path);
+    if (!lines) added.set(h.path, (lines = addedLines(file)));
     const match = word?.exec(h.text);
-    const kind = added.has(h.no) ? "add" : "context";
-    list.push({ path: h.path, side: "new", no: h.no, kind, text: h.text, at: match?.index ?? -1, length: match?.[0].length ?? 0 });
+    const kind = lines.has(h.no) ? "add" : "context";
+    const hit: Hit = { path: h.path, side: "new", no: h.no, kind, text: h.text, at: match?.index ?? -1, length: match?.[0].length ?? 0, inDiff: false };
+    const list = lists[key]!;
+    list.set(h.path, [...(list.get(h.path) ?? []), hit]);
   }
-  const ordered = [...groups].sort(([a], [b]) => comparePaths(a, b)).map(([path, list]) => ({ path, hits: list }));
-  return { groups: ordered, hits: ordered.flatMap((g) => g.hits), capped };
+
+  const out: Section[] = [];
+  for (const [key, title, hint] of SECTIONS) {
+    const groups = key === "changes" ? changes.groups : [...lists[key]!].sort(([a], [b]) => comparePaths(a, b)).map(([path, hits]) => ({ path, hits }));
+    const capped = key === "changes" ? changes.capped : (repo?.capped ?? false);
+    if (groups.length) out.push({ key, title, hint, found: { groups, hits: groups.flatMap((g) => g.hits), capped } });
+  }
+  return out;
 }
 
 export function definitionsFound(hits: RepoHit[], capped: boolean, files: FileDiff[], name: string): Found {
@@ -80,7 +117,7 @@ export function definitionsFound(hits: RepoHit[], capped: boolean, files: FileDi
   const groups: Found["groups"] = [];
   for (const h of first) {
     const kind = addedLines(changed.get(h.path)).has(h.no) ? "add" : "context";
-    const hit: Hit = { path: h.path, side: "new", no: h.no, kind, text: h.text, at: h.at, length: h.at < 0 ? 0 : name.length };
+    const hit: Hit = { path: h.path, side: "new", no: h.no, kind, text: h.text, at: h.at, length: h.at < 0 ? 0 : name.length, inDiff: false };
     const last = groups[groups.length - 1];
     if (last?.path === h.path) last.hits.push(hit);
     else groups.push({ path: h.path, hits: [hit] });
@@ -123,36 +160,38 @@ export function showLineTarget(card: HTMLElement | null, path: string): void {
 const MARK = { add: "+", del: "-", context: "" } as const;
 
 interface Props {
-  found: Found;
   definitions: Found | null;
+  sections: Section[];
+  // What is still missing from the list, or that nothing matched.
+  note: string | null;
   current: Hit | null;
   onOpen: (hit: Hit) => void;
-  empty: string;
 }
 
-export function SearchResults({ found, definitions, current, onOpen, empty }: Props) {
+export function SearchResults({ definitions, sections, note, current, onOpen }: Props) {
   return (
     <div className="search-results">
       {definitions && (
-        <div className="search-definitions">
+        <div className="search-section">
           <p className="search-count" title="Where the name is defined in the compared version. A definition opens its file on the right.">
-            {definitions.capped ? "First " : ""}
-            {plural(definitions.hits.length, "definition")}
+            <span className="search-title">Definitions</span>
+            {definitions.capped ? "first " : ""}
+            {definitions.hits.length}
           </p>
           <HitGroups groups={definitions.groups} current={current} onOpen={onOpen} />
         </div>
       )}
-      {found.hits.length === 0 ? (
-        <p className="tree-empty">{empty}</p>
-      ) : (
-        <>
-          <p className="search-count">
-            {found.capped ? "First " : ""}
-            {plural(found.hits.length, "line")} in {plural(found.groups.length, "file")}
+      {sections.map((s) => (
+        <div className="search-section" key={s.key}>
+          <p className="search-count" title={s.hint}>
+            <span className="search-title">{s.title}</span>
+            {s.found.capped ? "first " : ""}
+            {plural(s.found.hits.length, "line")}
           </p>
-          <HitGroups groups={found.groups} current={current} onOpen={onOpen} />
-        </>
-      )}
+          <HitGroups groups={s.found.groups} current={current} onOpen={onOpen} />
+        </div>
+      ))}
+      {note !== null && <p className="tree-empty">{note}</p>}
     </div>
   );
 }

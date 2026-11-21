@@ -39,7 +39,7 @@ import { go, KeyboardButton, ShortcutHelp, stepSection, useShortcuts } from "./k
 import { locate } from "./locate";
 import { comparePaths } from "./paths";
 import { ReviewBar } from "./ReviewBar";
-import { definitionsFound, type Hit, repoFound, revealLine, searchDiff, SearchResults } from "./Search";
+import { definitionsFound, type Hit, revealLine, searchChanges, SearchResults, searchSections } from "./Search";
 import { useStoredState, useViewed } from "./storage";
 import { SubmitReview } from "./SubmitReview";
 import { ChangeStats, RefreshButton, SidebarToggle, type Tab, ThemeToggle, ViewTabs } from "./TopBar";
@@ -93,7 +93,6 @@ export function App({ viewId }: Props) {
   const [foldedDirs, setFoldedDirs] = useState<ReadonlySet<string>>(new Set());
   const [query, setQuery] = useState("");
   const [hit, setHit] = useState<Hit | null>(null);
-  const [scope, setScope] = useState<"diff" | "repo">("diff");
   const [wholeWord, setWholeWord] = useState(true);
   const [repoSearch, setRepoSearch] = useState<RepoSearch | null>(null);
   const [defined, setDefined] = useState<{ name: string; result: RepoHits } | null>(null);
@@ -229,7 +228,6 @@ export function App({ viewId }: Props) {
   }, []);
   const searchFor = useCallback(
     (text: string) => {
-      setScope("repo");
       setWholeWord(true);
       setQuery(text);
       setHit(null);
@@ -466,7 +464,7 @@ export function App({ viewId }: Props) {
   const view: Tab = tab === "topics" ? "topics" : tab === "commits" && diff?.commits.length ? "commits" : "files";
 
   const searched = useDeferredValue(query);
-  const repoQuery = scope === "repo" ? searched.trim() : "";
+  const repoQuery = searched.trim();
   const repoKey = `${wholeWord}\0${repoQuery}`;
   const loadedVersion = data?.version ?? null;
   useEffect(() => {
@@ -503,27 +501,30 @@ export function App({ viewId }: Props) {
     };
   }, [searchedName, viewId, loadedVersion]);
 
-  const diffFound = useMemo(
-    () => searchDiff(shown.map((e) => e.file), scope === "diff" ? searched : "", wholeWord),
-    [shown, searched, scope, wholeWord],
-  );
   const repoFiles = diff?.files;
-  const found = useMemo(
-    () => (scope === "repo" ? repoFound(repoResult?.hits ?? [], repoResult?.capped ?? false, repoFiles ?? [], repoQuery, wholeWord) : diffFound),
-    [scope, repoResult, repoFiles, repoQuery, wholeWord, diffFound],
-  );
+  const repos = diff?.repos;
   const definitions = useMemo(() => {
     const result = defined?.name === searchedName && defined.result.version === loadedVersion ? defined.result : null;
     return result?.hits.length ? definitionsFound(result.hits, result.capped, repoFiles ?? [], searchedName) : null;
   }, [defined, searchedName, loadedVersion, repoFiles]);
+  const changesFound = useMemo(() => searchChanges(shown.map((e) => e.file), searched, wholeWord), [shown, searched, wholeWord]);
+  const sections = useMemo(
+    () => searchSections(changesFound, repoResult, repoFiles ?? [], repos ?? [], repoQuery, wholeWord, definitions),
+    [changesFound, repoResult, repoFiles, repos, repoQuery, wholeWord, definitions],
+  );
+  let searchNote: string | null = null;
+  if (repoError) searchNote = `Could not search the repository: ${repoError}`;
+  else if (repoStale) searchNote = "The files changed. Load the new changes to search the repository.";
+  else if (!repoResult) searchNote = "Searching the repository…";
+  else if (sections.length === 0) searchNote = definitions ? "No other line has it." : "No matches.";
   const openHit = (next: Hit) => {
     setHit(next);
-    if (scope === "repo" || definitions?.hits.includes(next)) return openCode(next.path, next.no);
+    if (!next.inDiff) return openCode(next.path, next.no);
     if (view !== "files") setTab("files");
     revealLine(next);
   };
   const stepHit = (dir: 1 | -1) => {
-    const hits = [...(definitions?.hits ?? []), ...found.hits];
+    const hits = [...(definitions?.hits ?? []), ...sections.flatMap((s) => s.found.hits)];
     const i = hit ? hits.indexOf(hit) : -1;
     const next = hits[i < 0 ? (dir > 0 ? 0 : hits.length - 1) : (i + dir + hits.length) % hits.length];
     if (next) openHit(next);
@@ -744,7 +745,7 @@ export function App({ viewId }: Props) {
                         <input
                           className="filter"
                           type="search"
-                          placeholder={scope === "repo" ? "Search the repo" : "Search the diff"}
+                          placeholder="Search the code"
                           value={query}
                           onChange={(e) => {
                             setQuery(e.target.value);
@@ -755,8 +756,8 @@ export function App({ viewId }: Props) {
                             e.preventDefault();
                             stepHit(e.shiftKey ? -1 : 1);
                           }}
-                          aria-label={scope === "repo" ? "Search in the repository" : "Search in the diff"}
-                          title="Enter goes to the next match, Shift+Enter to the previous one"
+                          aria-label="Search the diff and the repository"
+                          title="Searches the changed lines and every file of the compared version. Enter goes to the next match, Shift+Enter to the previous one."
                         />
                         <button
                           className="search-option"
@@ -771,40 +772,9 @@ export function App({ viewId }: Props) {
                           <WholeWordIcon />
                         </button>
                       </div>
-                      <div className="search-scope" role="radiogroup" aria-label="Search in">
-                        {(["diff", "repo"] as const).map((s) => (
-                          <button
-                            key={s}
-                            role="radio"
-                            aria-checked={scope === s}
-                            className={scope === s ? "is-on" : undefined}
-                            title={
-                              s === "repo"
-                                ? "Search every file in the compared version. A match opens its file on the right."
-                                : "Search the lines shown in the diff. A match goes to its line in the diff."
-                            }
-                            onClick={() => {
-                              setScope(s);
-                              setHit(null);
-                            }}
-                          >
-                            {s === "repo" ? "Repo" : "Diff"}
-                          </button>
-                        ))}
-                      </div>
                     </div>
-                    {searched.trim() && scope === "repo" && !repoResult ? (
-                      <p className="tree-empty">
-                        {repoError ? `Could not search: ${repoError}` : repoStale ? "The files changed. Load the new changes to search them." : "Searching…"}
-                      </p>
-                    ) : searched.trim() ? (
-                      <SearchResults
-                        found={found}
-                        definitions={definitions}
-                        current={hit}
-                        onOpen={openHit}
-                        empty={scope === "repo" ? "No matches in the repository." : "No matches in the lines shown in the diff."}
-                      />
+                    {searched.trim() ? (
+                      <SearchResults definitions={definitions} sections={sections} note={searchNote} current={hit} onOpen={openHit} />
                     ) : (
                       <FileTree
                         entries={treeEntries}
