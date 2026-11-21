@@ -157,7 +157,7 @@ export const DiffTable = memo(function DiffTable({ path, hunks, oldTokens, newTo
     if (!text) return;
     e.preventDefault();
     const line = word ? lineAt(e.target, false) : null;
-    findDefinition(text, { path, line: line?.[0] === "new" ? line[1] : null, col: word?.col ?? 0 }, e.clientX, e.clientY);
+    findDefinition(text, { path, line: line?.[0] === "new" ? line[1] : null, col: word?.col ?? 0, panel: single }, e.clientX, e.clientY);
   };
 
   const submit = async (body: string, single: boolean) => {

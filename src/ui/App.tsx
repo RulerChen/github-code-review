@@ -8,6 +8,7 @@ import { followActiveFile } from "./active";
 import { scrollToTop, startAnchoring } from "./anchor";
 import {
   ApiError,
+  type ClickedAt,
   createThread,
   deleteComment,
   deleteReview,
@@ -71,6 +72,12 @@ interface CommitRange {
 
 const savedRange = () => (history.state as { range?: CommitRange } | null)?.range ?? null;
 
+// The stops of the trace in the code panel are kept in the history entry, so the browser's back and forward walk the trace and a reload keeps it.
+type SavedPeek = Omit<Peek, "seq">;
+let peeks = 0;
+const savedCode = (): Peek[] => ((history.state as { code?: SavedPeek[] } | null)?.code ?? []).map((p) => ({ ...p, seq: ++peeks }));
+const toSave = (stack: Peek[]): SavedPeek[] => stack.map(({ path, line, name, listed }) => ({ path, line, name, listed }));
+
 const commitComparison = (c: CommitInfo): Comparison => ({ base: c.parents[0]!, head: c.sha, threeDot: false, overrides: [] });
 
 interface RepoSearch {
@@ -96,8 +103,8 @@ export function App({ viewId }: Props) {
   const [wholeWord, setWholeWord] = useState(true);
   const [repoSearch, setRepoSearch] = useState<RepoSearch | null>(null);
   const [defined, setDefined] = useState<{ name: string; result: RepoHits } | null>(null);
-  const [code, setCode] = useState<Peek[]>([]);
-  const peekSeq = useRef(0);
+  const [code, setCode] = useState<Peek[]>(savedCode);
+  const codeNow = useRef(code);
   const [lookup, setLookup] = useState<DefinitionLookup | null>(null);
   const lookupSeq = useRef(0);
 
@@ -108,6 +115,8 @@ export function App({ viewId }: Props) {
   const [range, setRange] = useState(savedRange);
 
   const requested = useRef<Comparison | null>(comparisonFromQuery(new URLSearchParams(location.search)));
+  // The comparison last asked for, which is the loaded one once it arrives.
+  const asked = useRef(requested.current);
   const seq = useRef(0);
   const version = useRef<string | null>(null);
   const scrolls = useRef<Partial<Record<Tab, number>>>({});
@@ -117,6 +126,7 @@ export function App({ viewId }: Props) {
     if (!viewId) return;
     const n = ++seq.current;
     const other = !sameTarget(target, requested.current);
+    asked.current = target;
     setLoading(true);
     if (other) setSwitching(true);
 
@@ -128,7 +138,12 @@ export function App({ viewId }: Props) {
       const fresh = other || version.current === null;
       requested.current = target;
       version.current = result.version;
-      if (push && other) history.pushState(nextRange && { range: nextRange }, "", target ? `?${comparisonQuery(target)}` : location.pathname);
+      if (push && other) {
+        // The open file stays open in the other comparison. The stops before it belong to the entry left behind.
+        codeNow.current = codeNow.current.slice(-1);
+        setCode(codeNow.current);
+        history.pushState({ range: nextRange, code: toSave(codeNow.current) }, "", target ? `?${comparisonQuery(target)}` : location.pathname);
+      }
       if (other) {
         scrolls.current = {};
         resetScroll.current = true;
@@ -163,7 +178,12 @@ export function App({ viewId }: Props) {
 
   useEffect(() => {
     void load(requested.current);
-    const onPop = () => void load(comparisonFromQuery(new URLSearchParams(location.search)), false, undefined, savedRange());
+    const onPop = () => {
+      codeNow.current = savedCode();
+      setCode(codeNow.current);
+      const target = comparisonFromQuery(new URLSearchParams(location.search));
+      if (!sameTarget(target, asked.current)) void load(target, false, undefined, savedRange());
+    };
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
   }, [load]);
@@ -212,14 +232,30 @@ export function App({ viewId }: Props) {
     [viewId],
   );
 
-  const openCode = useCallback((path: string, line: number | null, push = false) => {
-    const next = { path, line, seq: ++peekSeq.current };
-    setCode((stack) => {
-      const top = stack.at(-1);
-      if (!top) return [next];
-      return push ? [...stack, next] : [...stack.slice(0, -1), next];
-    });
+  const showCode = useCallback((stack: Peek[], push: boolean) => {
+    const state = { ...(history.state as object | null), code: toSave(stack) };
+    if (push) history.pushState(state, "");
+    else history.replaceState(state, "");
+    codeNow.current = stack;
+    setCode(stack);
   }, []);
+  // A name followed in the code panel adds a stop after the one it was clicked in, and that stop keeps the clicked line to come back to. A name followed in the diff starts a new trace. Lines picked from a list, which is from null, share one stop.
+  const openCode = useCallback(
+    (path: string, line: number | null, from: ClickedAt | null = null, name?: string) => {
+      const stack = codeNow.current;
+      const top = stack.at(-1);
+      const next: Peek = { path, line, seq: ++peeks, name, listed: from === null };
+      if (from === null) return showCode(top?.listed ? [...stack.slice(0, -1), next] : [...stack, next], !top?.listed);
+      if (!top || !from.panel || top.path !== from.path) return showCode([next], true);
+      const here = [...stack.slice(0, -1), { ...top, line: from.line ?? top.line, listed: false }];
+      showCode(here, false);
+      showCode([...here, next], true);
+    },
+    [showCode],
+  );
+  const closeCode = useCallback(() => {
+    if (codeNow.current.length) showCode([], true);
+  }, [showCode]);
   const codeTop = code.at(-1) ?? null;
 
   const closeLookup = useCallback(() => {
@@ -248,7 +284,7 @@ export function App({ viewId }: Props) {
           fail,
         );
 
-      setLookup({ name: text, x, y, hits: null, lines: false, capped: false, error: null });
+      setLookup({ name: text, from, x, y, hits: null, lines: false, capped: false, error: null });
       if (!isName(text)) return void findLines();
       fetchDefinitions(viewId, requested.current, text, from).then((r) => {
         if (seq !== lookupSeq.current) return;
@@ -261,7 +297,7 @@ export function App({ viewId }: Props) {
         if (hits.length === 0) return void findLines();
         if (hits.length === 1 && !r.capped) {
           closeLookup();
-          openCode(hits[0]!.path, hits[0]!.no, true);
+          openCode(hits[0]!.path, hits[0]!.no, from, text);
           return;
         }
         current((l) => ({ ...l, hits, capped: r.capped }));
@@ -616,7 +652,7 @@ export function App({ viewId }: Props) {
     j: () => stepSection(1),
     k: () => stepSection(-1),
     u: conv.nextUnread,
-    Escape: () => (lookup ? closeLookup() : help ? setHelp(false) : codeTop ? setCode([]) : conv.setOpen(false)),
+    Escape: () => (lookup ? closeLookup() : help ? setHelp(false) : codeTop ? closeCode() : conv.setOpen(false)),
   });
 
   const [isViewed, toggleViewed] = useViewed(diff && `diff-review:viewed:${diff.repoRoot}`, (f: FileDiff) => f.path, signature);
@@ -706,7 +742,7 @@ export function App({ viewId }: Props) {
                   conv={conv}
                   shown={conv.open && !codeTop}
                   onClick={() => {
-                    setCode([]);
+                    closeCode();
                     conv.setOpen((o) => codeTop !== null || !o);
                   }}
                 />
@@ -853,9 +889,9 @@ export function App({ viewId }: Props) {
                   revision={revisionOf(actions.versions(codeTop.path).new)}
                   version={loadedVersion ?? ""}
                   load={loadCode}
-                  canGoBack={code.length > 1}
-                  onBack={() => setCode((stack) => stack.slice(0, -1))}
-                  onClose={() => setCode([])}
+                  trail={code}
+                  onGo={(steps) => history.go(steps)}
+                  onClose={closeCode}
                   onShowDiff={() => showDiff(codeTop.path)}
                 />
               ) : (
@@ -868,7 +904,7 @@ export function App({ viewId }: Props) {
                 lookup={lookup}
                 onPick={(h) => {
                   closeLookup();
-                  openCode(h.path, h.no, true);
+                  openCode(h.path, h.no, lookup.from, lookup.name);
                 }}
                 onSearch={() => {
                   searchFor(lookup.name);

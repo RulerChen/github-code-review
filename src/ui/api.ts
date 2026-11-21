@@ -79,6 +79,8 @@ export interface ClickedAt {
   path: string;
   line: number | null;
   col: number;
+  // The click was in the code panel, not in the diff.
+  panel: boolean;
 }
 
 export function fetchDefinitions(viewId: string, compare: Comparison | null, name: string, from: ClickedAt): Promise<Definitions> {

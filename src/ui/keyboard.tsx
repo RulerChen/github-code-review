@@ -87,7 +87,8 @@ const KEYS: [string[], string][] = [
   [["j", "k"], "Next or previous file or topic"],
   [["u"], "Next conversation with a new answer"],
   [["Ctrl+Enter"], "Add the comment to your review, or submit the review being written"],
-  [["Ctrl+click"], "Find where the name under the pointer is defined, or the lines with it. On selected text, find the lines with that text (⌘+click on a Mac)"],
+  [["Ctrl+click"], "Go to where the name under the pointer is defined, or list the lines that use it when the pointer is on its definition. On selected text, find the lines with that text (⌘+click on a Mac)"],
+  [["Alt+←", "Alt+→"], "Back and forward through the code opened on the right, as the browser's own buttons do (⌘+[ and ⌘+] on a Mac)"],
   [["Esc"], "Cancel a comment, or close this list, the code panel or the conversations"],
 ];
 

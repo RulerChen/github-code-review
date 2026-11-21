@@ -59,6 +59,7 @@ export function rankDefinitions(hits: RepoHit[], from: string): RepoHit[] {
 
 export interface DefinitionLookup {
   name: string;
+  from: ClickedAt;
   x: number;
   y: number;
   hits: RepoHit[] | null;

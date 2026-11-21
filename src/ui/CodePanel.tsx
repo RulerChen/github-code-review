@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { splitLines } from "../shared/hunks";
 import type { DiffLine, DisplayHunk, FileDiff, RepoFile } from "../shared/types";
 import { errorMessage } from "../shared/util";
@@ -10,13 +10,19 @@ import { ArrowLeftIcon, CloseIcon } from "./icons";
 import { basename, dirPrefix } from "./paths";
 import "./code-panel.css";
 
+// One stop of a trace through the code.
 export interface Peek {
   path: string;
   line: number | null;
   seq: number;
+  // The name that was followed to get here.
+  name?: string;
+  // Picked from a list of lines. The next line picked from a list takes its place.
+  listed?: boolean;
 }
 
 const WINDOW = 500;
+const MAX_CRUMBS = 5;
 const FOUND_MS = 2500;
 
 export function addedLines(file: FileDiff | undefined): Set<number> {
@@ -33,13 +39,17 @@ interface Props {
   revision: string;
   version: string;
   load: (path: string) => Promise<RepoFile>;
-  canGoBack: boolean;
-  onBack: () => void;
+  // The stops that led here, this one last.
+  trail: Peek[];
+  // Moves along the trail: -1 is the stop before this one.
+  onGo: (steps: number) => void;
   onClose: () => void;
   onShowDiff: () => void;
 }
 
-export function CodePanel({ peek, file, revision, version, load, canGoBack, onBack, onClose, onShowDiff }: Props) {
+const placeOf = (p: Peek) => (p.line === null ? p.path : `${p.path}:${p.line}`);
+
+export function CodePanel({ peek, file, revision, version, load, trail, onGo, onClose, onShowDiff }: Props) {
   const { path } = peek;
   const key = `${version}\0${path}`;
   const local = file?.newContent ?? null;
@@ -136,8 +146,8 @@ export function CodePanel({ peek, file, revision, version, load, canGoBack, onBa
   return (
     <aside className="code-panel" aria-label={`Code of ${path}`}>
       <header className="code-head">
-        {canGoBack && (
-          <button className="icon-button" onClick={onBack} aria-label="Back" title="Back">
+        {trail.length > 1 && (
+          <button className="icon-button" onClick={() => onGo(-1)} aria-label="Back" title="Back (Alt+←)">
             <ArrowLeftIcon />
           </button>
         )}
@@ -159,6 +169,29 @@ export function CodePanel({ peek, file, revision, version, load, canGoBack, onBa
           <CloseIcon />
         </button>
       </header>
+      {trail.length > 1 && (
+        <nav className="code-trail" aria-label="The way here">
+          {trail.length > MAX_CRUMBS && <span className="code-crumb-gap">…</span>}
+          {trail.slice(-MAX_CRUMBS).map((p, i, shown) => {
+            const back = shown.length - 1 - i;
+            const label = p.name ?? (p.line === null ? basename(p.path) : `${basename(p.path)}:${p.line}`);
+            return (
+              <Fragment key={p.seq}>
+                {i > 0 && <span className="code-crumb-gap">›</span>}
+                {back === 0 ? (
+                  <span className="code-crumb is-current" title={placeOf(p)}>
+                    {label}
+                  </span>
+                ) : (
+                  <button className="code-crumb" onClick={() => onGo(-back)} title={`Back to ${placeOf(p)}`}>
+                    {label}
+                  </button>
+                )}
+              </Fragment>
+            );
+          })}
+        </nav>
+      )}
       <div className="code-body" ref={body}>
         {fileThreads.length > 0 && (
           <div className="file-threads">
