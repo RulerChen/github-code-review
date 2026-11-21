@@ -78,13 +78,19 @@ export function ClaudeStatus({ state, since }: { state: Claude; since: string | 
   const ref = useRef<HTMLDivElement>(null);
   useDismiss(ref, open, () => setOpen(false));
   const minutes = useMinutes(state === "working" ? since : null);
-  const label = state === "working" && minutes > 0 ? `${LABELS.working} · ${minutes} min` : LABELS[state];
+  const label = LABELS[state];
 
   return (
     <div className="review-menu status-menu" ref={ref}>
       <button className={`button status-button is-${state}`} aria-expanded={open} onClick={() => setOpen((o) => !o)}>
         <span className="status-dot" aria-hidden="true" />
-        {label}
+        <span className="status-label">
+          {(Object.keys(LABELS) as Claude[]).map((s) => (
+            <span key={s} className={s === state ? undefined : "is-hidden"}>
+              {LABELS[s]}
+            </span>
+          ))}
+        </span>
       </button>
       {open && (
         <div className="review-popover status-popover" role="dialog" aria-label={label}>

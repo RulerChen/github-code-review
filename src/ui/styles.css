@@ -1881,6 +1881,19 @@ button {
   white-space: nowrap;
 }
 
+.status-label {
+  display: inline-grid;
+  text-align: left;
+}
+
+.status-label > * {
+  grid-area: 1 / 1;
+}
+
+.status-label > .is-hidden {
+  visibility: hidden;
+}
+
 .status-menu > .status-button.is-gone {
   border-color: var(--danger);
   color: var(--danger);
