@@ -10,10 +10,10 @@ export const ASK = "address my review comments";
 const TICK_MS = 15_000;
 
 const LABELS: Record<Claude, string> = {
-  waiting: "Claude is waiting",
-  working: "Claude is working",
-  idle: "Claude isn't waiting",
-  gone: "Disconnected",
+  waiting: "Waiting",
+  working: "Running",
+  idle: "Idle",
+  gone: "Offline",
 };
 
 export function claudeState(status: SessionStatus | null, connected: boolean): Claude {
