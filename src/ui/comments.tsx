@@ -219,13 +219,21 @@ function CommentForm({ placeholder, initial = "", editing = false, lines, onSubm
       <div className="comment-box" ref={box}>
         <div className="comment-tabs" ref={tabs}>
           <div className="comment-tablist" role="tablist">
-            <button type="button" role="tab" className="comment-tab" aria-selected={writing} onClick={() => writing || togglePreview()}>
+            <button
+              type="button"
+              role="tab"
+              className="comment-tab"
+              data-label="Write"
+              aria-selected={writing}
+              onClick={() => writing || togglePreview()}
+            >
               Write
             </button>
             <button
               type="button"
               role="tab"
               className="comment-tab"
+              data-label="Preview"
               aria-selected={!writing}
               onClick={() => writing && togglePreview()}
               title="Preview (Ctrl+Shift+P)"

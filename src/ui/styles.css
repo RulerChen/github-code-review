@@ -2011,14 +2011,22 @@ button {
   cursor: pointer;
 }
 
+.comment-tab::after {
+  content: attr(data-label);
+  display: block;
+  height: 0;
+  overflow: hidden;
+  font-weight: 600;
+  visibility: hidden;
+}
+
 .comment-tab:hover {
   color: var(--fg);
 }
 
 .comment-tab[aria-selected="true"] {
-  border-color: var(--border-muted);
-  background: var(--bg-subtle);
   color: var(--fg);
+  font-weight: 600;
 }
 
 .comment-toolbar {
