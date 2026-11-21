@@ -136,3 +136,23 @@ button.code-crumb:hover {
     box-shadow: -8px 0 24px rgb(1 4 9 / 0.2);
   }
 }
+
+.code-panel.is-full {
+  position: sticky;
+  top: calc(var(--topbar-h) + 16px);
+  z-index: auto;
+  width: auto;
+  height: calc(100vh - var(--topbar-h) - 32px);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: none;
+  transition: none;
+}
+
+.code-empty {
+  margin: 0;
+  padding: 32px 16px;
+  color: var(--fg-muted);
+  text-align: center;
+}

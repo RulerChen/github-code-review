@@ -267,12 +267,6 @@ button {
   display: none;
 }
 
-.tree-modes {
-  display: flex;
-  gap: 2px;
-  margin-bottom: 8px;
-}
-
 .filter-row {
   display: flex;
   gap: 4px;
@@ -2030,8 +2024,7 @@ button {
   gap: 2px;
 }
 
-.comment-tab,
-.tree-mode {
+.comment-tab {
   padding: 2px 10px;
   border: 1px solid transparent;
   border-radius: 6px;
@@ -2043,8 +2036,7 @@ button {
   cursor: pointer;
 }
 
-.comment-tab::after,
-.tree-mode::after {
+.comment-tab::after {
   content: attr(data-label);
   display: block;
   height: 0;
@@ -2053,13 +2045,11 @@ button {
   visibility: hidden;
 }
 
-.comment-tab:hover,
-.tree-mode:hover {
+.comment-tab:hover {
   color: var(--fg);
 }
 
-.comment-tab[aria-selected="true"],
-.tree-mode[aria-selected="true"] {
+.comment-tab[aria-selected="true"] {
   color: var(--fg);
   font-weight: 600;
 }

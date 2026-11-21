@@ -40,11 +40,12 @@ interface Props {
   onGo: (steps: number) => void;
   onClose: () => void;
   onShowDiff: () => void;
+  full?: boolean;
 }
 
 const placeOf = (p: Peek) => (p.line === null ? p.path : `${p.path}:${p.line}`);
 
-export function CodePanel({ peek, file, revision, version, load, trail, onGo, onClose, onShowDiff }: Props) {
+export function CodePanel({ peek, file, revision, version, load, trail, onGo, onClose, onShowDiff, full = false }: Props) {
   const { path } = peek;
   const key = `${version}\0${path}`;
   const local = file?.newContent ?? null;
@@ -139,7 +140,7 @@ export function CodePanel({ peek, file, revision, version, load, trail, onGo, on
   else if (lines.length === 0) note = "Empty file.";
 
   return (
-    <aside className="code-panel" aria-label={`Code of ${path}`}>
+    <aside className={`code-panel${full ? " is-full" : ""}`} aria-label={`Code of ${path}`}>
       <header className="code-head">
         {trail.length > 1 && (
           <button className="icon-button" onClick={() => onGo(-1)} aria-label="Back" title="Back (Alt+←)">
@@ -160,9 +161,11 @@ export function CodePanel({ peek, file, revision, version, load, trail, onGo, on
             Show diff
           </button>
         )}
-        <button className="icon-button" onClick={onClose} aria-label="Close code" title="Close code (Esc)">
-          <CloseIcon />
-        </button>
+        {!full && (
+          <button className="icon-button" onClick={onClose} aria-label="Close code" title="Close code (Esc)">
+            <CloseIcon />
+          </button>
+        )}
       </header>
       {trail.length > 1 && (
         <nav className="code-trail" aria-label="The way here">

@@ -100,7 +100,6 @@ export function App({ viewId }: Props) {
   const [sidebarOpen, setSidebarOpen] = useStoredState("diff-review:sidebar", true);
   const [filter, setFilter] = useState("");
   const [foldedDirs, setFoldedDirs] = useState<ReadonlySet<string>>(new Set());
-  const [treeMode, setTreeMode] = useStoredState<"changed" | "all">("diff-review:tree", "changed");
   const [repoTree, setRepoTree] = useState<{ version: string; paths: string[] | null; error: string | null } | null>(null);
   const [openDirs, setOpenDirs] = useState<ReadonlySet<string>>(new Set());
   const [query, setQuery] = useState("");
@@ -506,7 +505,8 @@ export function App({ viewId }: Props) {
     [topics],
   );
 
-  const view: Tab = tab === "topics" ? "topics" : tab === "commits" && diff?.commits.length ? "commits" : "files";
+  const view: Tab = tab === "topics" || tab === "code" ? tab : tab === "commits" && diff?.commits.length ? "commits" : "files";
+  const sidePeek = view === "code" ? null : codeTop;
 
   const searched = useDeferredValue(query);
   const repoQuery = searched.trim();
@@ -566,7 +566,7 @@ export function App({ viewId }: Props) {
   else if (sections.length === 0) searchNote = definitions ? "No other line has it." : "No matches.";
   const openHit = (next: Hit) => {
     setHit(next);
-    if (!next.inDiff) return openCode(next.path, next.no);
+    if (!next.inDiff || (view === "code" && next.side === "new")) return openCode(next.path, next.no);
     if (view !== "files") setTab("files");
     revealLine(next);
   };
@@ -647,7 +647,7 @@ export function App({ viewId }: Props) {
         if (t.anchor.path !== null) openCode(t.anchor.path, t.anchor.start);
         return;
       }
-      if (topicTab || tab === "commits" || p.tab === "topics") setTab(p.tab);
+      if (topicTab || tab === "commits" || view === "code" || p.tab === "topics") setTab(p.tab);
       const { path } = t.anchor;
       if (p.tab === "files" && path !== null && !path.toLowerCase().includes(filter.trim().toLowerCase())) setFilter("");
     },
@@ -664,7 +664,7 @@ export function App({ viewId }: Props) {
     j: () => stepSection(1),
     k: () => stepSection(-1),
     u: conv.nextUnread,
-    Escape: () => (lookup ? closeLookup() : help ? setHelp(false) : codeTop ? closeCode() : conv.setOpen(false)),
+    Escape: () => (lookup ? closeLookup() : help ? setHelp(false) : sidePeek ? closeCode() : conv.setOpen(false)),
   });
 
   const [isViewed, toggleViewed] = useViewed(diff && `diff-review:viewed:${diff.repoRoot}`, (f: FileDiff) => f.path, signature);
@@ -697,17 +697,13 @@ export function App({ viewId }: Props) {
       setTab("files");
     } else setOpening({ anchor: entry.anchor });
   };
-  const pick = (entry: TreeEntry) => {
-    if (entry.anchor !== null) select(entry.anchor);
-    else if (entry.file) showDiff(entry.path);
-    else openCode(entry.path, null);
-  };
+  const pick = (entry: TreeEntry) => (view !== "code" && entry.anchor !== null ? select(entry.anchor) : openCode(entry.path, null));
   const latestPick = useRef(pick);
   latestPick.current = pick;
   const onPick = useCallback((entry: TreeEntry) => latestPick.current(entry), []);
   const treeEntries = useMemo(() => (topicTab ? matching(topicFiles, filter) : shown), [topicTab, topicFiles, filter, shown]);
 
-  const allFiles = treeMode === "all";
+  const allFiles = view === "code";
   useEffect(() => {
     if (!allFiles || !viewId || loadedVersion === null || repoTree?.version === loadedVersion) return;
     let cancelled = false;
@@ -723,9 +719,8 @@ export function App({ viewId }: Props) {
     const paths = repoTree?.version === loadedVersion ? repoTree.paths : null;
     if (!paths || !diff) return null;
     const files = new Map(diff.files.map((f) => [f.path, f]));
-    const anchors = new Map((topicTab ? topicFiles : entries).map((e) => [e.file.path, e.anchor]));
-    return paths.map((path) => ({ path, file: files.get(path) ?? null, anchor: anchors.get(path) ?? null }));
-  }, [repoTree, loadedVersion, diff, topicTab, topicFiles, entries]);
+    return paths.map((path) => ({ path, file: files.get(path) ?? null, anchor: null }));
+  }, [repoTree, loadedVersion, diff]);
   const filterText = filter.trim().toLowerCase();
   const browsing = allFiles && !filterText;
   const treeList = useMemo<TreeEntry[] | null>(() => {
@@ -778,6 +773,22 @@ export function App({ viewId }: Props) {
   }
   if (!diff) return <Notice title="Loading diff…" />;
 
+  const codePanel = (full: boolean) =>
+    codeTop && (
+      <CodePanel
+        full={full}
+        peek={codeTop}
+        file={diff.files.find((f) => f.path === codeTop.path)}
+        revision={revisionOf(actions.versions(codeTop.path).new)}
+        version={loadedVersion ?? ""}
+        load={loadCode}
+        trail={code}
+        onGo={(steps) => history.go(steps)}
+        onClose={closeCode}
+        onShowDiff={() => showDiff(codeTop.path)}
+      />
+    );
+
   return (
     <FileLoader.Provider value={loadFile}>
       <FindDefinitionContext.Provider value={findDefinition}>
@@ -797,10 +808,10 @@ export function App({ viewId }: Props) {
                 <ViewTabs view={view} commitCount={stepping?.count ?? diff.commitCount} onSelect={setTab} />
                 <ConversationsButton
                   conv={conv}
-                  shown={conv.open && !codeTop}
+                  shown={conv.open && !sidePeek}
                   onClick={() => {
-                    closeCode();
-                    conv.setOpen((o) => codeTop !== null || !o);
+                    if (sidePeek) closeCode();
+                    conv.setOpen((o) => sidePeek !== null || !o);
                   }}
                 />
                 <KeyboardButton onClick={() => setHelp(true)} />
@@ -811,24 +822,9 @@ export function App({ viewId }: Props) {
 
               {error && <div className="banner">{error.message}</div>}
 
-              <div className={`layout${codeTop ? " with-code" : conv.open ? " with-conversations" : ""}${sidebarOpen ? "" : " no-sidebar"}`}>
+              <div className={`layout${sidePeek ? " with-code" : conv.open ? " with-conversations" : ""}${sidebarOpen ? "" : " no-sidebar"}`}>
                 <aside className="sidebar" hidden={!sidebarOpen}>
                   <div className="view">
-                    <div className="tree-modes" role="tablist" aria-label="Files in the tree">
-                      <button role="tab" className="tree-mode" data-label="Changed files" aria-selected={!allFiles} onClick={() => setTreeMode("changed")}>
-                        Changed files
-                      </button>
-                      <button
-                        role="tab"
-                        className="tree-mode"
-                        data-label="All files"
-                        aria-selected={allFiles}
-                        onClick={() => setTreeMode("all")}
-                        title="Every file of the compared version. Opening a file without changes shows it beside the diff."
-                      >
-                        All files
-                      </button>
-                    </div>
                     <div className="filter-row">
                       <input
                         className="filter"
@@ -903,15 +899,16 @@ export function App({ viewId }: Props) {
                 </aside>
 
                 <main className={`files${switching ? " is-switching" : ""}`}>
-                  {repoFailures(diff.repos).map((f) => (
-                    <p key={f.error} className="file-note inline">
-                      Not compared in {f.dirs.join(", ")}: {f.error}
-                    </p>
-                  ))}
-                  {stepping && view !== "commits" && (
+                  {view !== "code" &&
+                    repoFailures(diff.repos).map((f) => (
+                      <p key={f.error} className="file-note inline">
+                        Not compared in {f.dirs.join(", ")}: {f.error}
+                      </p>
+                    ))}
+                  {stepping && view !== "commits" && view !== "code" && (
                     <CommitBar commits={stepping.commits} count={stepping.count} index={stepIndex} onView={viewCommit} onAll={showAllCommits} />
                   )}
-                  {view !== "commits" && diff.files.length === 0 && <Notice title="No changes">{noChanges(diff)}</Notice>}
+                  {(view === "topics" || view === "files") && diff.files.length === 0 && <Notice title="No changes">{noChanges(diff)}</Notice>}
                   {visited.current.has("topics") && (
                     <div className="view" hidden={view !== "topics"}>
                       <ReviewBar
@@ -959,23 +956,12 @@ export function App({ viewId }: Props) {
                       />
                     </div>
                   )}
+                  {view === "code" && (
+                    <div className="view">{codePanel(true) || <p className="code-empty">Pick a file in the tree to read it.</p>}</div>
+                  )}
                 </main>
               </div>
-              {codeTop ? (
-                <CodePanel
-                  peek={codeTop}
-                  file={diff.files.find((f) => f.path === codeTop.path)}
-                  revision={revisionOf(actions.versions(codeTop.path).new)}
-                  version={loadedVersion ?? ""}
-                  load={loadCode}
-                  trail={code}
-                  onGo={(steps) => history.go(steps)}
-                  onClose={closeCode}
-                  onShowDiff={() => showDiff(codeTop.path)}
-                />
-              ) : (
-                conv.open && <ConversationsPanel conv={conv} />
-              )}
+              {sidePeek ? codePanel(false) : conv.open && <ConversationsPanel conv={conv} />}
             </div>
             {help && <ShortcutHelp onClose={() => setHelp(false)} />}
             {lookup && (

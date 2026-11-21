@@ -4,7 +4,7 @@ import { plural, sum } from "../shared/util";
 import { MoonIcon, SidebarIcon, SunIcon, SyncIcon } from "./icons";
 import { readStorage, writeStorage } from "./storage";
 
-export type Tab = "topics" | "files" | "commits";
+export type Tab = "topics" | "files" | "commits" | "code";
 
 const THEME_KEY = "diff-review:theme";
 
@@ -70,6 +70,7 @@ const TABS: [Tab, string][] = [
   ["topics", "Topics"],
   ["files", "Files"],
   ["commits", "Commits"],
+  ["code", "Code"],
 ];
 
 export function ViewTabs({ view, commitCount, onSelect }: { view: Tab; commitCount: number; onSelect: (tab: Tab) => void }) {
