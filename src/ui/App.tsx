@@ -108,6 +108,7 @@ export function App({ viewId }: Props) {
   const [repoSearch, setRepoSearch] = useState<RepoSearch | null>(null);
   const [defined, setDefined] = useState<{ name: string; result: RepoHits } | null>(null);
   const [code, setCode] = useState<Peek[]>(savedCode);
+  const [codeFile, setCodeFile] = useState<Peek | null>(null);
   const codeNow = useRef(code);
   const [lookup, setLookup] = useState<DefinitionLookup | null>(null);
   const lookupSeq = useRef(0);
@@ -258,6 +259,7 @@ export function App({ viewId }: Props) {
     if (codeNow.current.length) showCode([], true);
   }, [showCode]);
   const codeTop = code.at(-1) ?? null;
+  const readFile = useCallback((path: string, line: number | null) => setCodeFile({ path, line, seq: ++peeks }), []);
 
   const closeLookup = useCallback(() => {
     lookupSeq.current++;
@@ -506,7 +508,6 @@ export function App({ viewId }: Props) {
   );
 
   const view: Tab = tab === "topics" || tab === "code" ? tab : tab === "commits" && diff?.commits.length ? "commits" : "files";
-  const sidePeek = view === "code" ? null : codeTop;
 
   const searched = useDeferredValue(query);
   const repoQuery = searched.trim();
@@ -566,6 +567,7 @@ export function App({ viewId }: Props) {
   else if (sections.length === 0) searchNote = definitions ? "No other line has it." : "No matches.";
   const openHit = (next: Hit) => {
     setHit(next);
+    if (view === "code" && next.side === "new" && (codeFile === null || codeFile.path === next.path)) return readFile(next.path, next.no);
     if (!next.inDiff || (view === "code" && next.side === "new")) return openCode(next.path, next.no);
     if (view !== "files") setTab("files");
     revealLine(next);
@@ -664,7 +666,7 @@ export function App({ viewId }: Props) {
     j: () => stepSection(1),
     k: () => stepSection(-1),
     u: conv.nextUnread,
-    Escape: () => (lookup ? closeLookup() : help ? setHelp(false) : sidePeek ? closeCode() : conv.setOpen(false)),
+    Escape: () => (lookup ? closeLookup() : help ? setHelp(false) : codeTop ? closeCode() : conv.setOpen(false)),
   });
 
   const [isViewed, toggleViewed] = useViewed(diff && `diff-review:viewed:${diff.repoRoot}`, (f: FileDiff) => f.path, signature);
@@ -697,7 +699,10 @@ export function App({ viewId }: Props) {
       setTab("files");
     } else setOpening({ anchor: entry.anchor });
   };
-  const pick = (entry: TreeEntry) => (view !== "code" && entry.anchor !== null ? select(entry.anchor) : openCode(entry.path, null));
+  const pick = (entry: TreeEntry) => {
+    if (view === "code") readFile(entry.path, null);
+    else if (entry.anchor !== null) select(entry.anchor);
+  };
   const latestPick = useRef(pick);
   latestPick.current = pick;
   const onPick = useCallback((entry: TreeEntry) => latestPick.current(entry), []);
@@ -729,7 +734,7 @@ export function App({ viewId }: Props) {
   }, [allFiles, allEntries, filterText, treeEntries]);
 
   const changedKey = diff?.files.map((f) => f.path).join("\0") ?? "";
-  const codePath = codeTop?.path ?? null;
+  const codePath = codeFile?.path ?? null;
   const changedDirs = useCallback(
     (dirs: ReadonlySet<string>) => withDirsOf(dirs, changedKey ? changedKey.split("\0") : []),
     [changedKey],
@@ -773,21 +778,20 @@ export function App({ viewId }: Props) {
   }
   if (!diff) return <Notice title="Loading diff…" />;
 
-  const codePanel = (full: boolean) =>
-    codeTop && (
-      <CodePanel
-        full={full}
-        peek={codeTop}
-        file={diff.files.find((f) => f.path === codeTop.path)}
-        revision={revisionOf(actions.versions(codeTop.path).new)}
-        version={loadedVersion ?? ""}
-        load={loadCode}
-        trail={code}
-        onGo={(steps) => history.go(steps)}
-        onClose={closeCode}
-        onShowDiff={() => showDiff(codeTop.path)}
-      />
-    );
+  const codePanel = (peek: Peek, full: boolean) => (
+    <CodePanel
+      full={full}
+      peek={peek}
+      file={diff.files.find((f) => f.path === peek.path)}
+      revision={revisionOf(actions.versions(peek.path).new)}
+      version={loadedVersion ?? ""}
+      load={loadCode}
+      trail={full ? [peek] : code}
+      onGo={(steps) => history.go(steps)}
+      onClose={closeCode}
+      onShowDiff={() => showDiff(peek.path)}
+    />
+  );
 
   return (
     <FileLoader.Provider value={loadFile}>
@@ -808,10 +812,10 @@ export function App({ viewId }: Props) {
                 <ViewTabs view={view} commitCount={stepping?.count ?? diff.commitCount} onSelect={setTab} />
                 <ConversationsButton
                   conv={conv}
-                  shown={conv.open && !sidePeek}
+                  shown={conv.open && !codeTop}
                   onClick={() => {
-                    if (sidePeek) closeCode();
-                    conv.setOpen((o) => sidePeek !== null || !o);
+                    closeCode();
+                    conv.setOpen((o) => codeTop !== null || !o);
                   }}
                 />
                 <KeyboardButton onClick={() => setHelp(true)} />
@@ -822,7 +826,7 @@ export function App({ viewId }: Props) {
 
               {error && <div className="banner">{error.message}</div>}
 
-              <div className={`layout${sidePeek ? " with-code" : conv.open ? " with-conversations" : ""}${sidebarOpen ? "" : " no-sidebar"}`}>
+              <div className={`layout${codeTop ? " with-code" : conv.open ? " with-conversations" : ""}${sidebarOpen ? "" : " no-sidebar"}`}>
                 <aside className="sidebar" hidden={!sidebarOpen}>
                   <div className="view">
                     <div className="filter-row">
@@ -957,11 +961,11 @@ export function App({ viewId }: Props) {
                     </div>
                   )}
                   {view === "code" && (
-                    <div className="view">{codePanel(true) || <p className="code-empty">Pick a file in the tree to read it.</p>}</div>
+                    <div className="view">{codeFile ? codePanel(codeFile, true) : <p className="code-empty">Pick a file in the tree to read it.</p>}</div>
                   )}
                 </main>
               </div>
-              {sidePeek ? codePanel(false) : conv.open && <ConversationsPanel conv={conv} />}
+              {codeTop ? codePanel(codeTop, false) : conv.open && <ConversationsPanel conv={conv} />}
             </div>
             {help && <ShortcutHelp onClose={() => setHelp(false)} />}
             {lookup && (

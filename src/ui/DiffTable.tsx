@@ -41,6 +41,7 @@ interface Props {
   threads: Thread[];
   onExpand: OnExpand;
   single?: boolean;
+  panel?: boolean;
 }
 
 const MARK = { add: "+", del: "-", context: " " } as const;
@@ -97,7 +98,7 @@ function Code({ line, tokens, marks }: { line: DiffLine; tokens: Token[] | undef
   );
 }
 
-export const DiffTable = memo(function DiffTable({ path, hunks, oldTokens, newTokens, threads, onExpand, single = false }: Props) {
+export const DiffTable = memo(function DiffTable({ path, hunks, oldTokens, newTokens, threads, onExpand, single = false, panel = single }: Props) {
   const { create, versions } = useCommentActions();
   const findDefinition = useContext(FindDefinitionContext);
   const [selection, setSelection] = useState<Selection | null>(null);
@@ -157,7 +158,7 @@ export const DiffTable = memo(function DiffTable({ path, hunks, oldTokens, newTo
     if (!text) return;
     e.preventDefault();
     const line = word ? lineAt(e.target, false) : null;
-    findDefinition(text, { path, line: line?.[0] === "new" ? line[1] : null, col: word?.col ?? 0, panel: single }, e.clientX, e.clientY);
+    findDefinition(text, { path, line: line?.[0] === "new" ? line[1] : null, col: word?.col ?? 0, panel }, e.clientX, e.clientY);
   };
 
   const submit = async (body: string, single: boolean) => {

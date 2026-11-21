@@ -201,7 +201,7 @@ export function CodePanel({ peek, file, revision, version, load, trail, onGo, on
         {note !== null ? (
           <p className="file-note">{note}</p>
         ) : (
-          <DiffTable path={path} hunks={hunks} oldTokens={null} newTokens={newTokens} threads={threads} onExpand={expand} single />
+          <DiffTable path={path} hunks={hunks} oldTokens={null} newTokens={newTokens} threads={threads} onExpand={expand} single panel={!full} />
         )}
       </div>
     </aside>
