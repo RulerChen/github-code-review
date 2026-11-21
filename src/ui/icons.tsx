@@ -177,6 +177,14 @@ export const FileIcon = ({ className }: { className: string }) => (
   />
 );
 
+export const MatchCaseIcon = () => (
+  <Svg>
+    <text x="8" y="12" textAnchor="middle" fontSize="10.5" fontWeight="600" fill="currentColor">
+      Aa
+    </text>
+  </Svg>
+);
+
 export const WholeWordIcon = () => (
   <Svg>
     <text x="8" y="9" textAnchor="middle" fontSize="9" fontWeight="600" fill="currentColor">

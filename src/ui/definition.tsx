@@ -65,7 +65,6 @@ export interface DefinitionLookup {
   y: number;
   hits: RepoHit[] | null;
   lines: boolean;
-  capped: boolean;
   error: string | null;
 }
 
@@ -87,9 +86,9 @@ export function DefinitionMenu({ lookup, onPick, onSearch, onClose }: Props) {
     m.style.top = `${below + m.offsetHeight <= innerHeight - 16 ? below : Math.max(16, lookup.y - 12 - m.offsetHeight)}px`;
   });
 
-  const { name, hits, lines, capped, error } = lookup;
+  const { name, hits, lines, error } = lookup;
   const named = isName(name);
-  const count = `${capped ? "First " : ""}${plural(hits?.length ?? 0, lines ? "line" : "definition")}`;
+  const count = plural(hits?.length ?? 0, lines ? "line" : "definition");
   const title = !hits?.length || error ? (named ? `Definition of ${name}` : `Lines with ${name}`) : `${count} ${lines ? "with" : "of"} ${name}`;
   const shown = hits?.slice(0, MAX_SHOWN) ?? [];
   return (
@@ -119,7 +118,7 @@ export function DefinitionMenu({ lookup, onPick, onSearch, onClose }: Props) {
           </ul>
           {shown.length < hits.length ? (
             <button className="definition-more" onClick={onSearch}>
-              Show all {capped ? "" : `${hits.length} `}in the search
+              Show all {hits.length} in the search
             </button>
           ) : (
             lookup.byName && (

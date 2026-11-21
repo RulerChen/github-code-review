@@ -289,16 +289,21 @@ button {
 
 .search-box > .filter {
   margin-bottom: 0;
-  padding-right: 32px;
+  padding-right: 56px;
 }
 
-.search-option {
+.search-options {
   position: absolute;
   top: 0;
   right: 4px;
   bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.search-option {
   display: grid;
-  margin: auto 0;
   place-items: center;
   width: 22px;
   height: 22px;
@@ -478,20 +483,70 @@ button {
   font-weight: 600;
 }
 
+.search-count,
+.search-file {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.search-count:hover,
+.search-file:hover {
+  background: var(--bg-subtle);
+}
+
 .search-count {
   margin: 0 0 8px;
-  padding: 0 8px;
+  padding: 0 8px 0 4px;
   color: var(--fg-muted);
   font-size: 12px;
 }
 
 .search-file {
-  display: flex;
   margin: 0;
-  padding: 4px 8px;
+  padding: 4px 8px 4px 4px;
+  color: var(--fg);
   font-size: 12px;
   font-weight: 600;
   white-space: nowrap;
+}
+
+.search-toggle {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 16px;
+  margin-right: 2px;
+  color: var(--fg-muted);
+}
+
+.search-toggle svg {
+  width: 12px;
+  height: 12px;
+  fill: currentColor;
+  transition: transform 0.15s ease-out;
+}
+
+[aria-expanded="false"] > .search-toggle svg {
+  transform: rotate(-90deg);
+}
+
+.search-file-count {
+  flex: none;
+  margin-left: auto;
+  padding-left: 8px;
+  color: var(--fg-muted);
+  font-weight: 400;
+}
+
+.search-more {
+  height: 1px;
 }
 
 .search-dir {

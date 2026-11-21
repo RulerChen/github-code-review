@@ -179,7 +179,6 @@ export interface RepoHit {
 export interface RepoHits {
   version: string;
   hits: RepoHit[];
-  capped: boolean;
 }
 
 export interface Definitions extends RepoHits {

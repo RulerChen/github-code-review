@@ -407,7 +407,7 @@ export class ReviewServer {
         const q = (query.get("q") ?? "").trim();
         if (!isText(q, MAX_QUERY, true) || /[\0\n\r]/.test(q)) return sendJson(res, 400, { error: "Invalid search" });
         const { version, diff } = await this.loadDiff(view.repo, compare);
-        return sendFound(res, version, (signal) => grepRepo(diff, q, query.get("word") !== "0", signal));
+        return sendFound(res, version, (signal) => grepRepo(diff, q, query.get("word") !== "0", query.get("case") !== "0", signal));
       }
       case "GET defs": {
         const name = query.get("name") ?? "";
@@ -417,7 +417,7 @@ export class ReviewServer {
         const col = Number(query.get("col"));
         const click = Number.isInteger(line) && line > 0 && Number.isInteger(col) && col >= 0 ? { line, col } : null;
         const { version, diff } = await this.loadDiff(view.repo, compare);
-        if (from === null) return sendFound(res, version, (signal) => findDefinitionsAnywhere(diff, name, signal));
+        if (from === null) return sendFound(res, version, (signal) => findDefinitionsAnywhere(diff, name, query.get("case") !== "0", signal));
         return sendFound(res, version, (signal) => findDefinitions(diff, name, from, click, signal));
       }
       case "GET version":

@@ -37,7 +37,7 @@ import { ConversationsButton, ConversationsPanel, type Place, useConversations }
 import { hasLine } from "./DiffTable";
 import { FileCard, FileLoader, RawUrl, unreadAdded } from "./FileCard";
 import { dirPaths, FileTree, type TreeEntry, withDirsOf } from "./FileTree";
-import { FoldIcon, WholeWordIcon } from "./icons";
+import { FoldIcon, MatchCaseIcon, WholeWordIcon } from "./icons";
 import { go, KeyboardButton, ShortcutHelp, stepSection, useShortcuts } from "./keyboard";
 import { locate } from "./locate";
 import { comparePaths } from "./paths";
@@ -106,8 +106,9 @@ export function App({ viewId }: Props) {
   const [query, setQuery] = useState("");
   const [hit, setHit] = useState<Hit | null>(null);
   const [wholeWord, setWholeWord] = useState(true);
+  const [matchCase, setMatchCase] = useState(true);
   const [repoSearch, setRepoSearch] = useState<RepoSearch | null>(null);
-  const [defined, setDefined] = useState<{ name: string; result: RepoHits } | null>(null);
+  const [defined, setDefined] = useState<{ key: string; result: RepoHits } | null>(null);
   const [code, setCode] = useState<Peek[]>(savedCode);
   const [codeFile, setCodeFile] = useState<Peek | null>(null);
   const codeNow = useRef(code);
@@ -273,6 +274,7 @@ export function App({ viewId }: Props) {
   const searchFor = useCallback(
     (text: string) => {
       setWholeWord(true);
+      setMatchCase(true);
       setQuery(text);
       setHit(null);
       setSidebarOpen(true);
@@ -287,12 +289,12 @@ export function App({ viewId }: Props) {
         setLookup((l) => (l && seq === lookupSeq.current ? update(l) : l));
       const fail = (e: unknown) => current((l) => ({ ...l, error: errorMessage(e) }));
       const findLines = () =>
-        searchRepo(viewId, requested.current, text, true, new AbortController().signal).then(
-          (r) => current((l) => ({ ...l, hits: rankDefinitions(r.hits, from.path), lines: true, capped: r.capped })),
+        searchRepo(viewId, requested.current, text, true, true, new AbortController().signal).then(
+          (r) => current((l) => ({ ...l, hits: rankDefinitions(r.hits, from.path), lines: true })),
           fail,
         );
 
-      setLookup({ name: text, from, byName: false, x, y, hits: null, lines: false, capped: false, error: null });
+      setLookup({ name: text, from, byName: false, x, y, hits: null, lines: false, error: null });
       if (!isName(text)) return void findLines();
       fetchDefinitions(viewId, requested.current, text, from).then((r) => {
         if (seq !== lookupSeq.current) return;
@@ -308,12 +310,12 @@ export function App({ viewId }: Props) {
           return;
         }
         if (hits.length === 0) return void findLines();
-        if (hits.length === 1 && !r.capped && !r.byName) {
+        if (hits.length === 1 && !r.byName) {
           closeLookup();
           openCode(hits[0]!.path, hits[0]!.no, from, text);
           return;
         }
-        current((l) => ({ ...l, hits, capped: r.capped, byName: r.byName }));
+        current((l) => ({ ...l, hits, byName: r.byName }));
       }, fail);
     },
     [viewId, openCode, closeLookup, searchFor],
@@ -516,13 +518,13 @@ export function App({ viewId }: Props) {
 
   const searched = useDeferredValue(query);
   const repoQuery = searched.trim();
-  const repoKey = `${wholeWord}\0${repoQuery}`;
+  const repoKey = `${wholeWord}\0${matchCase}\0${repoQuery}`;
   const loadedVersion = data?.version ?? null;
   useEffect(() => {
     if (!repoQuery || !viewId || loadedVersion === null) return;
     const aborted = new AbortController();
     const timer = window.setTimeout(() => {
-      searchRepo(viewId, requested.current, repoQuery, wholeWord, aborted.signal).then(
+      searchRepo(viewId, requested.current, repoQuery, wholeWord, matchCase, aborted.signal).then(
         (result) => setRepoSearch({ query: repoKey, result, error: null }),
         (e: unknown) => !aborted.signal.aborted && setRepoSearch({ query: repoKey, result: null, error: errorMessage(e) }),
       );
@@ -537,12 +539,13 @@ export function App({ viewId }: Props) {
   const repoStale = repoSearch?.query === repoKey && repoSearch.result !== null && repoSearch.result.version !== loadedVersion;
 
   const searchedName = isName(searched.trim()) ? searched.trim() : "";
+  const definedKey = `${matchCase}\0${searchedName}`;
   useEffect(() => {
     if (!searchedName || !viewId || loadedVersion === null) return;
     const aborted = new AbortController();
     const timer = window.setTimeout(() => {
-      searchDefinitions(viewId, requested.current, searchedName, aborted.signal).then(
-        (result) => setDefined({ name: searchedName, result }),
+      searchDefinitions(viewId, requested.current, searchedName, matchCase, aborted.signal).then(
+        (result) => setDefined({ key: definedKey, result }),
         () => {},
       );
     }, REPO_SEARCH_MS);
@@ -550,19 +553,19 @@ export function App({ viewId }: Props) {
       clearTimeout(timer);
       aborted.abort();
     };
-  }, [searchedName, viewId, loadedVersion]);
+  }, [definedKey, viewId, loadedVersion]);
 
   const repoFiles = diff?.files;
   const definitions = useMemo(() => {
-    const result = defined?.name === searchedName && defined.result.version === loadedVersion ? defined.result : null;
+    const result = searchedName && defined?.key === definedKey && defined.result.version === loadedVersion ? defined.result : null;
     const fields = (repoResult?.hits ?? []).filter((f) => f.role === "field" && !result?.hits.some((h) => h.path === f.path && h.no === f.no));
     const hits = [...(result?.hits ?? []), ...fields];
-    return hits.length ? definitionsFound(hits, result?.capped ?? false, repoFiles ?? [], searched.trim()) : null;
-  }, [defined, searched, searchedName, loadedVersion, repoFiles, repoResult]);
-  const changesFound = useMemo(() => searchChanges(shown.map((e) => e.file), searched, wholeWord), [shown, searched, wholeWord]);
+    return hits.length ? definitionsFound(hits, repoFiles ?? [], searched.trim(), matchCase) : null;
+  }, [defined, searched, searchedName, definedKey, loadedVersion, repoFiles, repoResult, matchCase]);
+  const changesFound = useMemo(() => searchChanges(shown.map((e) => e.file), searched, wholeWord, matchCase), [shown, searched, wholeWord, matchCase]);
   const sections = useMemo(
-    () => searchSections(changesFound, repoResult, repoFiles ?? [], repoQuery, wholeWord, definitions),
-    [changesFound, repoResult, repoFiles, repoQuery, wholeWord, definitions],
+    () => searchSections(changesFound, repoResult, repoFiles ?? [], repoQuery, wholeWord, matchCase, definitions),
+    [changesFound, repoResult, repoFiles, repoQuery, wholeWord, matchCase, definitions],
   );
   let searchNote: string | null = null;
   if (repoError) searchNote = `Could not search the repository: ${repoError}`;
@@ -872,24 +875,42 @@ export function App({ viewId }: Props) {
                               stepHit(e.shiftKey ? -1 : 1);
                             }}
                             aria-label="Search the diff and the repository"
-                            title="Searches every file of the compared version, so lines the diff removes are not found. A name is found in every spelling of it: userId also finds user_id and user-id. Enter goes to the next match, Shift+Enter to the previous one."
+                            title="Searches every file of the compared version, so lines the diff removes are not found. Enter goes to the next match, Shift+Enter to the previous one."
                           />
-                          <button
-                            className="search-option"
-                            aria-pressed={wholeWord}
-                            aria-label="Match whole word"
-                            title={wholeWord ? "Matching whole words only. Click to also match parts of words." : "Matching parts of words. Click to match whole words only."}
-                            onClick={() => {
-                              setWholeWord((w) => !w);
-                              setHit(null);
-                            }}
-                          >
-                            <WholeWordIcon />
-                          </button>
+                          <div className="search-options">
+                            <button
+                              className="search-option"
+                              aria-pressed={matchCase}
+                              aria-label="Match case"
+                              title={
+                                matchCase
+                                  ? "Matching the name as it is written. Click to also find it in any case and every spelling: userId then finds user_id, USER_ID and user-id."
+                                  : "Finding the name in any case and every spelling: userId also finds user_id, USER_ID and user-id. Click to match it as it is written."
+                              }
+                              onClick={() => {
+                                setMatchCase((c) => !c);
+                                setHit(null);
+                              }}
+                            >
+                              <MatchCaseIcon />
+                            </button>
+                            <button
+                              className="search-option"
+                              aria-pressed={wholeWord}
+                              aria-label="Match whole word"
+                              title={wholeWord ? "Matching whole words only. Click to also match parts of words." : "Matching parts of words. Click to match whole words only."}
+                              onClick={() => {
+                                setWholeWord((w) => !w);
+                                setHit(null);
+                              }}
+                            >
+                              <WholeWordIcon />
+                            </button>
+                          </div>
                         </div>
                       </div>
                       {searched.trim() ? (
-                        <SearchResults definitions={definitions} sections={sections} note={searchNote} current={hit} onOpen={openHit} />
+                        <SearchResults key={repoKey} definitions={definitions} sections={sections} note={searchNote} current={hit} onOpen={openHit} />
                       ) : treeList ? (
                         <FileTree
                           entries={treeList}

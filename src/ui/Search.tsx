@@ -1,15 +1,15 @@
-import { useEffect, useRef, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { insideOf } from "../shared/scope";
 import { wordRegExp } from "../shared/search";
 import type { FileDiff, RepoHit } from "../shared/types";
 import { plural } from "../shared/util";
 import { pin } from "./anchor";
 import { addedLines } from "./CodePanel";
+import { ChevronIcon } from "./icons";
 import { basename, comparePaths, dirPrefix } from "./paths";
 
-const MAX_HITS = 500;
-const MAX_DEFINITIONS = 5;
 const LEAD_CHARS = 16;
+const PAGE_ROWS = 300;
 const FOUND_MS = 2500;
 
 export interface Hit {
@@ -26,7 +26,6 @@ export interface Hit {
 interface Found {
   groups: { path: string; hits: Hit[] }[];
   hits: Hit[];
-  capped: boolean;
 }
 
 export interface Section {
@@ -36,9 +35,9 @@ export interface Section {
   found: Found;
 }
 
-export function searchChanges(files: FileDiff[], query: string, whole: boolean): Found {
-  const word = wordRegExp(query, whole);
-  const found: Found = { groups: [], hits: [], capped: false };
+export function searchChanges(files: FileDiff[], query: string, whole: boolean, matchCase: boolean): Found {
+  const word = wordRegExp(query, whole, matchCase);
+  const found: Found = { groups: [], hits: [] };
   if (!word) return found;
 
   for (const file of files) {
@@ -48,7 +47,6 @@ export function searchChanges(files: FileDiff[], query: string, whole: boolean):
       for (const line of hunk.lines) {
         const match = line.kind === "add" ? word.exec(line.text) : null;
         if (!match) continue;
-        if (found.hits.length === MAX_HITS) return { ...found, capped: true };
 
         const no = line.newNo!;
         const inside = file.newContent === null ? null : (place ??= insideOf(file.newContent, file.path))(no);
@@ -67,13 +65,14 @@ const REFERENCES_HINT =
 
 export function searchSections(
   changes: Found,
-  repo: { hits: RepoHit[]; capped: boolean } | null,
+  repo: { hits: RepoHit[] } | null,
   files: FileDiff[],
   query: string,
   whole: boolean,
+  matchCase: boolean,
   definitions: Found | null,
 ): Section[] {
-  const word = wordRegExp(query, whole);
+  const word = wordRegExp(query, whole, matchCase);
   const changed = new Map(files.map((f) => [f.path, f]));
   const idOf = (h: { path: string; no: number }) => `${h.path}\0${h.no}`;
   const defined = new Set((definitions?.hits ?? []).map(idOf));
@@ -101,18 +100,15 @@ export function searchSections(
     .sort(([a], [b]) => Number(!changed.has(a)) - Number(!changed.has(b)) || comparePaths(a, b))
     .map(([path, hits]) => ({ path, hits: hits.sort((x, y) => x.no - y.no) }));
   if (!groups.length) return [];
-  const capped = changes.capped || (repo?.capped ?? false);
-  return [{ key: "references", title: "References", hint: REFERENCES_HINT, found: { groups, hits: groups.flatMap((g) => g.hits), capped } }];
+  return [{ key: "references", title: "References", hint: REFERENCES_HINT, found: { groups, hits: groups.flatMap((g) => g.hits) } }];
 }
 
-export function definitionsFound(hits: RepoHit[], capped: boolean, files: FileDiff[], name: string): Found {
+export function definitionsFound(hits: RepoHit[], files: FileDiff[], name: string, matchCase: boolean): Found {
   const changed = new Map(files.map((f) => [f.path, f]));
-  const word = wordRegExp(name, true);
-  const first = [...hits]
-    .sort((a, b) => Number(!changed.has(a.path)) - Number(!changed.has(b.path)) || comparePaths(a.path, b.path) || a.no - b.no)
-    .slice(0, MAX_DEFINITIONS);
+  const word = wordRegExp(name, true, matchCase);
+  const sorted = [...hits].sort((a, b) => Number(!changed.has(a.path)) - Number(!changed.has(b.path)) || comparePaths(a.path, b.path) || a.no - b.no);
   const groups: Found["groups"] = [];
-  for (const h of first) {
+  for (const h of sorted) {
     const kind = addedLines(changed.get(h.path)).has(h.no) ? "add" : "context";
     const match = word?.exec(h.text);
     const length = h.at < 0 ? 0 : match?.index === h.at ? match[0].length : name.length;
@@ -121,7 +117,7 @@ export function definitionsFound(hits: RepoHit[], capped: boolean, files: FileDi
     if (last?.path === h.path) last.hits.push(hit);
     else groups.push({ path: h.path, hits: [hit] });
   }
-  return { groups, hits: groups.flatMap((g) => g.hits), capped: capped || first.length < hits.length };
+  return { groups, hits: groups.flatMap((g) => g.hits) };
 }
 
 let target: Hit | null = null;
@@ -158,6 +154,8 @@ export function showLineTarget(card: HTMLElement | null, path: string): void {
 
 const MARK = { add: "+", context: "" } as const;
 
+const DEFINITIONS_HINT = "Where the name is defined in the compared version. A definition opens its file on the right.";
+
 interface Props {
   definitions: Found | null;
   sections: Section[];
@@ -166,56 +164,157 @@ interface Props {
   onOpen: (hit: Hit) => void;
 }
 
+interface Listed extends Section {
+  count: string;
+}
+
+interface Planned {
+  key: string;
+  path: string;
+  open: boolean;
+  count: number;
+  hits: Hit[];
+}
+
+const groupKey = (section: string, path: string) => `${section}\0${path}`;
+
+function plan(listed: Listed[], folded: ReadonlySet<string>, rows: number): { planned: { section: Listed; groups: Planned[] }[]; cut: boolean } {
+  let left = rows;
+  let cut = false;
+  const planned: { section: Listed; groups: Planned[] }[] = [];
+  for (const section of listed) {
+    if (left <= 0) {
+      cut = true;
+      break;
+    }
+    const groups: Planned[] = [];
+    planned.push({ section, groups });
+    if (folded.has(section.key)) continue;
+    for (const g of section.found.groups) {
+      if (left <= 0) {
+        cut = true;
+        break;
+      }
+      const key = groupKey(section.key, g.path);
+      const open = !folded.has(key);
+      const hits = open ? g.hits.slice(0, left - 1) : [];
+      if (hits.length < (open ? g.hits.length : 0)) cut = true;
+      left -= 1 + hits.length;
+      groups.push({ key, path: g.path, open, count: g.hits.length, hits });
+    }
+  }
+  return { planned, cut };
+}
+
+function rowsBefore(listed: Listed[], folded: ReadonlySet<string>, target: Hit): number {
+  let rows = 0;
+  for (const s of listed) {
+    if (folded.has(s.key)) continue;
+    for (const g of s.found.groups) {
+      rows++;
+      if (folded.has(groupKey(s.key, g.path))) continue;
+      const at = g.hits.indexOf(target);
+      if (at >= 0) return rows + at + 1;
+      rows += g.hits.length;
+    }
+  }
+  return rows;
+}
+
 export function SearchResults({ definitions, sections, note, current, onOpen }: Props) {
+  const [folded, setFolded] = useState<ReadonlySet<string>>(() => new Set());
+  const [rows, setRows] = useState(PAGE_ROWS);
+  const more = useRef<HTMLDivElement>(null);
+  const listed: Listed[] = [
+    ...(definitions ? [{ key: "definitions", title: "Definitions", hint: DEFINITIONS_HINT, found: definitions, count: String(definitions.hits.length) }] : []),
+    ...sections.map((s) => ({ ...s, count: plural(s.found.hits.length, "line") })),
+  ];
+  const { planned, cut } = plan(listed, folded, rows);
+  const toggle = (key: string) =>
+    setFolded((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(key)) next.add(key);
+      return next;
+    });
+
+  useEffect(() => {
+    const section = current && listed.find((l) => l.found.hits.includes(current));
+    if (!current || !section) return;
+    const keys = [section.key, groupKey(section.key, current.path)];
+    const open = keys.some((k) => folded.has(k)) ? new Set([...folded].filter((k) => !keys.includes(k))) : folded;
+    if (open !== folded) setFolded(open);
+    setRows((r) => Math.max(r, rowsBefore(listed, open, current) + PAGE_ROWS));
+  }, [current]);
+
+  useEffect(() => {
+    const end = more.current;
+    if (!end) return;
+    const seen = new IntersectionObserver((entries) => entries.some((e) => e.isIntersecting) && setRows((r) => r + PAGE_ROWS), {
+      root: end.closest(".sidebar"),
+      rootMargin: "600px 0px",
+    });
+    seen.observe(end);
+    return () => seen.disconnect();
+  }, [rows, cut]);
+
   return (
     <div className="search-results">
-      {definitions && (
-        <div className="search-section">
-          <p className="search-count" title="Where the name is defined in the compared version. A definition opens its file on the right.">
-            <span className="search-title">Definitions</span>
-            {definitions.capped ? "first " : ""}
-            {definitions.hits.length}
-          </p>
-          <HitGroups groups={definitions.groups} current={current} onOpen={onOpen} />
-        </div>
-      )}
-      {sections.map((s) => (
-        <div className="search-section" key={s.key}>
-          <p className="search-count" title={s.hint}>
-            <span className="search-title">{s.title}</span>
-            {s.found.capped ? "first " : ""}
-            {plural(s.found.hits.length, "line")}
-          </p>
-          <HitGroups groups={s.found.groups} current={current} onOpen={onOpen} />
-        </div>
-      ))}
+      {planned.map(({ section, groups }) => {
+        const open = !folded.has(section.key);
+        return (
+          <div className="search-section" key={section.key}>
+            <button className="search-count" aria-expanded={open} title={section.hint} onClick={() => toggle(section.key)}>
+              <span className="search-toggle">
+                <ChevronIcon />
+              </span>
+              <span className="search-title">{section.title}</span>
+              {section.count}
+            </button>
+            {open && <HitGroups groups={groups} current={current} onOpen={onOpen} onToggle={toggle} />}
+          </div>
+        );
+      })}
+      {cut && <div ref={more} className="search-more" />}
       {note !== null && <p className="tree-empty">{note}</p>}
     </div>
   );
 }
 
-function HitGroups({ groups, current, onOpen }: { groups: Found["groups"]; current: Hit | null; onOpen: (hit: Hit) => void }) {
+interface GroupsProps {
+  groups: Planned[];
+  current: Hit | null;
+  onOpen: (hit: Hit) => void;
+  onToggle: (key: string) => void;
+}
+
+function HitGroups({ groups, current, onOpen, onToggle }: GroupsProps) {
   return groups.map((g) => (
-    <section key={g.path}>
-      <h3 className="search-file" title={g.path}>
+    <section key={g.key}>
+      <button className="search-file" aria-expanded={g.open} title={g.path} onClick={() => onToggle(g.key)}>
+        <span className="search-toggle">
+          <ChevronIcon />
+        </span>
         <span className="search-dir">{dirPrefix(g.path)}</span>
-        {basename(g.path)}
-      </h3>
-      <ul>
-        {g.hits.map((h, n) => {
-          const starts = h.inside !== (g.hits[n - 1]?.inside ?? null);
-          return (
-            <li key={h.no}className={starts && h.inside === null ? "search-outside" : undefined}>
-              {starts && h.inside !== null && (
-                <span className="search-inside" title={`These lines are in ${h.inside}`}>
-                  {h.inside}
-                </span>
-              )}
-              <HitButton hit={h} current={h === current} onOpen={onOpen} />
-            </li>
-          );
-        })}
-      </ul>
+        <span>{basename(g.path)}</span>
+        <span className="search-file-count">{g.count}</span>
+      </button>
+      {g.open && (
+        <ul>
+          {g.hits.map((h, n) => {
+            const starts = h.inside !== (g.hits[n - 1]?.inside ?? null);
+            return (
+              <li key={h.no} className={starts && h.inside === null ? "search-outside" : undefined}>
+                {starts && h.inside !== null && (
+                  <span className="search-inside" title={`These lines are in ${h.inside}`}>
+                    {h.inside}
+                  </span>
+                )}
+                <HitButton hit={h} current={h === current} onOpen={onOpen} />
+              </li>
+            );
+          })}
+        </ul>
+      )}
     </section>
   ));
 }
