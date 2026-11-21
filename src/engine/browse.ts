@@ -94,19 +94,32 @@ async function readBlobAt(root: string, rev: string, rest: string): Promise<Cont
 }
 
 // git grep runs a regular expression on every line. A plain string every match has, joined with --and, lets it skip most lines first.
-export function grepRepo(diff: DiffResult, query: string, whole: boolean, signal: AbortSignal): Promise<{ hits: RepoHit[]; capped: boolean }> {
+export function grepRepo(diff: DiffResult, query: string, whole: boolean, signal: AbortSignal): Promise<Found> {
   const found = wordRegExp(query, whole);
   const pattern = wordPattern(query, whole);
   const plain = (query.match(/[A-Za-z0-9_]+/g) ?? []).reduce((a, b) => (b.length > a.length ? b : a), "");
   const match = plain && plain !== pattern ? ["-e", plain, "--and", "-e", pattern] : ["-e", pattern];
-  return grepLines(diff, ["-E", "-i", ...match], ["."], MAX_HITS, signal, (text) => found?.exec(text)?.index ?? -1);
+  return grepLines(diff, searchable(diff), ["-E", "-i", ...match], ["."], MAX_HITS, signal, (text) => found?.exec(text)?.index ?? -1);
+}
+
+type Found = { hits: RepoHit[]; capped: boolean };
+
+const searchable = (diff: DiffResult) => diff.repos.filter((r) => r.error === null);
+
+// Takes the definitions from the first group of repositories that has any, so the nearest repositories win and the rest are only searched when those have none.
+async function nearestFirst(groups: DiffRepo[][], find: (repos: DiffRepo[]) => Promise<Found>): Promise<Found> {
+  for (const repos of groups) {
+    const found = repos.length ? await find(repos) : null;
+    if (found?.hits.length) return found;
+  }
+  return { hits: [], capped: false };
 }
 
 const defines = (name: string, patterns: string[]) => ["-E", "-e", name, "--and", "(", ...patterns.flatMap((p) => ["-e", p]), ")"];
 
 export const isIdentifier = (name: string) => IDENTIFIER.test(name);
 
-export function findDefinitions(diff: DiffResult, name: string, from: string, signal: AbortSignal): Promise<{ hits: RepoHit[]; capped: boolean }> {
+export function findDefinitions(diff: DiffResult, name: string, from: string, signal: AbortSignal): Promise<Found> {
   const base = from.slice(from.lastIndexOf("/") + 1);
   const ext = base.includes(".") ? base.slice(base.lastIndexOf(".") + 1).toLowerCase() : "";
   const language = LANGUAGES.find((l) => l.exts.includes(ext));
@@ -114,31 +127,39 @@ export function findDefinitions(diff: DiffResult, name: string, from: string, si
   const patterns = language ? language.patterns(escaped) : anyLanguage(escaped);
   const exts = language?.exts ?? (ext ? [ext] : []);
   const pathspecs = exts.length ? exts.map((e) => `*.${e}`) : ["."];
-  return grepLines(diff, defines(escaped, patterns), pathspecs, MAX_DEFINITIONS, signal, (text) => text.indexOf(name));
+  const own = repoOf(diff, from)?.repo;
+  const all = searchable(diff);
+  return nearestFirst(own ? [[own], all.filter((r) => r !== own)] : [all], (repos) =>
+    grepLines(diff, repos, defines(escaped, patterns), pathspecs, MAX_DEFINITIONS, signal, (text) => text.indexOf(name)),
+  );
 }
 
-export async function findDefinitionsAnywhere(diff: DiffResult, name: string, signal: AbortSignal): Promise<{ hits: RepoHit[]; capped: boolean }> {
+export function findDefinitionsAnywhere(diff: DiffResult, name: string, signal: AbortSignal): Promise<Found> {
   const escaped = name.replaceAll("$", "\\$");
   const lower = name.toLowerCase();
-  const find = (patterns: string[], pathspecs: string[]) =>
-    grepLines(diff, ["-i", ...defines(escaped, patterns)], pathspecs, MAX_DEFINITIONS, signal, (text) => text.toLowerCase().indexOf(lower));
-  const found = await Promise.all([
-    ...LANGUAGES.map((l) => find(l.patterns(escaped), l.exts.map((e) => `*.${e}`))),
-    find(anyLanguage(escaped), [".", ...LANGUAGES.flatMap((l) => l.exts).map((e) => `:(exclude)*.${e}`)]),
-  ]);
-  const hits = found.flatMap((f) => f.hits).sort((a, b) => compareText(a.path, b.path) || a.no - b.no);
-  return { hits: hits.slice(0, MAX_DEFINITIONS), capped: hits.length > MAX_DEFINITIONS || found.some((f) => f.capped) };
+  const all = searchable(diff);
+  const changed = all.filter((r) => diff.files.some((f) => r.dir === "" || f.path.startsWith(`${r.dir}/`)));
+  return nearestFirst([changed, all.filter((r) => !changed.includes(r))], async (repos) => {
+    const find = (patterns: string[], pathspecs: string[]) =>
+      grepLines(diff, repos, ["-i", ...defines(escaped, patterns)], pathspecs, MAX_DEFINITIONS, signal, (text) => text.toLowerCase().indexOf(lower));
+    const found = await Promise.all([
+      ...LANGUAGES.map((l) => find(l.patterns(escaped), l.exts.map((e) => `*.${e}`))),
+      find(anyLanguage(escaped), [".", ...LANGUAGES.flatMap((l) => l.exts).map((e) => `:(exclude)*.${e}`)]),
+    ]);
+    const hits = found.flatMap((f) => f.hits).sort((a, b) => compareText(a.path, b.path) || a.no - b.no);
+    return { hits: hits.slice(0, MAX_DEFINITIONS), capped: hits.length > MAX_DEFINITIONS || found.some((f) => f.capped) };
+  });
 }
 
 async function grepLines(
   diff: DiffResult,
+  repos: DiffRepo[],
   match: string[],
   pathspecs: string[],
   max: number,
   signal: AbortSignal,
   atOf: (text: string) => number,
-): Promise<{ hits: RepoHit[]; capped: boolean }> {
-  const repos = diff.repos.filter((r) => r.error === null);
+): Promise<Found> {
   const parts = await mapLimit(repos, REPO_LIMIT, async (repo) => {
     const prefix = repo.dir ? `${repo.dir}/` : "";
     const rev = repo.headCommit;

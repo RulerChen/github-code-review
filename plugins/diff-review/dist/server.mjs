@@ -37592,7 +37592,15 @@ function grepRepo(diff, query, whole, signal) {
   const pattern = wordPattern(query, whole);
   const plain = (query.match(/[A-Za-z0-9_]+/g) ?? []).reduce((a, b) => b.length > a.length ? b : a, "");
   const match = plain && plain !== pattern ? ["-e", plain, "--and", "-e", pattern] : ["-e", pattern];
-  return grepLines(diff, ["-E", "-i", ...match], ["."], MAX_HITS, signal, (text) => found?.exec(text)?.index ?? -1);
+  return grepLines(diff, searchable(diff), ["-E", "-i", ...match], ["."], MAX_HITS, signal, (text) => found?.exec(text)?.index ?? -1);
+}
+var searchable = (diff) => diff.repos.filter((r) => r.error === null);
+async function nearestFirst(groups, find) {
+  for (const repos of groups) {
+    const found = repos.length ? await find(repos) : null;
+    if (found?.hits.length) return found;
+  }
+  return { hits: [], capped: false };
 }
 var defines = (name, patterns) => ["-E", "-e", name, "--and", "(", ...patterns.flatMap((p) => ["-e", p]), ")"];
 var isIdentifier = (name) => IDENTIFIER.test(name);
@@ -37604,21 +37612,29 @@ function findDefinitions(diff, name, from, signal) {
   const patterns = language ? language.patterns(escaped) : anyLanguage(escaped);
   const exts = language?.exts ?? (ext ? [ext] : []);
   const pathspecs = exts.length ? exts.map((e) => `*.${e}`) : ["."];
-  return grepLines(diff, defines(escaped, patterns), pathspecs, MAX_DEFINITIONS, signal, (text) => text.indexOf(name));
+  const own2 = repoOf(diff, from)?.repo;
+  const all = searchable(diff);
+  return nearestFirst(
+    own2 ? [[own2], all.filter((r) => r !== own2)] : [all],
+    (repos) => grepLines(diff, repos, defines(escaped, patterns), pathspecs, MAX_DEFINITIONS, signal, (text) => text.indexOf(name))
+  );
 }
-async function findDefinitionsAnywhere(diff, name, signal) {
+function findDefinitionsAnywhere(diff, name, signal) {
   const escaped = name.replaceAll("$", "\\$");
   const lower = name.toLowerCase();
-  const find = (patterns, pathspecs) => grepLines(diff, ["-i", ...defines(escaped, patterns)], pathspecs, MAX_DEFINITIONS, signal, (text) => text.toLowerCase().indexOf(lower));
-  const found = await Promise.all([
-    ...LANGUAGES.map((l) => find(l.patterns(escaped), l.exts.map((e) => `*.${e}`))),
-    find(anyLanguage(escaped), [".", ...LANGUAGES.flatMap((l) => l.exts).map((e) => `:(exclude)*.${e}`)])
-  ]);
-  const hits = found.flatMap((f) => f.hits).sort((a, b) => compareText(a.path, b.path) || a.no - b.no);
-  return { hits: hits.slice(0, MAX_DEFINITIONS), capped: hits.length > MAX_DEFINITIONS || found.some((f) => f.capped) };
+  const all = searchable(diff);
+  const changed = all.filter((r) => diff.files.some((f) => r.dir === "" || f.path.startsWith(`${r.dir}/`)));
+  return nearestFirst([changed, all.filter((r) => !changed.includes(r))], async (repos) => {
+    const find = (patterns, pathspecs) => grepLines(diff, repos, ["-i", ...defines(escaped, patterns)], pathspecs, MAX_DEFINITIONS, signal, (text) => text.toLowerCase().indexOf(lower));
+    const found = await Promise.all([
+      ...LANGUAGES.map((l) => find(l.patterns(escaped), l.exts.map((e) => `*.${e}`))),
+      find(anyLanguage(escaped), [".", ...LANGUAGES.flatMap((l) => l.exts).map((e) => `:(exclude)*.${e}`)])
+    ]);
+    const hits = found.flatMap((f) => f.hits).sort((a, b) => compareText(a.path, b.path) || a.no - b.no);
+    return { hits: hits.slice(0, MAX_DEFINITIONS), capped: hits.length > MAX_DEFINITIONS || found.some((f) => f.capped) };
+  });
 }
-async function grepLines(diff, match, pathspecs, max, signal, atOf) {
-  const repos = diff.repos.filter((r) => r.error === null);
+async function grepLines(diff, repos, match, pathspecs, max, signal, atOf) {
   const parts2 = await mapLimit(repos, REPO_LIMIT, async (repo) => {
     const prefix = repo.dir ? `${repo.dir}/` : "";
     const rev = repo.headCommit;
