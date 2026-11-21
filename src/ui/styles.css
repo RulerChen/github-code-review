@@ -2296,11 +2296,34 @@ button {
 }
 
 .repos-dir {
-  flex: 0 0 160px;
-  overflow: hidden;
+  display: flex;
+  flex: 0 0 180px;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
   font-weight: 600;
+  cursor: pointer;
+}
+
+.repos-dir > input {
+  flex: none;
+  margin: 0;
+  cursor: inherit;
+}
+
+.repos-dir:has(> input:disabled) {
+  cursor: default;
+}
+
+.repos-dir > span {
+  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.repos-list > li.is-excluded .repos-dir {
+  color: var(--fg-muted);
+  font-weight: 400;
 }
 
 .repos-files {
@@ -2315,7 +2338,7 @@ button {
 }
 
 .repos-error {
-  margin: 4px 0 0 172px;
+  margin: 4px 0 0 192px;
   color: var(--danger);
   font-size: 12px;
 }

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { withOverride, withRange } from "../shared/comparison";
+import { withExcluded, withOverride, withRange } from "../shared/comparison";
 import type { CommitInfo, Comparison, DiffResult, RefList, RefRange } from "../shared/types";
-import { errorMessage, plural } from "../shared/util";
+import { compareText, errorMessage, plural } from "../shared/util";
 import { focusInPlace } from "./anchor";
 import { useDismiss, usePlaceBelow } from "./hooks";
 import { CaretIcon, CheckMark, SwapIcon } from "./icons";
@@ -51,7 +51,11 @@ export function RepoComparisons({ diff, loadRefs, onCompare }: ReposProps) {
   usePlaceBelow(button, menu, open);
   if (diff.repos[0]?.dir === "") return null;
   const own = diff.overrides.length;
-  const title = "Refs for each repository";
+  const out = diff.excluded.length;
+  const byDir = new Map(diff.repos.map((r) => [r.dir, r]));
+  const dirs = [...byDir.keys(), ...diff.excluded].sort(compareText);
+  const working = diff.repos.filter((r) => r.error === null).length;
+  const title = "Repositories and their refs";
 
   return (
     <div className="picker repos-picker" ref={root}>
@@ -63,33 +67,49 @@ export function RepoComparisons({ diff, loadRefs, onCompare }: ReposProps) {
         title={own === 1 ? "1 repository compares refs of its own" : own ? `${own} repositories compare refs of their own` : title}
         onClick={() => setOpen(!open)}
       >
-        <span className="picker-value">{plural(diff.repos.length, "repo")}</span>
+        <span className="picker-value">{plural(dirs.length, "repo")}</span>
         {own > 0 && <span className="picker-role">· {own} custom</span>}
+        {out > 0 && <span className="picker-role">· {out} excluded</span>}
         <CaretIcon />
       </button>
       {open && (
         <div ref={menu} className="picker-menu is-fixed repos-menu" role="dialog" aria-label={title}>
           <div className="picker-title">{title}</div>
           <ul className="repos-list">
-            {diff.repos.map((r) => {
-              const overridden = diff.overrides.some((o) => o.dir === r.dir);
-              const files = diff.files.filter((f) => f.path.startsWith(`${r.dir}/`)).length;
+            {dirs.map((dir) => {
+              const r = byDir.get(dir);
+              if (!r) {
+                return (
+                  <li key={dir} className="is-excluded">
+                    <div className="repos-row">
+                      <label className="repos-dir" title={`Show the changes in ${dir}`}>
+                        <input type="checkbox" checked={false} onChange={() => onCompare(withExcluded(diff, dir, false))} />
+                        <span>{dir}</span>
+                      </label>
+                    </div>
+                  </li>
+                );
+              }
+              const overridden = diff.overrides.some((o) => o.dir === dir);
+              const files = diff.files.filter((f) => f.path.startsWith(`${dir}/`)).length;
+              const last = r.error === null && working === 1;
               return (
-                <li key={r.dir}>
+                <li key={dir}>
                   <div className="repos-row">
-                    <span className="repos-dir" title={r.dir}>
-                      {r.dir}
-                    </span>
+                    <label className="repos-dir" title={last ? dir : `Leave ${dir} out of the diff`}>
+                      <input type="checkbox" checked disabled={last} onChange={() => onCompare(withExcluded(diff, dir, true))} />
+                      <span>{dir}</span>
+                    </label>
                     <RangeControls
                       range={r}
                       baseCommit={r.baseCommit}
                       headCommit={r.headCommit}
-                      loadRefs={loaderFor(r.dir)}
-                      onChange={(next) => onCompare(withOverride(diff, r.dir, next))}
+                      loadRefs={loaderFor(dir)}
+                      onChange={(next) => onCompare(withOverride(diff, dir, next))}
                     />
                     {r.error === null && <span className="repos-files">{plural(files, "file")}</span>}
                     {overridden && (
-                      <button className="link-button repos-reset" onClick={() => onCompare(withOverride(diff, r.dir, diff))}>
+                      <button className="link-button repos-reset" onClick={() => onCompare(withOverride(diff, dir, diff))}>
                         Use default
                       </button>
                     )}

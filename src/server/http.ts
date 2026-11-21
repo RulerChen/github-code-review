@@ -57,7 +57,7 @@ const MAX_QUERY = 200;
 const MAX_TOPICS = 50;
 const MAX_TITLE = 200;
 const MAX_REF = 1024;
-const MAX_OVERRIDES = 1000;
+const MAX_REPOS = 1000;
 const MAX_PATH = 4096;
 const MAX_CACHED_DIFFS = 2;
 const MAX_CACHED_CHARS = 64 * 1024 * 1024;
@@ -611,8 +611,11 @@ function isComparison(c: unknown): c is Comparison {
   return (
     isRange(c) &&
     Array.isArray(c.overrides) &&
-    c.overrides.length <= MAX_OVERRIDES &&
-    c.overrides.every((o) => isRange(o) && isText(o.dir, MAX_REF, true))
+    c.overrides.length <= MAX_REPOS &&
+    c.overrides.every((o) => isRange(o) && isText(o.dir, MAX_REF, true)) &&
+    Array.isArray(c.excluded) &&
+    c.excluded.length <= MAX_REPOS &&
+    c.excluded.every((dir) => isText(dir, MAX_REF, true))
   );
 }
 

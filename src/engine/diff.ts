@@ -3,7 +3,7 @@ import { lstat, readdir, readFile, readlink, realpath, stat } from "node:fs/prom
 import path from "node:path";
 import { rangeFor, repoFailures } from "../shared/comparison.js";
 import { buildHunks, splitLines, stripCr } from "../shared/hunks.js";
-import type { Block, CommitInfo, Comparison, DiffRepo, DiffResult, FileDiff, FileStatus, RefList, RefRange, RepoRange } from "../shared/types.js";
+import type { Block, CommitInfo, Comparison, DiffRepo, DiffResult, FileDiff, FileStatus, RefList, RefRange } from "../shared/types.js";
 import { compareText, errorMessage, plural, sum } from "../shared/util.js";
 import { git, gitText } from "./git.js";
 
@@ -83,7 +83,7 @@ interface DiffProbe {
   root: string;
   compare: Comparison;
   repos: RepoProbe[];
-  nested: boolean;
+  names: string[] | null;
 }
 
 export const ABSENT: Content = { kind: "absent" };
@@ -99,6 +99,7 @@ function normalize(compare: Partial<Comparison>): Comparison {
     head: compare.head ?? null,
     threeDot: compare.threeDot ?? true,
     overrides: compare.overrides ?? [],
+    excluded: compare.excluded ?? [],
   };
 
   for (const { base, head } of [c, ...c.overrides]) {
@@ -127,10 +128,10 @@ async function findRepos(dir: string): Promise<{ root: string; repos: string[] |
 }
 
 export async function computeDiff(probe: DiffProbe): Promise<DiffResult> {
-  const { root, compare: c, repos, nested } = probe;
-  checkOverrides(root, nested ? repos.map((r) => r.dir) : null, c.overrides);
+  const { root, compare: c, repos, names } = probe;
+  checkRepos(root, names, c);
 
-  if (!nested) {
+  if (!names) {
     const { repo, commits, commitCount, files } = await diffRepo(repos[0]!);
     const { baseCommit, headCommit, oldCommit } = repo;
     return { repoRoot: root, ...c, baseCommit, headCommit, oldCommit, repos: [repo], commits, commitCount, files };
@@ -138,7 +139,7 @@ export async function computeDiff(probe: DiffProbe): Promise<DiffResult> {
 
   const parts = await mapLimit(repos, REPO_LIMIT, (r) => diffRepo(r).catch((err: unknown) => failedPart(r.dir, r.range, err)));
   const states = parts.map((p) => p.repo);
-  if (states.every((r) => r.error !== null)) {
+  if (states.length && states.every((r) => r.error !== null)) {
     throw new Error(repoFailures(states).map((f) => `${f.error} (${f.dirs.join(", ")})`).join("; "));
   }
 
@@ -160,10 +161,10 @@ function failedPart(dir: string, range: RefRange, err: unknown): RepoPart {
   return { repo, commits: [], commitCount: 0, files: [] };
 }
 
-function checkOverrides(root: string, repos: string[] | null, overrides: RepoRange[]): void {
-  const unknown = overrides.filter((o) => !repos?.includes(o.dir)).map((o) => o.dir);
+function checkRepos(root: string, repos: string[] | null, c: Comparison): void {
+  const unknown = [...new Set([...c.overrides.map((o) => o.dir), ...c.excluded])].filter((dir) => !repos?.includes(dir));
   if (!unknown.length) return;
-  if (!repos) throw new Error(`${root} is a single repository, so no repository in it can compare a range of its own.`);
+  if (!repos) throw new Error(`${root} is a single repository, so no repository in it can compare a range of its own or be left out.`);
   throw new Error(`No repository named ${unknown.join(", ")} directly under ${root}.`);
 }
 
@@ -211,7 +212,8 @@ async function diffRepo({ dir, root, range: { base, head, threeDot }, baseCommit
 export async function probeDiff(dir: string, compare: Partial<Comparison> = {}): Promise<DiffProbe> {
   const c = normalize(compare);
   const { root, repos } = await findRepos(dir);
-  const probed = await mapLimit(repos ?? [""], REPO_LIMIT, (name) => {
+  const compared = repos ? repos.filter((name) => !c.excluded.includes(name)) : [""];
+  const probed = await mapLimit(compared, REPO_LIMIT, (name) => {
     const range = rangeFor(c, name);
     const repo = path.join(root, name);
     return probeRepo(repo, range, name).catch((err: unknown): RepoProbe => {
@@ -223,7 +225,7 @@ export async function probeDiff(dir: string, compare: Partial<Comparison> = {}):
     .update(probed.map((r) => `${r.dir}\0${r.version}`).join("\n"))
     .digest("hex")
     .slice(0, 16);
-  return { version, root, compare: c, repos: probed, nested: repos !== null };
+  return { version, root, compare: c, repos: probed, names: repos };
 }
 
 async function probeRepo(root: string, range: RefRange, dir: string): Promise<RepoProbe> {

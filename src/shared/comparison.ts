@@ -9,11 +9,20 @@ export const rangeFor = (c: Comparison, dir: string): RefRange => c.overrides.fi
 
 export function withOverride(c: Comparison, dir: string, next: RefRange): Comparison {
   const rest = c.overrides.filter((o) => o.dir !== dir);
-  return { ...rangeOf(c), overrides: sameRange(next, c) ? rest : sortOverrides([...rest, { dir, ...rangeOf(next) }]) };
+  return { ...rangeOf(c), overrides: sameRange(next, c) ? rest : sortOverrides([...rest, { dir, ...rangeOf(next) }]), excluded: c.excluded };
 }
 
 export function withRange(c: Comparison, range: RefRange): Comparison {
-  return { ...rangeOf(range), overrides: c.overrides.filter((o) => !sameRange(o, range)) };
+  return { ...rangeOf(range), overrides: c.overrides.filter((o) => !sameRange(o, range)), excluded: c.excluded };
+}
+
+export function withExcluded(c: Comparison, dir: string, out: boolean): Comparison {
+  const rest = c.excluded.filter((d) => d !== dir);
+  return {
+    ...rangeOf(c),
+    overrides: out ? c.overrides.filter((o) => o.dir !== dir) : c.overrides,
+    excluded: out ? [...rest, dir].sort(compareText) : rest,
+  };
 }
 
 export const sortOverrides = (overrides: RepoRange[]) => [...overrides].sort((a, b) => compareText(a.dir, b.dir));
@@ -28,6 +37,7 @@ export function comparisonQuery(c: Comparison): string {
 
   add(c, "");
   for (const o of c.overrides) add(o, `@${o.dir}`);
+  for (const dir of c.excluded) params.append("exclude", dir);
   return params.toString();
 }
 
@@ -45,14 +55,16 @@ export function comparisonFromQuery(params: URLSearchParams): Comparison | null 
     const range = key.startsWith("base@") ? read(key.slice(4)) : null;
     if (range) overrides.push({ dir: key.slice(5), ...range });
   }
-  return { ...top, overrides: sortOverrides(overrides) };
+  return { ...top, overrides: sortOverrides(overrides), excluded: [...new Set(params.getAll("exclude"))].sort(compareText) };
 }
 
 export function sameComparison(a: Comparison, b: Comparison): boolean {
   return (
     sameRange(a, b) &&
     a.overrides.length === b.overrides.length &&
-    a.overrides.every((o, i) => o.dir === b.overrides[i]!.dir && sameRange(o, b.overrides[i]!))
+    a.overrides.every((o, i) => o.dir === b.overrides[i]!.dir && sameRange(o, b.overrides[i]!)) &&
+    a.excluded.length === b.excluded.length &&
+    a.excluded.every((dir, i) => dir === b.excluded[i])
   );
 }
 
@@ -62,6 +74,7 @@ export const isFor = (repo: string, c: Comparison) => (r: { repo: string; compar
 export function describeComparison(c: Comparison, ref = (r: string | null) => r ?? "the working tree"): string {
   const range = (r: RefRange) => `${ref(r.base)}${r.threeDot ? "..." : ".."}${ref(r.head)}`;
   const own = c.overrides.map((o) => `${o.dir}: ${range(o)}`);
+  if (c.excluded.length) own.push(`without ${c.excluded.join(", ")}`);
   return own.length ? `${range(c)} (${own.join("; ")})` : range(c);
 }
 

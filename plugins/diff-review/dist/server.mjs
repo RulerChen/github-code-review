@@ -36693,6 +36693,7 @@ function comparisonQuery(c) {
   };
   add(c, "");
   for (const o of c.overrides) add(o, `@${o.dir}`);
+  for (const dir of c.excluded) params.append("exclude", dir);
   return params.toString();
 }
 function comparisonFromQuery(params) {
@@ -36707,15 +36708,16 @@ function comparisonFromQuery(params) {
     const range = key.startsWith("base@") ? read(key.slice(4)) : null;
     if (range) overrides.push({ dir: key.slice(5), ...range });
   }
-  return { ...top, overrides: sortOverrides(overrides) };
+  return { ...top, overrides: sortOverrides(overrides), excluded: [...new Set(params.getAll("exclude"))].sort(compareText) };
 }
 function sameComparison(a, b) {
-  return sameRange(a, b) && a.overrides.length === b.overrides.length && a.overrides.every((o, i) => o.dir === b.overrides[i].dir && sameRange(o, b.overrides[i]));
+  return sameRange(a, b) && a.overrides.length === b.overrides.length && a.overrides.every((o, i) => o.dir === b.overrides[i].dir && sameRange(o, b.overrides[i])) && a.excluded.length === b.excluded.length && a.excluded.every((dir, i) => dir === b.excluded[i]);
 }
 var isFor = (repo, c) => (r) => r.repo === repo && sameComparison(r.compare, c);
 function describeComparison(c, ref = (r) => r ?? "the working tree") {
   const range = (r) => `${ref(r.base)}${r.threeDot ? "..." : ".."}${ref(r.head)}`;
   const own2 = c.overrides.map((o) => `${o.dir}: ${range(o)}`);
+  if (c.excluded.length) own2.push(`without ${c.excluded.join(", ")}`);
   return own2.length ? `${range(c)} (${own2.join("; ")})` : range(c);
 }
 function repoFailures(repos) {
@@ -36901,7 +36903,8 @@ function normalize(compare) {
     base: compare.base ?? "HEAD",
     head: compare.head ?? null,
     threeDot: compare.threeDot ?? true,
-    overrides: compare.overrides ?? []
+    overrides: compare.overrides ?? [],
+    excluded: compare.excluded ?? []
   };
   for (const { base, head } of [c, ...c.overrides]) {
     for (const ref of [base, head]) {
@@ -36926,16 +36929,16 @@ async function findRepos(dir) {
   }
 }
 async function computeDiff(probe) {
-  const { root, compare: c, repos, nested } = probe;
-  checkOverrides(root, nested ? repos.map((r) => r.dir) : null, c.overrides);
-  if (!nested) {
+  const { root, compare: c, repos, names } = probe;
+  checkRepos(root, names, c);
+  if (!names) {
     const { repo, commits, commitCount, files } = await diffRepo(repos[0]);
     const { baseCommit, headCommit, oldCommit } = repo;
     return { repoRoot: root, ...c, baseCommit, headCommit, oldCommit, repos: [repo], commits, commitCount, files };
   }
   const parts2 = await mapLimit(repos, REPO_LIMIT, (r) => diffRepo(r).catch((err) => failedPart(r.dir, r.range, err)));
   const states = parts2.map((p) => p.repo);
-  if (states.every((r) => r.error !== null)) {
+  if (states.length && states.every((r) => r.error !== null)) {
     throw new Error(repoFailures(states).map((f) => `${f.error} (${f.dirs.join(", ")})`).join("; "));
   }
   return {
@@ -36954,10 +36957,10 @@ function failedPart(dir, range, err) {
   const repo = { dir, ...range, baseCommit: null, headCommit: null, oldCommit: null, error: errorMessage(err) };
   return { repo, commits: [], commitCount: 0, files: [] };
 }
-function checkOverrides(root, repos, overrides) {
-  const unknown2 = overrides.filter((o) => !repos?.includes(o.dir)).map((o) => o.dir);
+function checkRepos(root, repos, c) {
+  const unknown2 = [.../* @__PURE__ */ new Set([...c.overrides.map((o) => o.dir), ...c.excluded])].filter((dir) => !repos?.includes(dir));
   if (!unknown2.length) return;
-  if (!repos) throw new Error(`${root} is a single repository, so no repository in it can compare a range of its own.`);
+  if (!repos) throw new Error(`${root} is a single repository, so no repository in it can compare a range of its own or be left out.`);
   throw new Error(`No repository named ${unknown2.join(", ")} directly under ${root}.`);
 }
 async function diffRepo({ dir, root, range: { base, head, threeDot }, baseCommit, tip, changes, error: error62 }) {
@@ -37000,7 +37003,8 @@ async function diffRepo({ dir, root, range: { base, head, threeDot }, baseCommit
 async function probeDiff(dir, compare = {}) {
   const c = normalize(compare);
   const { root, repos } = await findRepos(dir);
-  const probed = await mapLimit(repos ?? [""], REPO_LIMIT, (name) => {
+  const compared = repos ? repos.filter((name) => !c.excluded.includes(name)) : [""];
+  const probed = await mapLimit(compared, REPO_LIMIT, (name) => {
     const range = rangeFor(c, name);
     const repo = path.join(root, name);
     return probeRepo(repo, range, name).catch((err) => {
@@ -37009,7 +37013,7 @@ async function probeDiff(dir, compare = {}) {
     });
   });
   const version2 = createHash("sha256").update(probed.map((r) => `${r.dir}\0${r.version}`).join("\n")).digest("hex").slice(0, 16);
-  return { version: version2, root, compare: c, repos: probed, nested: repos !== null };
+  return { version: version2, root, compare: c, repos: probed, names: repos };
 }
 async function probeRepo(root, range, dir) {
   const { base, head } = range;
@@ -38515,6 +38519,7 @@ import path4 from "node:path";
 var DIR = process.env.CLAUDE_PLUGIN_DATA ? path4.join(process.env.CLAUDE_PLUGIN_DATA, "reviews") : null;
 var FORMAT = 1;
 var KEEP_MS = 3 * 24 * 60 * 60 * 1e3;
+var filled = (c) => ({ ...c, excluded: c.excluded ?? [] });
 function fileFor(session, repo) {
   return path4.join(DIR, `${session}-${createHash2("sha256").update(repo).digest("hex").slice(0, 16)}.json`);
 }
@@ -38522,7 +38527,13 @@ function loadState(session, repo) {
   if (!DIR) return null;
   try {
     const saved = JSON.parse(readFileSync(fileFor(session, repo), "utf8"));
-    return saved.format === FORMAT ? saved.state : null;
+    if (saved.format !== FORMAT) return null;
+    const state = saved.state;
+    return {
+      ...state,
+      threads: state.threads.map((t) => t.anchor.path === null ? { ...t, anchor: { ...t.anchor, compare: filled(t.anchor.compare) } } : t),
+      reviews: state.reviews.map((r) => ({ ...r, compare: filled(r.compare) }))
+    };
   } catch {
     return null;
   }
@@ -38734,7 +38745,7 @@ var MAX_QUERY = 200;
 var MAX_TOPICS = 50;
 var MAX_TITLE = 200;
 var MAX_REF = 1024;
-var MAX_OVERRIDES = 1e3;
+var MAX_REPOS = 1e3;
 var MAX_PATH = 4096;
 var MAX_CACHED_DIFFS = 2;
 var MAX_CACHED_CHARS = 64 * 1024 * 1024;
@@ -39223,7 +39234,7 @@ function isContext(c) {
   return c === null || isRecord(c) && lines(c.before) && lines(c.after);
 }
 function isComparison(c) {
-  return isRange(c) && Array.isArray(c.overrides) && c.overrides.length <= MAX_OVERRIDES && c.overrides.every((o) => isRange(o) && isText(o.dir, MAX_REF, true));
+  return isRange(c) && Array.isArray(c.overrides) && c.overrides.length <= MAX_REPOS && c.overrides.every((o) => isRange(o) && isText(o.dir, MAX_REF, true)) && Array.isArray(c.excluded) && c.excluded.length <= MAX_REPOS && c.excluded.every((dir) => isText(dir, MAX_REF, true));
 }
 function isRange(r) {
   return isRecord(r) && isText(r.base, MAX_REF, true) && (r.head === null || isText(r.head, MAX_REF, true)) && typeof r.threeDot === "boolean";
@@ -39326,7 +39337,7 @@ async function shutdown() {
   process.exit(0);
 }
 async function runHttpOnly(base) {
-  console.error(await openViewer(process.cwd(), { base, head: null, threeDot: true, overrides: [] }));
+  console.error(await openViewer(process.cwd(), { base, head: null, threeDot: true, overrides: [], excluded: [] }));
   process.on("SIGINT", () => void shutdown());
 }
 async function runMcp() {
@@ -39352,7 +39363,7 @@ async function runMcp() {
   const comparison = (args) => {
     const c = { base: args.base ?? "HEAD", head: args.head ?? null, threeDot: args.threeDot ?? true };
     const own2 = new Map((args.overrides ?? []).map((o) => [o.dir, { dir: o.dir, base: o.base, head: o.head ?? null, threeDot: o.threeDot ?? true }]));
-    return { ...c, overrides: sortOverrides([...own2.values()].filter((o) => !sameRange(o, c))) };
+    return { ...c, overrides: sortOverrides([...own2.values()].filter((o) => !sameRange(o, c))), excluded: [] };
   };
   mcp.registerTool(
     "list_changes",

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import type { Review, Thread } from "../shared/types.js";
+import type { Comparison, Review, Thread } from "../shared/types.js";
 import { errorMessage } from "../shared/util.js";
 import type { Submission } from "./threads.js";
 
@@ -16,6 +16,8 @@ interface SavedState {
   reviews: Review[];
 }
 
+const filled = (c: Comparison): Comparison => ({ ...c, excluded: c.excluded ?? [] });
+
 function fileFor(session: string, repo: string): string {
   return path.join(DIR!, `${session}-${createHash("sha256").update(repo).digest("hex").slice(0, 16)}.json`);
 }
@@ -24,7 +26,13 @@ export function loadState(session: string, repo: string): SavedState | null {
   if (!DIR) return null;
   try {
     const saved = JSON.parse(readFileSync(fileFor(session, repo), "utf8"));
-    return saved.format === FORMAT ? saved.state : null;
+    if (saved.format !== FORMAT) return null;
+    const state: SavedState = saved.state;
+    return {
+      ...state,
+      threads: state.threads.map((t) => (t.anchor.path === null ? { ...t, anchor: { ...t.anchor, compare: filled(t.anchor.compare) } } : t)),
+      reviews: state.reviews.map((r) => ({ ...r, compare: filled(r.compare) })),
+    };
   } catch {
     return null;
   }

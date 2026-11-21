@@ -81,7 +81,7 @@ async function shutdown(): Promise<never> {
 }
 
 async function runHttpOnly(base: string): Promise<void> {
-  console.error(await openViewer(process.cwd(), { base, head: null, threeDot: true, overrides: [] }));
+  console.error(await openViewer(process.cwd(), { base, head: null, threeDot: true, overrides: [], excluded: [] }));
   process.on("SIGINT", () => void shutdown());
 }
 
@@ -134,7 +134,7 @@ async function runMcp(): Promise<void> {
   const comparison = (args: { base?: string; head?: string; threeDot?: boolean; overrides?: Overrides }): Comparison => {
     const c = { base: args.base ?? "HEAD", head: args.head ?? null, threeDot: args.threeDot ?? true };
     const own = new Map((args.overrides ?? []).map((o) => [o.dir, { dir: o.dir, base: o.base, head: o.head ?? null, threeDot: o.threeDot ?? true }]));
-    return { ...c, overrides: sortOverrides([...own.values()].filter((o) => !sameRange(o, c))) };
+    return { ...c, overrides: sortOverrides([...own.values()].filter((o) => !sameRange(o, c))), excluded: [] };
   };
 
   mcp.registerTool(

@@ -209,6 +209,7 @@ export interface RepoRange extends RefRange {
 
 export interface Comparison extends RefRange {
   overrides: RepoRange[];
+  excluded: string[];
 }
 
 export interface CommitInfo {

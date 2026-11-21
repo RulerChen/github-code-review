@@ -78,7 +78,7 @@ let peeks = 0;
 const savedCode = (): Peek[] => ((history.state as { code?: SavedPeek[] } | null)?.code ?? []).map((p) => ({ ...p, seq: ++peeks }));
 const toSave = (stack: Peek[]): SavedPeek[] => stack.map(({ path, line, name, listed }) => ({ path, line, name, listed }));
 
-const commitComparison = (c: CommitInfo): Comparison => ({ base: c.parents[0]!, head: c.sha, threeDot: false, overrides: [] });
+const commitComparison = (c: CommitInfo): Comparison => ({ base: c.parents[0]!, head: c.sha, threeDot: false, overrides: [], excluded: [] });
 
 interface RepoSearch {
   query: string;
@@ -357,8 +357,8 @@ export function App({ viewId }: Props) {
   }, [viewId]);
 
   const current = useMemo<Comparison | null>(
-    () => diff && { base: diff.base, head: diff.head, threeDot: diff.threeDot, overrides: diff.overrides },
-    [diff?.base, diff?.head, diff?.threeDot, diff?.overrides],
+    () => diff && { base: diff.base, head: diff.head, threeDot: diff.threeDot, overrides: diff.overrides, excluded: diff.excluded },
+    [diff?.base, diff?.head, diff?.threeDot, diff?.overrides, diff?.excluded],
   );
   const repoCommits = JSON.stringify(diff?.repos.map((r) => [r.dir, r.oldCommit, r.headCommit]) ?? []);
 
