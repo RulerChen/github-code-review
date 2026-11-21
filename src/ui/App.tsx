@@ -17,6 +17,7 @@ import {
   fetchFile,
   fetchRefs,
   fetchRepoFile,
+  fetchTree,
   fetchVersion,
   fetchView,
   groupTopics,
@@ -34,7 +35,7 @@ import { CommitBar, CommitList, CompareControls, refLabel, RepoComparisons } fro
 import { ConversationsButton, ConversationsPanel, type Place, useConversations } from "./Conversations";
 import { hasLine } from "./DiffTable";
 import { FileCard, FileLoader } from "./FileCard";
-import { dirPaths, FileTree } from "./FileTree";
+import { dirPaths, FileTree, type TreeEntry, withDirsOf } from "./FileTree";
 import { FoldIcon, WholeWordIcon } from "./icons";
 import { go, KeyboardButton, ShortcutHelp, stepSection, useShortcuts } from "./keyboard";
 import { locate } from "./locate";
@@ -99,6 +100,9 @@ export function App({ viewId }: Props) {
   const [sidebarOpen, setSidebarOpen] = useStoredState("diff-review:sidebar", true);
   const [filter, setFilter] = useState("");
   const [foldedDirs, setFoldedDirs] = useState<ReadonlySet<string>>(new Set());
+  const [treeMode, setTreeMode] = useStoredState<"changed" | "all">("diff-review:tree", "changed");
+  const [repoTree, setRepoTree] = useState<{ version: string; paths: string[] | null; error: string | null } | null>(null);
+  const [openDirs, setOpenDirs] = useState<ReadonlySet<string>>(new Set());
   const [query, setQuery] = useState("");
   const [hit, setHit] = useState<Hit | null>(null);
   const [wholeWord, setWholeWord] = useState(true);
@@ -693,21 +697,66 @@ export function App({ viewId }: Props) {
       setTab("files");
     } else setOpening({ anchor: entry.anchor });
   };
-  const latestSelect = useRef(select);
-  latestSelect.current = select;
-  const onSelect = useCallback((anchor: string) => latestSelect.current(anchor), []);
+  const pick = (entry: TreeEntry) => {
+    if (entry.anchor !== null) select(entry.anchor);
+    else if (entry.file) showDiff(entry.path);
+    else openCode(entry.path, null);
+  };
+  const latestPick = useRef(pick);
+  latestPick.current = pick;
+  const onPick = useCallback((entry: TreeEntry) => latestPick.current(entry), []);
   const treeEntries = useMemo(() => (topicTab ? matching(topicFiles, filter) : shown), [topicTab, topicFiles, filter, shown]);
-  const toggleDir = useCallback(
-    (path: string) =>
-      setFoldedDirs((prev) => {
-        const next = new Set(prev);
-        if (!next.delete(path)) next.add(path);
-        return next;
-      }),
-    [],
+
+  const allFiles = treeMode === "all";
+  useEffect(() => {
+    if (!allFiles || !viewId || loadedVersion === null || repoTree?.version === loadedVersion) return;
+    let cancelled = false;
+    fetchTree(viewId, requested.current, loadedVersion).then(
+      (paths) => !cancelled && setRepoTree({ version: loadedVersion, paths, error: null }),
+      (e: unknown) => !cancelled && setRepoTree({ version: loadedVersion, paths: null, error: errorMessage(e) }),
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [allFiles, viewId, loadedVersion]);
+  const allEntries = useMemo<TreeEntry[] | null>(() => {
+    const paths = repoTree?.version === loadedVersion ? repoTree.paths : null;
+    if (!paths || !diff) return null;
+    const files = new Map(diff.files.map((f) => [f.path, f]));
+    const anchors = new Map((topicTab ? topicFiles : entries).map((e) => [e.file.path, e.anchor]));
+    return paths.map((path) => ({ path, file: files.get(path) ?? null, anchor: anchors.get(path) ?? null }));
+  }, [repoTree, loadedVersion, diff, topicTab, topicFiles, entries]);
+  const filterText = filter.trim().toLowerCase();
+  const browsing = allFiles && !filterText;
+  const treeList = useMemo<TreeEntry[] | null>(() => {
+    if (!allFiles) return treeEntries.map(({ file, anchor }) => ({ path: file.path, file, anchor }));
+    return allEntries && (filterText ? allEntries.filter((e) => e.path.toLowerCase().includes(filterText)) : allEntries);
+  }, [allFiles, allEntries, filterText, treeEntries]);
+
+  const changedKey = diff?.files.map((f) => f.path).join("\0") ?? "";
+  const codePath = codeTop?.path ?? null;
+  const changedDirs = useCallback(
+    (dirs: ReadonlySet<string>) => withDirsOf(dirs, changedKey ? changedKey.split("\0") : []),
+    [changedKey],
   );
-  const shownDirs = useMemo(() => dirPaths(treeEntries, foldedDirs), [treeEntries, foldedDirs]);
-  const anyDirOpen = shownDirs.some((d) => !foldedDirs.has(d));
+  useEffect(() => {
+    if (allFiles) setOpenDirs(changedDirs);
+  }, [allFiles, changedDirs]);
+  useEffect(() => {
+    if (allFiles && codePath !== null) setOpenDirs((dirs) => withDirsOf(dirs, [codePath]));
+  }, [allFiles, codePath]);
+
+  const toggleDir = useCallback((path: string) => setFoldedDirs(flip(path)), []);
+  const toggleOpen = useCallback((path: string) => setOpenDirs(flip(path)), []);
+  const isOpen = useCallback((path: string) => (browsing ? openDirs.has(path) : !foldedDirs.has(path)), [browsing, openDirs, foldedDirs]);
+  const shownDirs = useMemo(() => (browsing || !treeList ? [] : dirPaths(treeList, foldedDirs)), [browsing, treeList, foldedDirs]);
+  const anyDirOpen = browsing ? openDirs.size > 0 : shownDirs.some((d) => !foldedDirs.has(d));
+  const canFold = browsing ? allEntries !== null && allEntries.length > 0 : shownDirs.length > 0;
+  const foldAll = () => {
+    if (!browsing) setFoldedDirs(anyDirOpen && treeList ? new Set(dirPaths(treeList)) : new Set());
+    else setOpenDirs(anyDirOpen ? new Set() : withDirsOf(changedDirs(new Set()), codePath === null ? [] : [codePath]));
+  };
+  const unfoldLabel = browsing ? "Open the folders with changes" : "Expand all folders";
 
   if (!viewId) {
     return <Notice title="This link is incomplete">Open the exact link Claude gave you.</Notice>;
@@ -765,6 +814,21 @@ export function App({ viewId }: Props) {
               <div className={`layout${codeTop ? " with-code" : conv.open ? " with-conversations" : ""}${sidebarOpen ? "" : " no-sidebar"}`}>
                 <aside className="sidebar" hidden={!sidebarOpen}>
                   <div className="view">
+                    <div className="tree-modes" role="tablist" aria-label="Files in the tree">
+                      <button role="tab" className="tree-mode" data-label="Changed files" aria-selected={!allFiles} onClick={() => setTreeMode("changed")}>
+                        Changed files
+                      </button>
+                      <button
+                        role="tab"
+                        className="tree-mode"
+                        data-label="All files"
+                        aria-selected={allFiles}
+                        onClick={() => setTreeMode("all")}
+                        title="Every file of the compared version. Opening a file without changes shows it beside the diff."
+                      >
+                        All files
+                      </button>
+                    </div>
                     <div className="filter-row">
                       <input
                         className="filter"
@@ -774,12 +838,12 @@ export function App({ viewId }: Props) {
                         onChange={(e) => setFilter(e.target.value)}
                         aria-label="Filter files"
                       />
-                      {shownDirs.length > 0 && !searched.trim() && (
+                      {canFold && !searched.trim() && (
                         <button
                           className="icon-button"
-                          aria-label={anyDirOpen ? "Collapse all folders" : "Expand all folders"}
-                          title={anyDirOpen ? "Collapse all folders" : "Expand all folders"}
-                          onClick={() => setFoldedDirs(anyDirOpen ? new Set(dirPaths(treeEntries)) : new Set())}
+                          aria-label={anyDirOpen ? "Collapse all folders" : unfoldLabel}
+                          title={anyDirOpen ? "Collapse all folders" : unfoldLabel}
+                          onClick={foldAll}
                         >
                           <FoldIcon fold={anyDirOpen} />
                         </button>
@@ -820,14 +884,20 @@ export function App({ viewId }: Props) {
                     </div>
                     {searched.trim() ? (
                       <SearchResults definitions={definitions} sections={sections} note={searchNote} current={hit} onOpen={openHit} />
-                    ) : (
+                    ) : treeList ? (
                       <FileTree
-                        entries={treeEntries}
+                        entries={treeList}
                         isViewed={topicTab ? isTopicFileViewed : isViewed}
-                        onSelect={onSelect}
-                        collapsed={foldedDirs}
-                        onToggle={toggleDir}
+                        onSelect={onPick}
+                        isOpen={isOpen}
+                        onToggle={browsing ? toggleOpen : toggleDir}
+                        current={allFiles ? codePath : null}
+                        marked={allFiles}
                       />
+                    ) : (
+                      <p className="tree-empty">
+                        {repoTree?.version === loadedVersion && repoTree.error ? `Could not list the files: ${repoTree.error}` : "Listing the files…"}
+                      </p>
                     )}
                   </div>
                 </aside>
@@ -932,6 +1002,12 @@ export function App({ viewId }: Props) {
 function revisionOf(commit: string | null): string {
   return commit ? `at ${commit.slice(0, 7)}` : "working tree";
 }
+
+const flip = (path: string) => (dirs: ReadonlySet<string>) => {
+  const next = new Set(dirs);
+  if (!next.delete(path)) next.add(path);
+  return next;
+};
 
 function matching<T extends { file: FileDiff }>(list: T[], filter: string): T[] {
   const q = filter.trim().toLowerCase();

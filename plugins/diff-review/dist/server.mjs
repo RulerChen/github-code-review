@@ -38000,6 +38000,20 @@ async function readRepoFile(diff, filePath) {
   if (c.kind === "absent") return null;
   return { path: filePath, text: c.kind === "text" ? c.text : null, binary: c.kind === "binary", tooLarge: c.kind === "tooLarge" };
 }
+async function listRepoFiles(diff) {
+  const gone = new Set(diff.files.flatMap((f) => f.status === "renamed" && f.oldPath !== null ? [f.oldPath] : []));
+  const parts2 = await mapLimit(searchable(diff), REPO_LIMIT, async (repo) => {
+    const rev = repo.headCommit ?? repo.oldCommit;
+    if (!rev) return [];
+    const prefix = repo.dir ? `${repo.dir}/` : "";
+    const listed = (await git(path3.join(diff.repoRoot, repo.dir), ["ls-tree", "-r", "-z", "--full-tree", rev])).toString("utf8");
+    return listed.split("\0").flatMap((entry) => {
+      const tab = entry.indexOf("	");
+      return tab > 0 && entry.split(" ", 2)[1] === "blob" ? [prefix + entry.slice(tab + 1)] : [];
+    });
+  });
+  return [.../* @__PURE__ */ new Set([...parts2.flat().filter((p) => !gone.has(p)), ...diff.files.map((f) => f.path)])];
+}
 async function readBlobAt(root, rev, rest) {
   const check2 = await git(root, ["cat-file", "--batch-check=%(objectname) %(objecttype) %(objectsize)"], [0], `${rev}:${rest}
 `);
@@ -38752,7 +38766,7 @@ var MAX_CACHED_CHARS = 64 * 1024 * 1024;
 var PING_MS = 25e3;
 var SAVE_DELAY_MS = 500;
 var PAGE = /^\/v\/[\w-]+$/;
-var API = /^\/api\/views\/([\w-]+)\/(diff|file|blob|grep|defs|events|refs|threads|review|reviews|wait|version|topics)(?:\/([\w-]+)\/comments(?:\/([\w-]+))?)?$/;
+var API = /^\/api\/views\/([\w-]+)\/(diff|file|blob|tree|grep|defs|events|refs|threads|review|reviews|wait|version|topics)(?:\/([\w-]+)\/comments(?:\/([\w-]+))?)?$/;
 var SHA = /^[0-9a-f]{40,64}$/;
 var sshAddress = process.env.SSH_CONNECTION?.split(" ")[2] ?? "";
 var SSH_HOST = isIP(sshAddress) ? sshAddress : null;
@@ -39033,6 +39047,13 @@ var ReviewServer = class {
         const filePath = query.get("path") ?? "";
         const file2 = await readRepoFile(diff, filePath);
         return file2 ? sendJson(res, 200, { file: file2 }) : sendJson(res, 404, { error: `${filePath} is not in the compared version.` });
+      }
+      case "GET tree": {
+        const { version: version2, diff } = await this.loadDiff(view.repo, compare);
+        if (version2 !== query.get("version")) return sendJson(res, 409, { error: "The diff changed. Load the new changes first." });
+        const data = { version: version2, paths: await listRepoFiles(diff) };
+        const remote = SSH_HOST !== null && /\bgzip\b/.test(String(req.headers["accept-encoding"]));
+        return remote ? sendGzipped(res, data) : sendJson(res, 200, data);
       }
       case "GET grep": {
         const q = (query.get("q") ?? "").trim();

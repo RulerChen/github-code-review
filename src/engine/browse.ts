@@ -39,6 +39,21 @@ export async function readRepoFile(diff: DiffResult, filePath: string): Promise<
   return { path: filePath, text: c.kind === "text" ? c.text : null, binary: c.kind === "binary", tooLarge: c.kind === "tooLarge" };
 }
 
+export async function listRepoFiles(diff: DiffResult): Promise<string[]> {
+  const gone = new Set(diff.files.flatMap((f) => (f.status === "renamed" && f.oldPath !== null ? [f.oldPath] : [])));
+  const parts = await mapLimit(searchable(diff), REPO_LIMIT, async (repo) => {
+    const rev = repo.headCommit ?? repo.oldCommit;
+    if (!rev) return [];
+    const prefix = repo.dir ? `${repo.dir}/` : "";
+    const listed = (await git(path.join(diff.repoRoot, repo.dir), ["ls-tree", "-r", "-z", "--full-tree", rev])).toString("utf8");
+    return listed.split("\0").flatMap((entry) => {
+      const tab = entry.indexOf("\t");
+      return tab > 0 && entry.split(" ", 2)[1] === "blob" ? [prefix + entry.slice(tab + 1)] : [];
+    });
+  });
+  return [...new Set([...parts.flat().filter((p) => !gone.has(p)), ...diff.files.map((f) => f.path)])];
+}
+
 async function readBlobAt(root: string, rev: string, rest: string): Promise<Content> {
   const check = await git(root, ["cat-file", "--batch-check=%(objectname) %(objecttype) %(objectsize)"], [0], `${rev}:${rest}\n`);
   const [oid = "", type, size] = check.toString("utf8").trim().split(" ");

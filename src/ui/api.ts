@@ -75,6 +75,12 @@ export async function fetchRepoFile(viewId: string, compare: Comparison | null, 
   return (await request<{ file: RepoFile }>(`${viewUrl(viewId, "blob")}?${params}`, (b) => !!b.file)).file;
 }
 
+export async function fetchTree(viewId: string, compare: Comparison | null, version: string): Promise<string[]> {
+  const params = new URLSearchParams(compare ? comparisonQuery(compare) : "");
+  params.set("version", version);
+  return (await request<{ paths: string[] }>(`${viewUrl(viewId, "tree")}?${params}`, (b) => Array.isArray(b.paths))).paths;
+}
+
 export function searchRepo(viewId: string, compare: Comparison | null, query: string, whole: boolean, signal: AbortSignal): Promise<RepoHits> {
   const params = new URLSearchParams(compare ? comparisonQuery(compare) : "");
   params.set("q", query);
