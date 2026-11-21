@@ -548,10 +548,10 @@ export function App({ viewId }: Props) {
   const definitions = useMemo(() => {
     const result = defined?.name === searchedName && defined.result.version === loadedVersion ? defined.result : null;
     // A line that declares a field of the name defines it too.
-    const fields = (searchedName ? (repoResult?.hits ?? []) : []).filter((f) => f.role === "field" && !result?.hits.some((h) => h.path === f.path && h.no === f.no));
+    const fields = (repoResult?.hits ?? []).filter((f) => f.role === "field" && !result?.hits.some((h) => h.path === f.path && h.no === f.no));
     const hits = [...(result?.hits ?? []), ...fields];
-    return hits.length ? definitionsFound(hits, result?.capped ?? false, repoFiles ?? [], searchedName) : null;
-  }, [defined, searchedName, loadedVersion, repoFiles, repoResult]);
+    return hits.length ? definitionsFound(hits, result?.capped ?? false, repoFiles ?? [], searched.trim()) : null;
+  }, [defined, searched, searchedName, loadedVersion, repoFiles, repoResult]);
   const changesFound = useMemo(() => searchChanges(shown.map((e) => e.file), searched, wholeWord), [shown, searched, wholeWord]);
   const sections = useMemo(
     () => searchSections(changesFound, repoResult, repoFiles ?? [], repos ?? [], repoQuery, wholeWord, definitions),
@@ -802,7 +802,7 @@ export function App({ viewId }: Props) {
                             stepHit(e.shiftKey ? -1 : 1);
                           }}
                           aria-label="Search the diff and the repository"
-                          title="Searches the changed lines and every file of the compared version. Enter goes to the next match, Shift+Enter to the previous one."
+                          title="Searches the changed lines and every file of the compared version. A name is found in every spelling of it: userId also finds user_id and user-id. Enter goes to the next match, Shift+Enter to the previous one."
                         />
                         <button
                           className="search-option"

@@ -122,13 +122,16 @@ export function searchSections(
 
 export function definitionsFound(hits: RepoHit[], capped: boolean, files: FileDiff[], name: string): Found {
   const changed = new Map(files.map((f) => [f.path, f]));
+  const word = wordRegExp(name, true);
   const first = [...hits]
     .sort((a, b) => Number(!changed.has(a.path)) - Number(!changed.has(b.path)) || comparePaths(a.path, b.path) || a.no - b.no)
     .slice(0, MAX_DEFINITIONS);
   const groups: Found["groups"] = [];
   for (const h of first) {
     const kind = addedLines(changed.get(h.path)).has(h.no) ? "add" : "context";
-    const hit: Hit = { path: h.path, side: "new", no: h.no, kind, text: h.text, at: h.at, length: h.at < 0 ? 0 : name.length, inDiff: false, inside: null };
+    const match = word?.exec(h.text);
+    const length = h.at < 0 ? 0 : match?.index === h.at ? match[0].length : name.length;
+    const hit: Hit = { path: h.path, side: "new", no: h.no, kind, text: h.text, at: h.at, length, inDiff: false, inside: null };
     const last = groups[groups.length - 1];
     if (last?.path === h.path) last.hits.push(hit);
     else groups.push({ path: h.path, hits: [hit] });

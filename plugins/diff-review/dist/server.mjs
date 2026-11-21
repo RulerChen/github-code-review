@@ -37488,10 +37488,15 @@ import path3 from "node:path";
 // src/shared/search.ts
 var WORD = "A-Za-z0-9_";
 var IS_WORD = new RegExp(`[${WORD}]`);
+var PIECE = /([A-Za-z0-9]+(?:[_-]+[A-Za-z0-9]+)*)|[^A-Za-z0-9]+/g;
+var BETWEEN = "[_-]*";
+function nameParts(name) {
+  return name.split(/[_-]+|(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])/).filter(Boolean);
+}
 function parts(query, whole, special) {
   const q = query.trim();
   return {
-    words: q.split(/\s+/).map((w) => w.replace(special, "\\$&")),
+    words: q.split(/\s+/).map((w) => w.replace(PIECE, (piece, name) => name ? nameParts(name).join(BETWEEN) : piece.replace(special, "\\$&"))),
     wordStart: whole && IS_WORD.test(q[0] ?? ""),
     wordEnd: whole && IS_WORD.test(q[q.length - 1] ?? "")
   };
@@ -37504,6 +37509,9 @@ function wordRegExp(query, whole) {
 function wordPattern(query, whole) {
   const { words, wordStart, wordEnd } = parts(query, whole, /[.*+?^${()|[\\]/g);
   return `${wordStart ? `(^|[^${WORD}])` : ""}${words.join("[[:space:]]+")}${wordEnd ? `([^${WORD}]|$)` : ""}`;
+}
+function plainOf(query) {
+  return [...new Set((query.match(/[A-Za-z0-9]+/g) ?? []).flatMap(nameParts).map((p) => p.toLowerCase()))].sort((a, b) => b.length - a.length);
 }
 
 // src/shared/scope.ts
@@ -37888,6 +37896,7 @@ function usesOf(text, filePath) {
   const { lines, indentAt } = reader(text);
   const lang = languageOf(filePath);
   const jsx = /\.[jt]sx$/.test(filePath);
+  const yaml = /\.ya?ml$/.test(filePath);
   const around = (no, lead) => {
     const here = enclosure(lead);
     if (here) return here;
@@ -37905,7 +37914,7 @@ function usesOf(text, filePath) {
     if (open2 === "(") return "params";
     if (open2 !== "{" && open2 !== ":" || NOT_KEYS.test(head) || jsx && JSX_VALUE.test(head)) return "other";
     if (TYPE_HEAD.test(head) || TYPE_BEFORE.test(head)) return "type";
-    if (open2 === ":") return lang === GENERIC ? "literal" : "other";
+    if (open2 === ":") return "other";
     if (PATTERN_HEAD.test(head)) return "pattern";
     if (/:\s*$/.test(head) && TYPE_VALUE.test(value)) return "type";
     if (/;/.test(`${inner} ${/^[^,{}()]*/.exec(value)[0]}`.replace(STRING, ""))) return "type";
@@ -37948,6 +37957,7 @@ function usesOf(text, filePath) {
       if (start && kindOf(at, "") === "type") return field;
       return { role: "write", key: jsx && /^=[{"']/.test(rest) };
     }
+    if (yaml && key && /^\s*(?:-\s+)*$/.test(lead)) return { role: "write", key: true };
     if ((key || short) && placed) {
       const kind = kindOf(around(no, lead), rest.replace(/^\??\s*:/, ""));
       if (kind === "type") return key ? field : none;
@@ -37969,6 +37979,7 @@ var LEAD_CHARS = 100;
 var MAX_READ_FILES = 200;
 var NOT_GENERATED = ":(exclude,attr:linguist-generated=true)";
 var IDENTIFIER = /^[\p{L}_$][\p{L}\p{N}_$]{0,199}$/u;
+var SPELLED = /^[\p{L}_$][\p{L}\p{N}_$-]{0,199}$/u;
 function isRepoPath(p) {
   return p !== "" && !/[\0\n\r]/.test(p) && p.split("/").every((s) => s !== "" && s !== "." && s !== "..");
 }
@@ -38000,8 +38011,7 @@ async function readBlobAt(root, rev, rest) {
 async function grepRepo(diff, query, whole, signal) {
   const found = wordRegExp(query, whole);
   const pattern = wordPattern(query, whole);
-  const plain = (query.match(/[A-Za-z0-9_]+/g) ?? []).reduce((a, b) => b.length > a.length ? b : a, "");
-  const match = plain && plain !== pattern ? ["-e", plain, "--and", "-e", pattern] : ["-e", pattern];
+  const match = [...plainOf(query).filter((p) => p !== pattern.toLowerCase()).flatMap((p) => ["-e", p, "--and"]), "-e", pattern];
   const changed = new Set(diff.files.map((f) => f.path));
   const busy = searchable(diff).filter((r) => r.dir !== "" && diff.files.some((f) => f.path.startsWith(`${r.dir}/`)));
   const far = (p) => changed.has(p) ? 0 : busy.length === 0 || busy.some((r) => p.startsWith(`${r.dir}/`)) ? 1 : 2;
@@ -38021,7 +38031,7 @@ async function describe4(diff, hits, found) {
     h.inside = file2.inside(h.no);
     const line = file2.lines[h.no - 1] ?? "";
     for (const m of every ? line.matchAll(every) : []) {
-      if (!IDENTIFIER.test(m[0]) || /[\w$]/.test((line[m.index - 1] ?? "") + (line[m.index + m[0].length] ?? ""))) continue;
+      if (!SPELLED.test(m[0]) || /[\w$]/.test((line[m.index - 1] ?? "") + (line[m.index + m[0].length] ?? ""))) continue;
       const role = file2.roles(h.no, m.index, m[0]);
       if (role === "field" || role && !h.role) h.role = role;
     }
@@ -38074,7 +38084,7 @@ async function nearestFirst(groups, find) {
   }
   return { hits: [], capped: false };
 }
-var defines = (name, patterns) => ["-E", "-e", name, "--and", "(", ...patterns.flatMap((p) => ["-e", p]), ")"];
+var defines = (plain, patterns) => ["-E", ...plain.flatMap((p) => ["-e", p, "--and"]), "(", ...patterns.flatMap((p) => ["-e", p]), ")"];
 var isIdentifier = (name) => IDENTIFIER.test(name);
 async function findDefinitions(diff, name, from, click, signal) {
   const text = click ? (await readRepoFile(diff, from))?.text ?? null : null;
@@ -38095,7 +38105,7 @@ async function findDefinitions(diff, name, from, click, signal) {
   const all = searchable(diff);
   const lookUp = (patterns) => nearestFirst(
     own2 ? [[own2], all.filter((r) => r !== own2)] : [all],
-    (repos) => grepLines(diff, repos, defines(escaped, patterns), pathspecs, MAX_DEFINITIONS, signal, (line) => line.indexOf(name))
+    (repos) => grepLines(diff, repos, defines([escaped], patterns), pathspecs, MAX_DEFINITIONS, signal, (line) => line.indexOf(name))
   );
   const fields = async () => {
     const lines = await grepRepo(diff, name, true, signal);
@@ -38143,15 +38153,16 @@ function inModule(hits, module, from) {
   return [];
 }
 function findDefinitionsAnywhere(diff, name, signal) {
-  const escaped = name.replaceAll("$", "\\$");
-  const lower = name.toLowerCase();
+  const spelled = wordPattern(name, false);
+  const word = wordRegExp(name, true);
+  const plain = plainOf(name);
   const all = searchable(diff);
   const changed = all.filter((r) => diff.files.some((f) => r.dir === "" || f.path.startsWith(`${r.dir}/`)));
   return nearestFirst([changed, all.filter((r) => !changed.includes(r))], async (repos) => {
-    const find = (patterns, pathspecs) => grepLines(diff, repos, ["-i", ...defines(escaped, patterns)], pathspecs, MAX_DEFINITIONS, signal, (text) => text.toLowerCase().indexOf(lower));
+    const find = (patterns, pathspecs) => grepLines(diff, repos, ["-i", ...defines(plain, patterns)], pathspecs, MAX_DEFINITIONS, signal, (text) => word?.exec(text)?.index ?? -1);
     const found = await Promise.all([
-      ...LANGUAGES.map((l) => find([...l.patterns(escaped), ...l.values(escaped)], l.exts.map((e) => `*.${e}`))),
-      find(GENERIC.patterns(escaped), [".", ...LANGUAGES.flatMap((l) => l.exts).map((e) => `:(exclude)*.${e}`)])
+      ...LANGUAGES.map((l) => find([...l.patterns(spelled), ...l.values(spelled)], l.exts.map((e) => `*.${e}`))),
+      find(GENERIC.patterns(spelled), [".", ...LANGUAGES.flatMap((l) => l.exts).map((e) => `:(exclude)*.${e}`)])
     ]);
     const hits = found.flatMap((f) => f.hits).sort((a, b) => compareText(a.path, b.path) || a.no - b.no);
     return { hits: hits.slice(0, MAX_DEFINITIONS), capped: hits.length > MAX_DEFINITIONS || found.some((f) => f.capped) };

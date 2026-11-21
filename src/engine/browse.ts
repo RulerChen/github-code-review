@@ -1,5 +1,5 @@
 import path from "node:path";
-import { wordPattern, wordRegExp } from "../shared/search.js";
+import { plainOf, wordPattern, wordRegExp } from "../shared/search.js";
 import type { DiffRepo, DiffResult, RepoFile, RepoHit } from "../shared/types.js";
 import { compareText } from "../shared/util.js";
 import { ABSENT, classify, type Content, MAX_CONTENT_BYTES, mapLimit, readWorkTree, REPO_LIMIT } from "./diff.js";
@@ -13,6 +13,7 @@ const LEAD_CHARS = 100;
 const MAX_READ_FILES = 200;
 const NOT_GENERATED = ":(exclude,attr:linguist-generated=true)";
 const IDENTIFIER = /^[\p{L}_$][\p{L}\p{N}_$]{0,199}$/u;
+const SPELLED = /^[\p{L}_$][\p{L}\p{N}_$-]{0,199}$/u;
 
 export function isRepoPath(p: string): boolean {
   return p !== "" && !/[\0\n\r]/.test(p) && p.split("/").every((s) => s !== "" && s !== "." && s !== "..");
@@ -50,8 +51,7 @@ async function readBlobAt(root: string, rev: string, rest: string): Promise<Cont
 export async function grepRepo(diff: DiffResult, query: string, whole: boolean, signal: AbortSignal): Promise<Found> {
   const found = wordRegExp(query, whole);
   const pattern = wordPattern(query, whole);
-  const plain = (query.match(/[A-Za-z0-9_]+/g) ?? []).reduce((a, b) => (b.length > a.length ? b : a), "");
-  const match = plain && plain !== pattern ? ["-e", plain, "--and", "-e", pattern] : ["-e", pattern];
+  const match = [...plainOf(query).filter((p) => p !== pattern.toLowerCase()).flatMap((p) => ["-e", p, "--and"]), "-e", pattern];
   // When there are more matches than are kept, keep the ones nearest the diff: its files, then the repositories it changes.
   const changed = new Set(diff.files.map((f) => f.path));
   const busy = searchable(diff).filter((r) => r.dir !== "" && diff.files.some((f) => f.path.startsWith(`${r.dir}/`)));
@@ -75,7 +75,7 @@ async function describe(diff: DiffResult, hits: RepoHit[], found: RegExp | null)
     // The whole line, since the text of a hit is cut when it is long. A line can have the name more than once: a place that declares a field counts first, then one that writes.
     const line = file.lines[h.no - 1] ?? "";
     for (const m of every ? line.matchAll(every) : []) {
-      if (!IDENTIFIER.test(m[0]) || /[\w$]/.test((line[m.index - 1] ?? "") + (line[m.index + m[0].length] ?? ""))) continue;
+      if (!SPELLED.test(m[0]) || /[\w$]/.test((line[m.index - 1] ?? "") + (line[m.index + m[0].length] ?? ""))) continue;
       const role = file.roles(h.no, m.index, m[0]);
       if (role === "field" || (role && !h.role)) h.role = role;
     }
@@ -138,7 +138,7 @@ async function nearestFirst(groups: DiffRepo[][], find: (repos: DiffRepo[]) => P
   return { hits: [], capped: false };
 }
 
-const defines = (name: string, patterns: string[]) => ["-E", "-e", name, "--and", "(", ...patterns.flatMap((p) => ["-e", p]), ")"];
+const defines = (plain: string[], patterns: string[]) => ["-E", ...plain.flatMap((p) => ["-e", p, "--and"]), "(", ...patterns.flatMap((p) => ["-e", p]), ")"];
 
 export const isIdentifier = (name: string) => IDENTIFIER.test(name);
 
@@ -170,7 +170,7 @@ export async function findDefinitions(diff: DiffResult, name: string, from: stri
   const all = searchable(diff);
   const lookUp = (patterns: string[]) =>
     nearestFirst(own ? [[own], all.filter((r) => r !== own)] : [all], (repos) =>
-      grepLines(diff, repos, defines(escaped, patterns), pathspecs, MAX_DEFINITIONS, signal, (line) => line.indexOf(name)),
+      grepLines(diff, repos, defines([escaped], patterns), pathspecs, MAX_DEFINITIONS, signal, (line) => line.indexOf(name)),
     );
   // A member is a method, or a field that some type declares. Which one is looked for first follows from whether the member is called.
   const fields = async (): Promise<Found> => {
@@ -225,16 +225,17 @@ function inModule(hits: RepoHit[], module: string, from: string): RepoHit[] {
 }
 
 export function findDefinitionsAnywhere(diff: DiffResult, name: string, signal: AbortSignal): Promise<Found> {
-  const escaped = name.replaceAll("$", "\\$");
-  const lower = name.toLowerCase();
+  const spelled = wordPattern(name, false);
+  const word = wordRegExp(name, true);
+  const plain = plainOf(name);
   const all = searchable(diff);
   const changed = all.filter((r) => diff.files.some((f) => r.dir === "" || f.path.startsWith(`${r.dir}/`)));
   return nearestFirst([changed, all.filter((r) => !changed.includes(r))], async (repos) => {
     const find = (patterns: string[], pathspecs: string[]) =>
-      grepLines(diff, repos, ["-i", ...defines(escaped, patterns)], pathspecs, MAX_DEFINITIONS, signal, (text) => text.toLowerCase().indexOf(lower));
+      grepLines(diff, repos, ["-i", ...defines(plain, patterns)], pathspecs, MAX_DEFINITIONS, signal, (text) => word?.exec(text)?.index ?? -1);
     const found = await Promise.all([
-      ...LANGUAGES.map((l) => find([...l.patterns(escaped), ...l.values(escaped)], l.exts.map((e) => `*.${e}`))),
-      find(GENERIC.patterns(escaped), [".", ...LANGUAGES.flatMap((l) => l.exts).map((e) => `:(exclude)*.${e}`)]),
+      ...LANGUAGES.map((l) => find([...l.patterns(spelled), ...l.values(spelled)], l.exts.map((e) => `*.${e}`))),
+      find(GENERIC.patterns(spelled), [".", ...LANGUAGES.flatMap((l) => l.exts).map((e) => `:(exclude)*.${e}`)]),
     ]);
     const hits = found.flatMap((f) => f.hits).sort((a, b) => compareText(a.path, b.path) || a.no - b.no);
     return { hits: hits.slice(0, MAX_DEFINITIONS), capped: hits.length > MAX_DEFINITIONS || found.some((f) => f.capped) };

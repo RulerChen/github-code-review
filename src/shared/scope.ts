@@ -502,6 +502,7 @@ function usesOf(text: string, filePath: string): (no: number, col: number, name:
 
   // What the line is directly inside: the bracket and the text before it, on the line itself or on the nearest line above that is indented less.
   const jsx = /\.[jt]sx$/.test(filePath);
+  const yaml = /\.ya?ml$/.test(filePath);
   const around = (no: number, lead: string): Around => {
     const here = enclosure(lead);
     if (here) return here;
@@ -519,8 +520,7 @@ function usesOf(text: string, filePath: string): (no: number, col: number, name:
     if (open === "(") return "params";
     if ((open !== "{" && open !== ":") || NOT_KEYS.test(head) || (jsx && JSX_VALUE.test(head))) return "other";
     if (TYPE_HEAD.test(head) || TYPE_BEFORE.test(head)) return "type";
-    // A mapping in a file that is not code, as YAML. In code a block opened by ":" holds statements.
-    if (open === ":") return lang === GENERIC ? "literal" : "other";
+    if (open === ":") return "other";
     if (PATTERN_HEAD.test(head)) return "pattern";
     // After ":" the braces are a type, as in "(opts: { name: string })", or a value, as in "{ a: { name: 1 } }".
     if (/:\s*$/.test(head) && TYPE_VALUE.test(value)) return "type";
@@ -573,6 +573,7 @@ function usesOf(text: string, filePath: string): (no: number, col: number, name:
       // An attribute of an element: "<List hits={found} />".
       return { role: "write", key: jsx && /^=[{"']/.test(rest) };
     }
+    if (yaml && key && /^\s*(?:-\s+)*$/.test(lead)) return { role: "write", key: true };
     if ((key || short) && placed) {
       const kind = kindOf(around(no, lead), rest.replace(/^\??\s*:/, ""));
       if (kind === "type") return key ? field : none;
