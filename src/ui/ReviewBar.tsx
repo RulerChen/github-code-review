@@ -23,19 +23,30 @@ interface Props {
 export function ReviewBar({ reviews, review, grouping, repoRoot, hasChanges, onPick, onGroup, onRemove }: Props) {
   const running = grouping !== null && grouping.error === null;
   const [editing, setEditing] = useState(false);
+  const [creating, setCreating] = useState(false);
   const { busy, error, run } = useAction(async (ask: TopicRequest) => {
     await onGroup(ask);
     setEditing(false);
+    setCreating(false);
   });
   const removing = useAction(onRemove);
   const failedEdit = grouping?.error && review && grouping.replaces === review.createdAt ? grouping : null;
+  const canGroup = hasChanges && !running && !editing;
+  const showCreate = canGroup && (review === null || creating);
 
   return (
     <div className="review-bar">
       {(reviews.length > 0 || review) && (
         <div className="review-bar-row">
           {reviews.length > 0 && (
-            <ReviewPicker reviews={reviews} current={review} repoRoot={repoRoot} onPick={onPick} onRemove={removing.run} />
+            <ReviewPicker
+              reviews={reviews}
+              current={review}
+              repoRoot={repoRoot}
+              onPick={onPick}
+              onRemove={removing.run}
+              onCreate={canGroup && !showCreate ? () => setCreating(true) : null}
+            />
           )}
           {review?.focus && (
             <p className="focus" title={review.focus}>
@@ -44,13 +55,15 @@ export function ReviewBar({ reviews, review, grouping, repoRoot, hasChanges, onP
           )}
           <span className="spacer" />
           {review && hasChanges && !running && !editing && (
-            <button className="button" title="Change these topics and have Claude redo them" onClick={() => setEditing(true)}>
+            <button
+              className="button"
+              title="Change these topics and have Claude redo them"
+              onClick={() => {
+                setCreating(false);
+                setEditing(true);
+              }}
+            >
               Edit topics
-            </button>
-          )}
-          {review && (
-            <button className="button" title="Remove these topics and Claude's notes on their lines" disabled={removing.busy} onClick={() => void removing.run(review)}>
-              Remove
             </button>
           )}
         </div>
@@ -90,13 +103,14 @@ export function ReviewBar({ reviews, review, grouping, repoRoot, hasChanges, onP
           onCancel={() => setEditing(false)}
         />
       )}
-      {hasChanges && !running && !editing && (
+      {showCreate && (
         <CreateForm
           initial={grouping?.replaces === null && grouping.syncs === null ? (grouping.focus ?? "") : ""}
           explain={review === null}
           busy={busy}
           error={error}
           onSubmit={(focus) => run({ focus, topics: null, replaces: null })}
+          onCancel={review === null ? null : () => setCreating(false)}
         />
       )}
     </div>
@@ -109,19 +123,27 @@ interface CreateProps {
   busy: boolean;
   error: string | null;
   onSubmit: (focus: string) => Promise<void>;
+  onCancel: (() => void) | null;
 }
 
-function CreateForm({ initial, explain, busy, error, onSubmit }: CreateProps) {
+function CreateForm({ initial, explain, busy, error, onSubmit, onCancel }: CreateProps) {
   const [focus, setFocus] = useState(initial);
   return (
     <form
       className="group-card group-form"
+      onKeyDown={(e) => {
+        if (e.key === "Escape" && onCancel) onCancel();
+      }}
       onSubmit={(e) => {
         e.preventDefault();
         void onSubmit(focus.trim());
       }}
     >
-      {explain && <p>There are no topics for this comparison yet. Claude can make them now and explain each one.</p>}
+      {explain ? (
+        <p>There are no topics for this comparison yet. Claude can make them now and explain each one.</p>
+      ) : (
+        <p>Claude makes another set of topics for this comparison. The ones you have now stay in the Reviews list.</p>
+      )}
       <div className="group-form-row">
         <input
           className="filter"
@@ -130,7 +152,13 @@ function CreateForm({ initial, explain, busy, error, onSubmit }: CreateProps) {
           aria-label="Focus"
           value={focus}
           onChange={(e) => setFocus(e.target.value)}
+          ref={explain ? undefined : focusInPlace}
         />
+        {onCancel && (
+          <button type="button" className="button" onClick={onCancel}>
+            Cancel
+          </button>
+        )}
         <button className="button primary" type="submit" disabled={busy}>
           Create topics
         </button>
@@ -206,19 +234,29 @@ interface PickerProps {
   repoRoot: string;
   onPick: (review: Review) => void;
   onRemove: (review: Review) => Promise<void>;
+  onCreate: (() => void) | null;
 }
 
-function ReviewPicker({ reviews, current, repoRoot, onPick, onRemove }: PickerProps) {
+const MAX_LABEL = 60;
+
+const reviewLabel = (r: Review) => r.focus ?? r.topics.map((t) => t.title).join(", ");
+
+function ReviewPicker({ reviews, current, repoRoot, onPick, onRemove, onCreate }: PickerProps) {
   const [open, setOpen] = useState(false);
+  const [confirming, setConfirming] = useState<Review | null>(null);
   const root = useRef<HTMLDivElement>(null);
-  useDismiss(root, open, () => setOpen(false));
+  const close = () => {
+    setOpen(false);
+    setConfirming(null);
+  };
+  useDismiss(root, open, close);
 
   const otherRepos = reviews.some((r) => r.repo !== repoRoot);
   const newest = [...reviews].reverse();
 
   return (
     <div className="picker review-picker" ref={root}>
-      <button className="picker-button" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(!open)}>
+      <button className="picker-button" aria-haspopup="dialog" aria-expanded={open} onClick={() => (open ? close() : setOpen(true))}>
         <span className="picker-value">Reviews</span>
         <span className="counter">{reviews.length}</span>
         <CaretIcon />
@@ -235,28 +273,70 @@ function ReviewPicker({ reviews, current, repoRoot, onPick, onRemove }: PickerPr
                   <button
                     className="review-item"
                     onClick={() => {
-                      setOpen(false);
+                      close();
                       if (!selected) onPick(r);
                     }}
                   >
                     <CheckMark checked={selected} />
                     <span className="review-item-text">
-                      <span className="picker-item-label">{r.focus ?? r.topics.map((t) => t.title).join(", ")}</span>
+                      <span className="picker-item-label">{reviewLabel(r)}</span>
                       <span className="review-item-detail">
                         {otherRepos && `${basename(r.repo)} · `}
                         <code>{describeComparison(r.compare, refLabel)}</code> · {plural(r.topics.length, "topic")} · {time}
                       </span>
                     </span>
                   </button>
-                  <button className="icon-button small review-remove" aria-label="Remove these topics" title="Remove" onClick={() => void onRemove(r)}>
+                  <button
+                    className="icon-button small review-remove"
+                    aria-label="Remove these topics"
+                    aria-pressed={confirming === r}
+                    title="Remove"
+                    onClick={() => setConfirming(confirming === r ? null : r)}
+                  >
                     <TrashIcon />
                   </button>
                 </li>
               );
             })}
           </ul>
+          {confirming && (
+            <div className="comment-confirm review-confirm" role="alertdialog" aria-label="Remove these topics">
+              <span className="comment-confirm-text">
+                Remove the topics for “{shorten(reviewLabel(confirming))}” and Claude's notes on their lines?
+              </span>
+              <button className="button" ref={focusInPlace} onClick={() => setConfirming(null)}>
+                Cancel
+              </button>
+              <button
+                className="button danger"
+                onClick={() => {
+                  const r = confirming;
+                  close();
+                  void onRemove(r);
+                }}
+              >
+                Remove
+              </button>
+            </div>
+          )}
+          {onCreate && (
+            <button
+              className="picker-action"
+              title="Have Claude make another set of topics for this comparison, with a focus you choose"
+              onClick={() => {
+                close();
+                onCreate();
+              }}
+            >
+              New topics…
+            </button>
+          )}
         </div>
       )}
     </div>
   );
+}
+
+function shorten(text: string): string {
+  return text.length > MAX_LABEL ? `${text.slice(0, MAX_LABEL - 1)}…` : text;
 }

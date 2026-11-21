@@ -1131,6 +1131,14 @@ button {
   padding: 0;
 }
 
+.review-confirm {
+  margin: 4px 8px 8px;
+}
+
+.review-remove[aria-pressed="true"] {
+  color: var(--danger);
+}
+
 .review-item:hover {
   background: var(--bg-subtle);
 }
@@ -2452,7 +2460,8 @@ button {
   font-size: 12px;
 }
 
-.definition-more {
+.definition-more,
+.picker-action {
   display: block;
   width: 100%;
   padding: 8px 12px;
@@ -2465,7 +2474,8 @@ button {
   cursor: pointer;
 }
 
-.definition-more:hover {
+.definition-more:hover,
+.picker-action:hover {
   background: var(--bg-subtle);
 }
 
