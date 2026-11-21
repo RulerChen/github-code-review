@@ -549,10 +549,6 @@ button {
   color: var(--success);
 }
 
-.search-hit.del .search-no {
-  color: var(--danger);
-}
-
 .search-text {
   min-width: 0;
   overflow: hidden;

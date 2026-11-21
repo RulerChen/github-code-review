@@ -571,8 +571,8 @@ export function App({ viewId }: Props) {
   else if (sections.length === 0) searchNote = definitions ? "No other line has it." : "No matches.";
   const openHit = (next: Hit) => {
     setHit(next);
-    if (view === "code" && next.side === "new" && (codeFile === null || codeFile.path === next.path)) return readFile(next.path, next.no);
-    if (!next.inDiff || (view === "code" && next.side === "new")) return openCode(next.path, next.no);
+    if (view === "code" && (codeFile === null || codeFile.path === next.path)) return readFile(next.path, next.no);
+    if (!next.inDiff || view === "code") return openCode(next.path, next.no);
     if (view !== "files") setTab("files");
     revealLine(next);
   };
@@ -872,7 +872,7 @@ export function App({ viewId }: Props) {
                               stepHit(e.shiftKey ? -1 : 1);
                             }}
                             aria-label="Search the diff and the repository"
-                            title="Searches the changed lines and every file of the compared version. A name is found in every spelling of it: userId also finds user_id and user-id. Enter goes to the next match, Shift+Enter to the previous one."
+                            title="Searches every file of the compared version, so lines the diff removes are not found. A name is found in every spelling of it: userId also finds user_id and user-id. Enter goes to the next match, Shift+Enter to the previous one."
                           />
                           <button
                             className="search-option"
