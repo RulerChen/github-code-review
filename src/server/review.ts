@@ -44,6 +44,7 @@ export function formatFiles(files: FileDiff[], only: Set<string> | null = null, 
     for (const b of f.blocks) {
       if (only && !only.has(b.id)) continue;
       out.push(`  ${b.id}  ${hunkHeader(b.oldStart, b.oldCount, b.newStart, b.newCount, b.section)}${label(b.id)}`);
+      if (f.diffTooLarge) continue;
       if (size > MAX_CHARS) {
         omitted++;
         continue;

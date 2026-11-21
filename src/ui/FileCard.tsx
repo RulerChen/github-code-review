@@ -87,7 +87,7 @@ export const FileCard = memo(function FileCard({ file: next, blocks: nextBlocks 
   useEffect(() => setCollapsed(viewed), [viewed]);
 
   const { lineCount, charCount } = useMemo(() => sizeOf(baseHunksOf(next, nextBlocks)), [next, nextBlocks]);
-  const deferred = (next.generated || lineCount > AUTO_LOAD_LINES || charCount > AUTO_LOAD_CHARS) && !forceLoad;
+  const deferred = (next.generated || next.diffTooLarge || lineCount > AUTO_LOAD_LINES || charCount > AUTO_LOAD_CHARS) && !forceLoad;
   const loadFile = useContext(FileLoader);
   const loading = useAction(() => loadFile(next.path));
   useEffect(() => {
@@ -245,9 +245,6 @@ function FileBody({
   threads: Thread[];
 }) {
   if (file.binary) return <p className="file-note">Binary file not shown.</p>;
-  if (file.diffTooLarge) {
-    return <p className="file-note">Diff too large to display ({(file.additions + file.deletions).toLocaleString()} changed lines).</p>;
-  }
   if (hunks.length === 0 && !file.lazy) {
     if (file.tooLarge) return <p className="file-note">File too large to display.</p>;
     if (file.modeChange) return <p className="file-note">File mode changed from {file.modeChange.from} to {file.modeChange.to}.</p>;
@@ -255,10 +252,12 @@ function FileBody({
     return <p className="file-note">Empty file.</p>;
   }
   if (deferred) {
+    const size = file.diffTooLarge
+      ? `${(file.additions + file.deletions).toLocaleString()} changed lines`
+      : `${lineCount.toLocaleString()} lines, ${Math.ceil(charCount / 1024).toLocaleString()} KB`;
     return (
       <div className="file-note">
-        {file.generated ? "Generated file" : `Large diff (${lineCount.toLocaleString()} lines, ${Math.ceil(charCount / 1024).toLocaleString()} KB)`} not
-        rendered by default.{" "}
+        {file.generated ? "Generated file" : `Large diff (${size})`} not rendered by default.{" "}
         <button className="link-button" onClick={onLoad}>
           Load diff
         </button>
@@ -283,7 +282,7 @@ function FileBody({
 }
 
 function hunksOf(file: FileDiff, blocks: Block[], expansion: Expansion | null): DisplayHunk[] {
-  if (blocks.length === 0 || file.diffTooLarge || file.lazy) return [];
+  if (blocks.length === 0 || file.lazy) return [];
   const lines = (text: string | null) => (text === null ? null : splitLines(text));
   return buildHunks(blocks, lines(file.oldContent), lines(file.newContent), file.blocks, expansion);
 }

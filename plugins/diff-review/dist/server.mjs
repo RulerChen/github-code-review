@@ -37307,9 +37307,6 @@ function fileDiff(filePath, fields) {
     ...fields
   };
 }
-function withoutLines(file2, blocks) {
-  return { ...file2, diffTooLarge: true, blocks: blocks.map((b) => ({ ...b, del: [], add: [] })) };
-}
 async function trackedFile(ctx, entry, section) {
   const status = statusOf(entry.code);
   if (!section) {
@@ -37332,11 +37329,11 @@ async function trackedFile(ctx, entry, section) {
     deletions: sum(blocks, (b) => b.oldCount)
   });
   if (binary) return file2;
-  if (diffTooLarge(blocks)) return withoutLines(file2, blocks);
   const old = matchingText(oldC, blocks, "old");
   const next = matchingText(newC, blocks, "new");
   return {
     ...file2,
+    diffTooLarge: diffTooLarge(blocks),
     blocks,
     hunks: buildHunks(blocks, old?.lines ?? null, next?.lines ?? null),
     oldContent: old?.text ?? null,
@@ -37362,9 +37359,7 @@ async function untrackedFile(ctx, filePath) {
     section: ""
   };
   const blocks = assignIds(ctx.prefix + filePath, [raw]);
-  const added = { ...file2, additions: lines.length };
-  if (diffTooLarge(blocks)) return withoutLines(added, blocks);
-  return { ...added, blocks, hunks: buildHunks(blocks, null, lines), newContent: c.text };
+  return { ...file2, additions: lines.length, diffTooLarge: diffTooLarge(blocks), blocks, hunks: buildHunks(blocks, null, lines), newContent: c.text };
 }
 async function mapLimit(items, limit, fn) {
   const out = new Array(items.length);
@@ -38257,6 +38252,7 @@ function formatFiles(files, only = null, labels = /* @__PURE__ */ new Map()) {
     for (const b of f.blocks) {
       if (only && !only.has(b.id)) continue;
       out.push(`  ${b.id}  ${hunkHeader(b.oldStart, b.oldCount, b.newStart, b.newCount, b.section)}${label(b.id)}`);
+      if (f.diffTooLarge) continue;
       if (size > MAX_CHARS) {
         omitted++;
         continue;
@@ -38859,7 +38855,8 @@ var ReviewServer = class {
   }
   keepDiff(repo, compare, loaded) {
     const key = `${repo}\0${comparisonQuery(compare)}`;
-    const chars = sum(loaded.diff.files, (f) => (f.oldContent?.length ?? 0) + (f.newContent?.length ?? 0));
+    const lineChars = (f) => f.diffTooLarge ? sum(f.blocks, (b) => sum(b.del, (l) => l.length) + sum(b.add, (l) => l.length)) : 0;
+    const chars = sum(loaded.diff.files, (f) => (f.oldContent?.length ?? 0) + (f.newContent?.length ?? 0) + lineChars(f));
     this.diffs = [{ ...loaded, key, chars }, ...this.diffs.filter((d) => d.key !== key)].slice(0, MAX_CACHED_DIFFS);
     while (this.diffs.length && sum(this.diffs, (d) => d.chars) > MAX_CACHED_CHARS) this.diffs.pop();
   }
@@ -39024,7 +39021,7 @@ var ReviewServer = class {
         const { version: version2, diff } = await this.loadDiff(view.repo, compare);
         const commented = new Set(threads.threads.map((t) => t.anchor.side === null ? null : t.anchor.path));
         const data = {
-          diff: { ...diff, files: diff.files.map((f) => f.generated && f.hunks.length > 0 && !commented.has(f.path) ? withoutLines2(f) : f) },
+          diff: { ...diff, files: diff.files.map((f) => (f.generated || f.diffTooLarge) && f.hunks.length > 0 && !commented.has(f.path) ? withoutLines(f) : f) },
           version: version2,
           opened: view.compare,
           reviews: this.reviews,
@@ -39270,7 +39267,7 @@ function sendThread(res, thread, missing) {
   if (thread) sendJson(res, 200, { thread });
   else sendJson(res, 404, { error: missing });
 }
-function withoutLines2(file2) {
+function withoutLines(file2) {
   const blocks = file2.blocks.map((b) => ({ ...b, del: [], add: [] }));
   return { ...file2, lazy: true, blocks, hunks: [], oldContent: null, newContent: null };
 }

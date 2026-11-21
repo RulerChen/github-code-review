@@ -576,10 +576,6 @@ function fileDiff(filePath: string, fields: Partial<FileDiff>): FileDiff {
   };
 }
 
-function withoutLines(file: FileDiff, blocks: Block[]): FileDiff {
-  return { ...file, diffTooLarge: true, blocks: blocks.map((b) => ({ ...b, del: [], add: [] })) };
-}
-
 async function trackedFile(ctx: RepoContext, entry: RawEntry, section: string[] | undefined): Promise<FileDiff> {
   const status = statusOf(entry.code);
   if (!section) {
@@ -606,11 +602,11 @@ async function trackedFile(ctx: RepoContext, entry: RawEntry, section: string[] 
   });
 
   if (binary) return file;
-  if (diffTooLarge(blocks)) return withoutLines(file, blocks);
   const old = matchingText(oldC, blocks, "old");
   const next = matchingText(newC, blocks, "new");
   return {
     ...file,
+    diffTooLarge: diffTooLarge(blocks),
     blocks,
     hunks: buildHunks(blocks, old?.lines ?? null, next?.lines ?? null),
     oldContent: old?.text ?? null,
@@ -639,9 +635,7 @@ async function untrackedFile(ctx: RepoContext, filePath: string): Promise<FileDi
   };
 
   const blocks = assignIds(ctx.prefix + filePath, [raw]);
-  const added = { ...file, additions: lines.length };
-  if (diffTooLarge(blocks)) return withoutLines(added, blocks);
-  return { ...added, blocks, hunks: buildHunks(blocks, null, lines), newContent: c.text };
+  return { ...file, additions: lines.length, diffTooLarge: diffTooLarge(blocks), blocks, hunks: buildHunks(blocks, null, lines), newContent: c.text };
 }
 
 export async function mapLimit<T, R>(items: readonly T[], limit: number, fn: (item: T, index: number) => Promise<R>): Promise<R[]> {

@@ -180,7 +180,8 @@ export class ReviewServer {
 
   keepDiff(repo: string, compare: Comparison, loaded: LoadedDiff): void {
     const key = `${repo}\0${comparisonQuery(compare)}`;
-    const chars = sum(loaded.diff.files, (f) => (f.oldContent?.length ?? 0) + (f.newContent?.length ?? 0));
+    const lineChars = (f: FileDiff) => (f.diffTooLarge ? sum(f.blocks, (b) => sum(b.del, (l) => l.length) + sum(b.add, (l) => l.length)) : 0);
+    const chars = sum(loaded.diff.files, (f) => (f.oldContent?.length ?? 0) + (f.newContent?.length ?? 0) + lineChars(f));
     this.diffs = [{ ...loaded, key, chars }, ...this.diffs.filter((d) => d.key !== key)].slice(0, MAX_CACHED_DIFFS);
     while (this.diffs.length && sum(this.diffs, (d) => d.chars) > MAX_CACHED_CHARS) this.diffs.pop();
   }
@@ -370,7 +371,7 @@ export class ReviewServer {
         const { version, diff } = await this.loadDiff(view.repo, compare);
         const commented = new Set(threads.threads.map((t) => (t.anchor.side === null ? null : t.anchor.path)));
         const data: ViewData = {
-          diff: { ...diff, files: diff.files.map((f) => (f.generated && f.hunks.length > 0 && !commented.has(f.path) ? withoutLines(f) : f)) },
+          diff: { ...diff, files: diff.files.map((f) => ((f.generated || f.diffTooLarge) && f.hunks.length > 0 && !commented.has(f.path) ? withoutLines(f) : f)) },
           version,
           opened: view.compare,
           reviews: this.reviews,
