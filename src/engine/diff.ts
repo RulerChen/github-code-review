@@ -565,6 +565,7 @@ function fileDiff(filePath: string, fields: Partial<FileDiff>): FileDiff {
     generated: false,
     lazy: false,
     diffTooLarge: false,
+    size: null,
     modeChange: null,
     additions: 0,
     deletions: 0,
@@ -617,7 +618,7 @@ async function trackedFile(ctx: RepoContext, entry: RawEntry, section: string[] 
 async function untrackedFile(ctx: RepoContext, filePath: string): Promise<FileDiff | null> {
   const c = await readWorkTree(ctx.root, filePath);
   if (c.kind === "absent") return null;
-  const file = fileDiff(filePath, { binary: c.kind === "binary", tooLarge: c.kind === "tooLarge" });
+  const file = fileDiff(filePath, { binary: c.kind === "binary", tooLarge: c.kind === "tooLarge", size: c.kind === "tooLarge" ? c.size : null });
   if (c.kind !== "text") return file;
   const lines = splitLines(c.text);
   if (lines.length === 0) return file;

@@ -35,7 +35,7 @@ import { type CommentActions, CommentActionsContext, type CommentsApi, CommentsC
 import { CommitBar, CommitList, CompareControls, refLabel, RepoComparisons } from "./Compare";
 import { ConversationsButton, ConversationsPanel, type Place, useConversations } from "./Conversations";
 import { hasLine } from "./DiffTable";
-import { FileCard, FileLoader } from "./FileCard";
+import { FileCard, FileLoader, RawUrl, unreadAdded } from "./FileCard";
 import { dirPaths, FileTree, type TreeEntry, withDirsOf } from "./FileTree";
 import { FoldIcon, WholeWordIcon } from "./icons";
 import { go, KeyboardButton, ShortcutHelp, stepSection, useShortcuts } from "./keyboard";
@@ -235,7 +235,10 @@ export function App({ viewId }: Props) {
     },
     [viewId],
   );
-  const codeUrl = useCallback((path: string) => rawFileUrl(viewId ?? "", requested.current, version.current ?? "", path), [viewId]);
+  const codeUrl = useCallback(
+    (path: string, old?: boolean) => rawFileUrl(viewId ?? "", requested.current, version.current ?? "", path, old),
+    [viewId],
+  );
 
   const showCode = useCallback((stack: Peek[], push: boolean) => {
     const state = { ...(history.state as object | null), code: toSave(stack) };
@@ -632,7 +635,7 @@ export function App({ viewId }: Props) {
       if (fileIndex < 0) return inCode ? { tab: "code", rank: topics.length + entries.length } : null;
       const { file } = entries[fileIndex]!;
       const rank = topicTab ? topics.length + fileIndex : fileIndex;
-      if (anchor.side !== null && !file.lazy && !(shownVersion && hasLine(file.hunks, anchor.side, anchor.end))) {
+      if (anchor.side !== null && !file.lazy && !unreadAdded(file) && !(shownVersion && hasLine(file.hunks, anchor.side, anchor.end))) {
         return inCode ? { tab: "code", rank } : null;
       }
       if (!topicTab) return { tab: "files", rank };
@@ -798,196 +801,198 @@ export function App({ viewId }: Props) {
 
   return (
     <FileLoader.Provider value={loadFile}>
-      <FindDefinitionContext.Provider value={findDefinition}>
-        <CommentActionsContext.Provider value={actions}>
-          <CommentsContext.Provider value={commentsValue}>
-            <div className="app">
-              <header className="topbar">
-                <div className={`loading-bar${switching ? " is-active" : ""}`} aria-hidden="true" />
-                <SidebarToggle open={sidebarOpen} onToggle={() => setSidebarOpen((o) => !o)} />
-                <div className="topbar-title">
-                  <CompareControls diff={diff} loadRefs={loadRefs} onCompare={compareWith} />
-                  <RepoComparisons diff={diff} loadRefs={loadRefs} onCompare={compareWith} />
-                </div>
-                <ChangeStats files={diff.files} />
-                <RefreshButton stale={stale} loading={loading} onClick={() => void load(requested.current)} />
-                <span className="spacer" />
-                <ViewTabs view={view} commitCount={stepping?.count ?? diff.commitCount} onSelect={setTab} />
-                <ConversationsButton
-                  conv={conv}
-                  shown={conv.open && !codeTop}
-                  onClick={() => {
-                    closeCode();
-                    conv.setOpen((o) => codeTop !== null || !o);
-                  }}
-                />
-                <KeyboardButton onClick={() => setHelp(true)} />
-                <ThemeToggle />
-                <ClaudeStatus state={claude} since={status?.workingSince ?? null} />
-                <SubmitReview pending={pendingComments} state={claude} onSubmit={submit} onOpen={conv.reveal} />
-              </header>
+      <RawUrl.Provider value={codeUrl}>
+        <FindDefinitionContext.Provider value={findDefinition}>
+          <CommentActionsContext.Provider value={actions}>
+            <CommentsContext.Provider value={commentsValue}>
+              <div className="app">
+                <header className="topbar">
+                  <div className={`loading-bar${switching ? " is-active" : ""}`} aria-hidden="true" />
+                  <SidebarToggle open={sidebarOpen} onToggle={() => setSidebarOpen((o) => !o)} />
+                  <div className="topbar-title">
+                    <CompareControls diff={diff} loadRefs={loadRefs} onCompare={compareWith} />
+                    <RepoComparisons diff={diff} loadRefs={loadRefs} onCompare={compareWith} />
+                  </div>
+                  <ChangeStats files={diff.files} />
+                  <RefreshButton stale={stale} loading={loading} onClick={() => void load(requested.current)} />
+                  <span className="spacer" />
+                  <ViewTabs view={view} commitCount={stepping?.count ?? diff.commitCount} onSelect={setTab} />
+                  <ConversationsButton
+                    conv={conv}
+                    shown={conv.open && !codeTop}
+                    onClick={() => {
+                      closeCode();
+                      conv.setOpen((o) => codeTop !== null || !o);
+                    }}
+                  />
+                  <KeyboardButton onClick={() => setHelp(true)} />
+                  <ThemeToggle />
+                  <ClaudeStatus state={claude} since={status?.workingSince ?? null} />
+                  <SubmitReview pending={pendingComments} state={claude} onSubmit={submit} onOpen={conv.reveal} />
+                </header>
 
-              {error && <div className="banner">{error.message}</div>}
+                {error && <div className="banner">{error.message}</div>}
 
-              <div className={`layout${codeTop ? " with-code" : conv.open ? " with-conversations" : ""}${sidebarOpen ? "" : " no-sidebar"}`}>
-                <aside className="sidebar" hidden={!sidebarOpen}>
-                  <div className="view">
-                    <div className="filter-row">
-                      <input
-                        className="filter"
-                        type="search"
-                        placeholder="Filter files"
-                        value={filter}
-                        onChange={(e) => setFilter(e.target.value)}
-                        aria-label="Filter files"
-                      />
-                      {canFold && !searched.trim() && (
-                        <button
-                          className="icon-button"
-                          aria-label={anyDirOpen ? "Collapse all folders" : unfoldLabel}
-                          title={anyDirOpen ? "Collapse all folders" : unfoldLabel}
-                          onClick={foldAll}
-                        >
-                          <FoldIcon fold={anyDirOpen} />
-                        </button>
-                      )}
-                    </div>
-                    <div className="filter-row">
-                      <div className="search-box">
+                <div className={`layout${codeTop ? " with-code" : conv.open ? " with-conversations" : ""}${sidebarOpen ? "" : " no-sidebar"}`}>
+                  <aside className="sidebar" hidden={!sidebarOpen}>
+                    <div className="view">
+                      <div className="filter-row">
                         <input
                           className="filter"
                           type="search"
-                          placeholder="Search the code"
-                          value={query}
-                          onChange={(e) => {
-                            setQuery(e.target.value);
-                            setHit(null);
-                          }}
-                          onKeyDown={(e) => {
-                            if (e.key !== "Enter" || e.nativeEvent.isComposing) return;
-                            e.preventDefault();
-                            stepHit(e.shiftKey ? -1 : 1);
-                          }}
-                          aria-label="Search the diff and the repository"
-                          title="Searches the changed lines and every file of the compared version. A name is found in every spelling of it: userId also finds user_id and user-id. Enter goes to the next match, Shift+Enter to the previous one."
+                          placeholder="Filter files"
+                          value={filter}
+                          onChange={(e) => setFilter(e.target.value)}
+                          aria-label="Filter files"
                         />
-                        <button
-                          className="search-option"
-                          aria-pressed={wholeWord}
-                          aria-label="Match whole word"
-                          title={wholeWord ? "Matching whole words only. Click to also match parts of words." : "Matching parts of words. Click to match whole words only."}
-                          onClick={() => {
-                            setWholeWord((w) => !w);
-                            setHit(null);
-                          }}
-                        >
-                          <WholeWordIcon />
-                        </button>
+                        {canFold && !searched.trim() && (
+                          <button
+                            className="icon-button"
+                            aria-label={anyDirOpen ? "Collapse all folders" : unfoldLabel}
+                            title={anyDirOpen ? "Collapse all folders" : unfoldLabel}
+                            onClick={foldAll}
+                          >
+                            <FoldIcon fold={anyDirOpen} />
+                          </button>
+                        )}
                       </div>
+                      <div className="filter-row">
+                        <div className="search-box">
+                          <input
+                            className="filter"
+                            type="search"
+                            placeholder="Search the code"
+                            value={query}
+                            onChange={(e) => {
+                              setQuery(e.target.value);
+                              setHit(null);
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key !== "Enter" || e.nativeEvent.isComposing) return;
+                              e.preventDefault();
+                              stepHit(e.shiftKey ? -1 : 1);
+                            }}
+                            aria-label="Search the diff and the repository"
+                            title="Searches the changed lines and every file of the compared version. A name is found in every spelling of it: userId also finds user_id and user-id. Enter goes to the next match, Shift+Enter to the previous one."
+                          />
+                          <button
+                            className="search-option"
+                            aria-pressed={wholeWord}
+                            aria-label="Match whole word"
+                            title={wholeWord ? "Matching whole words only. Click to also match parts of words." : "Matching parts of words. Click to match whole words only."}
+                            onClick={() => {
+                              setWholeWord((w) => !w);
+                              setHit(null);
+                            }}
+                          >
+                            <WholeWordIcon />
+                          </button>
+                        </div>
+                      </div>
+                      {searched.trim() ? (
+                        <SearchResults definitions={definitions} sections={sections} note={searchNote} current={hit} onOpen={openHit} />
+                      ) : treeList ? (
+                        <FileTree
+                          entries={treeList}
+                          isViewed={topicTab ? isTopicFileViewed : isViewed}
+                          onSelect={onPick}
+                          isOpen={isOpen}
+                          onToggle={browsing ? toggleOpen : toggleDir}
+                          current={allFiles ? codePath : null}
+                          marked={allFiles}
+                        />
+                      ) : (
+                        <p className="tree-empty">
+                          {repoTree?.version === loadedVersion && repoTree.error ? `Could not list the files: ${repoTree.error}` : "Listing the files…"}
+                        </p>
+                      )}
                     </div>
-                    {searched.trim() ? (
-                      <SearchResults definitions={definitions} sections={sections} note={searchNote} current={hit} onOpen={openHit} />
-                    ) : treeList ? (
-                      <FileTree
-                        entries={treeList}
-                        isViewed={topicTab ? isTopicFileViewed : isViewed}
-                        onSelect={onPick}
-                        isOpen={isOpen}
-                        onToggle={browsing ? toggleOpen : toggleDir}
-                        current={allFiles ? codePath : null}
-                        marked={allFiles}
-                      />
-                    ) : (
-                      <p className="tree-empty">
-                        {repoTree?.version === loadedVersion && repoTree.error ? `Could not list the files: ${repoTree.error}` : "Listing the files…"}
-                      </p>
-                    )}
-                  </div>
-                </aside>
+                  </aside>
 
-                <main className={`files${switching ? " is-switching" : ""}`}>
-                  {view !== "code" &&
-                    repoFailures(diff.repos).map((f) => (
-                      <p key={f.error} className="file-note inline">
-                        Not compared in {f.dirs.join(", ")}: {f.error}
-                      </p>
-                    ))}
-                  {stepping && view !== "commits" && view !== "code" && (
-                    <CommitBar commits={stepping.commits} count={stepping.count} index={stepIndex} onView={viewCommit} onAll={showAllCommits} />
-                  )}
-                  {(view === "topics" || view === "files") && diff.files.length === 0 && <Notice title="No changes">{noChanges(diff)}</Notice>}
-                  {visited.current.has("topics") && (
-                    <div className="view" hidden={view !== "topics"}>
-                      <ReviewBar
-                        reviews={reviews}
-                        review={review}
-                        grouping={grouping}
-                        repoRoot={diff.repoRoot}
-                        hasChanges={diff.files.length > 0}
-                        onPick={(r) => showReview(r, r.createdAt)}
-                        onGroup={group}
-                        onRemove={removeReview}
-                      />
-                      {topics.map((t) => (
-                        <TopicSection
-                          key={t.key}
-                          topic={t}
-                          viewed={isTopicViewed(t)}
-                          opening={opening}
-                          onToggleViewed={() => toggleTopicViewed(t)}
-                        />
+                  <main className={`files${switching ? " is-switching" : ""}`}>
+                    {view !== "code" &&
+                      repoFailures(diff.repos).map((f) => (
+                        <p key={f.error} className="file-note inline">
+                          Not compared in {f.dirs.join(", ")}: {f.error}
+                        </p>
                       ))}
-                    </div>
-                  )}
-                  {visited.current.has("files") && diff.files.length > 0 && (
-                    <div className="view" hidden={view !== "files"}>
-                      {shown.map(({ file, anchor }) => (
-                        <FileCard
-                          key={file.path}
-                          file={file}
-                          anchor={anchor}
-                          viewed={isViewed(file)}
-                          onToggleViewed={toggleViewed}
+                    {stepping && view !== "commits" && view !== "code" && (
+                      <CommitBar commits={stepping.commits} count={stepping.count} index={stepIndex} onView={viewCommit} onAll={showAllCommits} />
+                    )}
+                    {(view === "topics" || view === "files") && diff.files.length === 0 && <Notice title="No changes">{noChanges(diff)}</Notice>}
+                    {visited.current.has("topics") && (
+                      <div className="view" hidden={view !== "topics"}>
+                        <ReviewBar
+                          reviews={reviews}
+                          review={review}
+                          grouping={grouping}
+                          repoRoot={diff.repoRoot}
+                          hasChanges={diff.files.length > 0}
+                          onPick={(r) => showReview(r, r.createdAt)}
+                          onGroup={group}
+                          onRemove={removeReview}
                         />
-                      ))}
-                    </div>
-                  )}
-                  {visited.current.has("commits") && diff.commits.length > 0 && (
-                    <div className="view" hidden={view !== "commits"}>
-                      <CommitList
-                        commits={stepping?.commits ?? diff.commits}
-                        count={stepping?.count ?? diff.commitCount}
-                        current={stepping ? diff.head : null}
-                        onView={viewCommit}
-                        onAll={showAllCommits}
-                      />
-                    </div>
-                  )}
-                  {view === "code" && (
-                    <div className="view">{codeFile ? codePanel(codeFile, true) : <p className="code-empty">Pick a file in the tree to read it.</p>}</div>
-                  )}
-                </main>
+                        {topics.map((t) => (
+                          <TopicSection
+                            key={t.key}
+                            topic={t}
+                            viewed={isTopicViewed(t)}
+                            opening={opening}
+                            onToggleViewed={() => toggleTopicViewed(t)}
+                          />
+                        ))}
+                      </div>
+                    )}
+                    {visited.current.has("files") && diff.files.length > 0 && (
+                      <div className="view" hidden={view !== "files"}>
+                        {shown.map(({ file, anchor }) => (
+                          <FileCard
+                            key={file.path}
+                            file={file}
+                            anchor={anchor}
+                            viewed={isViewed(file)}
+                            onToggleViewed={toggleViewed}
+                          />
+                        ))}
+                      </div>
+                    )}
+                    {visited.current.has("commits") && diff.commits.length > 0 && (
+                      <div className="view" hidden={view !== "commits"}>
+                        <CommitList
+                          commits={stepping?.commits ?? diff.commits}
+                          count={stepping?.count ?? diff.commitCount}
+                          current={stepping ? diff.head : null}
+                          onView={viewCommit}
+                          onAll={showAllCommits}
+                        />
+                      </div>
+                    )}
+                    {view === "code" && (
+                      <div className="view">{codeFile ? codePanel(codeFile, true) : <p className="code-empty">Pick a file in the tree to read it.</p>}</div>
+                    )}
+                  </main>
+                </div>
+                {codeTop ? codePanel(codeTop, false) : conv.open && <ConversationsPanel conv={conv} />}
               </div>
-              {codeTop ? codePanel(codeTop, false) : conv.open && <ConversationsPanel conv={conv} />}
-            </div>
-            {help && <ShortcutHelp onClose={() => setHelp(false)} />}
-            {lookup && (
-              <DefinitionMenu
-                lookup={lookup}
-                onPick={(h) => {
-                  closeLookup();
-                  openCode(h.path, h.no, lookup.from, lookup.name);
-                }}
-                onSearch={() => {
-                  searchFor(lookup.name);
-                  closeLookup();
-                }}
-                onClose={closeLookup}
-              />
-            )}
-          </CommentsContext.Provider>
-        </CommentActionsContext.Provider>
-      </FindDefinitionContext.Provider>
+              {help && <ShortcutHelp onClose={() => setHelp(false)} />}
+              {lookup && (
+                <DefinitionMenu
+                  lookup={lookup}
+                  onPick={(h) => {
+                    closeLookup();
+                    openCode(h.path, h.no, lookup.from, lookup.name);
+                  }}
+                  onSearch={() => {
+                    searchFor(lookup.name);
+                    closeLookup();
+                  }}
+                  onClose={closeLookup}
+                />
+              )}
+            </CommentsContext.Provider>
+          </CommentActionsContext.Provider>
+        </FindDefinitionContext.Provider>
+      </RawUrl.Provider>
     </FileLoader.Provider>
   );
 }

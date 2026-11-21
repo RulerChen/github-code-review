@@ -400,7 +400,7 @@ export class ReviewServer {
         const { version, diff } = await this.loadDiff(view.repo, compare);
         if (version !== query.get("version")) return sendJson(res, 409, { error: "The diff changed. Load the new changes first." });
         const filePath = query.get("path") ?? "";
-        const file = await openRepoFile(diff, filePath);
+        const file = await openRepoFile(diff, filePath, query.get("side") === "old");
         if (!file) return sendJson(res, 404, { error: `${filePath} is not in the compared version.` });
         res.writeHead(200, {
           "Content-Type": imageTypeOf(filePath) ?? "application/octet-stream",

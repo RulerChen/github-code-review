@@ -47,6 +47,7 @@ export interface FileDiff {
   generated: boolean;
   lazy: boolean;
   diffTooLarge: boolean;
+  size: number | null;
   modeChange: { from: string; to: string } | null;
   additions: number;
   deletions: number;

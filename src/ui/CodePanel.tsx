@@ -232,7 +232,7 @@ export function CodePanel({ peek, file, revision, version, load, raw, trail, onG
           <p className="file-note">{note}</p>
         ) : image ? (
           <div className="code-image">
-            <img src={raw(path)} alt={basename(path)} onError={() => setBroken(key)} />
+            <img className="image-view" src={raw(path)} alt={basename(path)} onError={() => setBroken(key)} />
           </div>
         ) : (
           <DiffTable path={path} hunks={hunks} oldTokens={null} newTokens={newTokens} threads={threads} onExpand={expand} single panel={!full} />

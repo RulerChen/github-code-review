@@ -79,8 +79,11 @@ export async function fetchRepoFile(viewId: string, compare: Comparison | null, 
   return (await request<{ file: RepoFile }>(`${viewUrl(viewId, "blob")}?${fileQuery(compare, version, path)}`, (b) => !!b.file)).file;
 }
 
-export const rawFileUrl = (viewId: string, compare: Comparison | null, version: string, path: string) =>
-  `${viewUrl(viewId, "raw")}?${fileQuery(compare, version, path)}`;
+export function rawFileUrl(viewId: string, compare: Comparison | null, version: string, path: string, old = false): string {
+  const params = fileQuery(compare, version, path);
+  if (old) params.set("side", "old");
+  return `${viewUrl(viewId, "raw")}?${params}`;
+}
 
 export async function fetchBytes(url: string): Promise<Uint8Array> {
   let res: Response;

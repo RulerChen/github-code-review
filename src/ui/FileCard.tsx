@@ -2,8 +2,9 @@ import { createContext, memo, useCallback, useContext, useEffect, useLayoutEffec
 import { flushSync } from "react-dom";
 import { buildHunks, splitLines } from "../shared/hunks";
 import type { Block, DiffLine, DisplayHunk, Expansion, FileDiff, Thread } from "../shared/types";
-import { sum } from "../shared/util";
+import { imageTypeOf, sum } from "../shared/util";
 import { keepHeaderInPlace, keepInPlace } from "./anchor";
+import { fetchBytes } from "./api";
 import { focusForm, onShownVersion, ThreadList, useComments } from "./comments";
 import { CollapseButton, CommentButton, CopyButton, ViewedToggle } from "./controls";
 import { DiffTable, hasLine, type OnExpand, toSplitRows, twoExpanders } from "./DiffTable";
@@ -69,6 +70,10 @@ function settleSoon(): void {
 }
 
 export const FileLoader = createContext<(path: string) => Promise<void>>(async () => {});
+export const RawUrl = createContext<(path: string, old?: boolean) => string>(() => "");
+
+export const unreadAdded = (file: FileDiff) => file.tooLarge && file.status === "added" && file.blocks.length === 0;
+const isImage = (file: FileDiff) => imageTypeOf(file.path) !== null && (file.binary || unreadAdded(file));
 
 interface Props {
   file: FileDiff;
@@ -78,7 +83,10 @@ interface Props {
   onToggleViewed?: (file: FileDiff) => void;
 }
 
-export const FileCard = memo(function FileCard({ file: next, blocks: nextBlocks = next.blocks, anchor, viewed = false, onToggleViewed }: Props) {
+export const FileCard = memo(function FileCard({ file: given, blocks: givenBlocks, anchor, viewed = false, onToggleViewed }: Props) {
+  const [whole, setWhole] = useState<{ of: FileDiff; file: FileDiff } | null>(null);
+  const next = whole?.of === given ? whole.file : given;
+  const nextBlocks = given.blocks.length > 0 ? (givenBlocks ?? given.blocks) : next.blocks;
   const [collapsed, setCollapsed] = useState(viewed);
   const [forceLoad, setForceLoad] = useState(false);
   const [expansion, setExpansion] = useState(NO_EXPANSION);
@@ -87,11 +95,15 @@ export const FileCard = memo(function FileCard({ file: next, blocks: nextBlocks 
   useEffect(() => setCollapsed(viewed), [viewed]);
 
   const { lineCount, charCount } = useMemo(() => sizeOf(baseHunksOf(next, nextBlocks)), [next, nextBlocks]);
-  const deferred = (next.generated || next.diffTooLarge || lineCount > AUTO_LOAD_LINES || charCount > AUTO_LOAD_CHARS) && !forceLoad;
+  const deferred = (next.generated || next.diffTooLarge || unreadAdded(next) || lineCount > AUTO_LOAD_LINES || charCount > AUTO_LOAD_CHARS) && !forceLoad;
   const loadFile = useContext(FileLoader);
-  const loading = useAction(() => loadFile(next.path));
+  const raw = useContext(RawUrl);
+  const loading = useAction(async () => {
+    if (next.lazy) return loadFile(next.path);
+    setWhole({ of: given, file: readAdded(given, await fetchBytes(raw(given.path))) });
+  });
   useEffect(() => {
-    if (forceLoad && next.lazy) void loading.run();
+    if (forceLoad && (next.lazy || (unreadAdded(next) && !isImage(next)))) void loading.run();
   }, [forceLoad, next]);
   const { file, blocks, tokens } = useShown(next, nextBlocks, near && !collapsed && !deferred);
   const partial = blocks !== file.blocks;
@@ -119,7 +131,7 @@ export const FileCard = memo(function FileCard({ file: next, blocks: nextBlocks 
     const thread = peekReveal();
     if (!thread || thread.anchor.path !== file.path) return;
     const { anchor } = thread;
-    if (anchor.side !== null && !file.lazy && !(onShownVersion(thread, versions) && hasLine(hunks, anchor.side, anchor.end))) return;
+    if (anchor.side !== null && !file.lazy && !unreadAdded(file) && !(onShownVersion(thread, versions) && hasLine(hunks, anchor.side, anchor.end))) return;
     setCollapsed(false);
     setNear(true);
     if (anchor.side !== null) setForceLoad(true);
@@ -186,7 +198,7 @@ export const FileCard = memo(function FileCard({ file: next, blocks: nextBlocks 
               keepHeaderInPlace(header.current, () => {
                 setCollapsed(!viewed);
                 setNear(true);
-                onToggleViewed(next);
+                onToggleViewed(given);
               })
             }
           />
@@ -244,17 +256,19 @@ function FileBody({
   tokens: Tokens;
   threads: Thread[];
 }) {
+  if (isImage(file)) return <ImageDiff file={file} />;
   if (file.binary) return <p className="file-note">Binary file not shown.</p>;
-  if (hunks.length === 0 && !file.lazy) {
-    if (file.tooLarge) return <p className="file-note">File too large to display.</p>;
+  if (hunks.length === 0 && !file.lazy && !unreadAdded(file)) {
     if (file.modeChange) return <p className="file-note">File mode changed from {file.modeChange.from} to {file.modeChange.to}.</p>;
     if (file.status === "renamed") return <p className="file-note">File renamed without changes.</p>;
     return <p className="file-note">Empty file.</p>;
   }
   if (deferred) {
-    const size = file.diffTooLarge
-      ? `${(file.additions + file.deletions).toLocaleString()} changed lines`
-      : `${lineCount.toLocaleString()} lines, ${Math.ceil(charCount / 1024).toLocaleString()} KB`;
+    const size = unreadAdded(file)
+      ? `${((file.size ?? 0) / 1024 / 1024).toFixed(1)} MB`
+      : file.diffTooLarge
+        ? `${(file.additions + file.deletions).toLocaleString()} changed lines`
+        : `${lineCount.toLocaleString()} lines, ${Math.ceil(charCount / 1024).toLocaleString()} KB`;
     return (
       <div className="file-note">
         {file.generated ? "Generated file" : `Large diff (${size})`} not rendered by default.{" "}
@@ -264,7 +278,7 @@ function FileBody({
       </div>
     );
   }
-  if (file.lazy) return <p className="file-note">{loadError ? `Could not load the diff: ${loadError}` : "Loading diff…"}</p>;
+  if (file.lazy || unreadAdded(file)) return <p className="file-note">{loadError ? `Could not load the diff: ${loadError}` : "Loading diff…"}</p>;
 
   return (
     <>
@@ -279,6 +293,49 @@ function FileBody({
       </div>
     </>
   );
+}
+
+function ImageDiff({ file }: { file: FileDiff }) {
+  const raw = useContext(RawUrl);
+  return (
+    <div className="image-diff">
+      {file.status !== "added" && <DiffImage src={raw(file.path, true)} side="old" />}
+      {file.status !== "deleted" && <DiffImage src={raw(file.path)} side="new" />}
+    </div>
+  );
+}
+
+function DiffImage({ src, side }: { src: string; side: "old" | "new" }) {
+  const [broken, setBroken] = useState<string | null>(null);
+  return (
+    <div className={`image-side is-${side}`}>
+      {broken === src ? (
+        <p className="file-note">Could not show the image.</p>
+      ) : (
+        <img className="image-view" src={src} alt={side === "old" ? "Before" : "After"} loading="lazy" onError={() => setBroken(src)} />
+      )}
+    </div>
+  );
+}
+
+function readAdded(file: FileDiff, bytes: Uint8Array): FileDiff {
+  if (bytes.subarray(0, 8000).includes(0)) return { ...file, binary: true, tooLarge: false };
+  const text = new TextDecoder().decode(bytes);
+  const lines = splitLines(text);
+  const block: Block = {
+    id: `file:${file.path}`,
+    oldStart: 0,
+    oldCount: 0,
+    newStart: 0,
+    newCount: lines.length,
+    del: [],
+    add: lines,
+    oldNoEol: false,
+    newNoEol: !text.endsWith("\n"),
+    section: "",
+  };
+  const blocks = [block];
+  return { ...file, tooLarge: false, additions: lines.length, blocks, hunks: buildHunks(blocks, null, lines), newContent: text };
 }
 
 function hunksOf(file: FileDiff, blocks: Block[], expansion: Expansion | null): DisplayHunk[] {

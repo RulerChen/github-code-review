@@ -2661,3 +2661,32 @@ button {
   flex: none;
   color: var(--fg-muted);
 }
+
+.image-view {
+  max-width: 100%;
+  height: auto;
+  border: 1px solid var(--border-muted);
+  background: repeating-conic-gradient(var(--bg-subtle) 0 25%, var(--bg) 0 50%) 0 0 / 16px 16px;
+}
+
+.image-diff {
+  display: flex;
+  gap: 16px;
+  padding: 16px;
+}
+
+.image-side {
+  display: flex;
+  flex: 1 1 0;
+  justify-content: center;
+  align-items: flex-start;
+  min-width: 0;
+}
+
+.image-side.is-old .image-view {
+  border-color: var(--danger);
+}
+
+.image-side.is-new .image-view {
+  border-color: var(--success);
+}

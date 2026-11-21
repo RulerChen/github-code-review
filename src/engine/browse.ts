@@ -49,8 +49,15 @@ export async function readRepoFile(diff: DiffResult, filePath: string): Promise<
   return { path: filePath, text: c.kind === "text" ? c.text : null, binary: c.kind === "binary", tooLarge: c.kind === "tooLarge", size };
 }
 
-export async function openRepoFile(diff: DiffResult, filePath: string): Promise<{ size: number; stream: Readable } | null> {
-  const from = sourceOf(diff, filePath);
+function oldSourceOf(diff: DiffResult, filePath: string): { root: string; rest: string; rev: string } | null {
+  const changed = diff.files.find((f) => f.path === filePath);
+  if (!changed || changed.status === "added") return null;
+  const where = repoOf(diff, changed.oldPath ?? changed.path);
+  return where?.repo.oldCommit ? { root: where.root, rest: where.rest, rev: where.repo.oldCommit } : null;
+}
+
+export async function openRepoFile(diff: DiffResult, filePath: string, old = false): Promise<{ size: number; stream: Readable } | null> {
+  const from = old ? oldSourceOf(diff, filePath) : sourceOf(diff, filePath);
   if (!from) return null;
   if (from.rev) {
     const blob = await blobAt(from.root, from.rev, from.rest);

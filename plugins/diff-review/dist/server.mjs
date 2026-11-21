@@ -37313,6 +37313,7 @@ function fileDiff(filePath, fields) {
     generated: false,
     lazy: false,
     diffTooLarge: false,
+    size: null,
     modeChange: null,
     additions: 0,
     deletions: 0,
@@ -37359,7 +37360,7 @@ async function trackedFile(ctx, entry, section) {
 async function untrackedFile(ctx, filePath) {
   const c = await readWorkTree(ctx.root, filePath);
   if (c.kind === "absent") return null;
-  const file2 = fileDiff(filePath, { binary: c.kind === "binary", tooLarge: c.kind === "tooLarge" });
+  const file2 = fileDiff(filePath, { binary: c.kind === "binary", tooLarge: c.kind === "tooLarge", size: c.kind === "tooLarge" ? c.size : null });
   if (c.kind !== "text") return file2;
   const lines = splitLines(c.text);
   if (lines.length === 0) return file2;
@@ -38020,8 +38021,14 @@ async function readRepoFile(diff, filePath) {
   const size = c.kind === "tooLarge" ? c.size : null;
   return { path: filePath, text: c.kind === "text" ? c.text : null, binary: c.kind === "binary", tooLarge: c.kind === "tooLarge", size };
 }
-async function openRepoFile(diff, filePath) {
-  const from = sourceOf(diff, filePath);
+function oldSourceOf(diff, filePath) {
+  const changed = diff.files.find((f) => f.path === filePath);
+  if (!changed || changed.status === "added") return null;
+  const where = repoOf(diff, changed.oldPath ?? changed.path);
+  return where?.repo.oldCommit ? { root: where.root, rest: where.rest, rev: where.repo.oldCommit } : null;
+}
+async function openRepoFile(diff, filePath, old = false) {
+  const from = old ? oldSourceOf(diff, filePath) : sourceOf(diff, filePath);
   if (!from) return null;
   if (from.rev) {
     const blob = await blobAt(from.root, from.rev, from.rest);
@@ -39089,7 +39096,7 @@ var ReviewServer = class {
         const { version: version2, diff } = await this.loadDiff(view.repo, compare);
         if (version2 !== query.get("version")) return sendJson(res, 409, { error: "The diff changed. Load the new changes first." });
         const filePath = query.get("path") ?? "";
-        const file2 = await openRepoFile(diff, filePath);
+        const file2 = await openRepoFile(diff, filePath, query.get("side") === "old");
         if (!file2) return sendJson(res, 404, { error: `${filePath} is not in the compared version.` });
         res.writeHead(200, {
           "Content-Type": imageTypeOf(filePath) ?? "application/octet-stream",
