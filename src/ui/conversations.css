@@ -209,10 +209,6 @@
   font-size: 12px;
 }
 
-.conv-status.is-error {
-  color: var(--danger);
-}
-
 kbd {
   display: inline-block;
   min-width: 18px;

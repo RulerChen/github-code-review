@@ -1,7 +1,7 @@
 import { type SetStateAction, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { lineNumbers } from "../shared/comments";
 import type { Thread, ThreadAnchor } from "../shared/types";
-import { anchorLabel, authorName, type CommentsApi, preview, readableCount, ThreadView } from "./comments";
+import { anchorLabel, authorName, type CommentsApi, preview, ThreadView } from "./comments";
 import { CloseIcon, ConversationIcon } from "./icons";
 import { isOutdated } from "./locate";
 import { basename, comparePaths, dirPrefix } from "./paths";
@@ -36,7 +36,7 @@ export interface Conversations {
 const REVEAL_MS = 1500;
 
 function countUnread(thread: Thread, seen: number): number {
-  return thread.comments.slice(seen, readableCount(thread)).filter((c) => c.author === "claude").length;
+  return thread.comments.slice(seen).filter((c) => c.author === "claude").length;
 }
 
 function byPlace(placeOf: Map<string, Place | null>) {
@@ -92,7 +92,7 @@ export function useConversations({ repoRoot, threads, place, show }: Options): C
   const markRead = useCallback(
     (thread: Thread) => {
       if (!key) return;
-      const n = readableCount(thread);
+      const n = thread.comments.length;
       setSeen((prev) => {
         if ((prev[thread.id] ?? 0) >= n) return prev;
         const next = { ...prev, [thread.id]: n };
@@ -144,7 +144,7 @@ export function useConversations({ repoRoot, threads, place, show }: Options): C
   };
   const markAllRead = () => {
     if (!key) return;
-    const next = Object.fromEntries(threads.map((t) => [t.id, Math.max(seen[t.id] ?? 0, readableCount(t))]));
+    const next = Object.fromEntries(threads.map((t) => [t.id, Math.max(seen[t.id] ?? 0, t.comments.length)]));
     writeStorage(key, next);
     setSeen(next);
   };
@@ -228,8 +228,7 @@ export function ConversationsPanel({ conv }: { conv: Conversations }) {
       {ordered.length === 0 ? (
         <p className="conversations-empty">
           No conversations yet. Click a line number to comment on lines, or the comment button in a file's or topic's
-          header to comment on all of it. Mention @claude to ask a question. Other comments go to Claude, which changes
-          the code the way they ask.
+          header to comment on all of it. Comments go to Claude, which answers them and changes the code the way they ask.
         </p>
       ) : (
         <ul className="conversations-list">
@@ -302,8 +301,6 @@ function ConversationItem({ thread, inDiff, current, unread, onOpen }: ItemProps
             <strong>{authorName(last)}:</strong> {preview(last.body)}
           </span>
         )}
-        {last?.status === "pending" && <span className="conv-status">{last.activity ? `${last.activity}…` : "Claude is writing…"}</span>}
-        {last?.status === "error" && <span className="conv-status is-error">Claude could not answer.</span>}
       </button>
     </li>
   );

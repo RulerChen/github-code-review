@@ -1,5 +1,5 @@
 import { createContext, type FormEvent, type KeyboardEvent, memo, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { lineRange, MENTION } from "../shared/comments";
+import { lineRange } from "../shared/comments";
 import type { FileAnchor, LineAnchor, Thread, ThreadAnchor, ThreadComment, TopicAnchor } from "../shared/types";
 import { plural } from "../shared/util";
 import { keepInPlace, pin } from "./anchor";
@@ -72,11 +72,6 @@ export const unmark = (snippet: string) =>
 
 const suggestionLines = (thread: Thread) => (thread.anchor.side === "new" ? unmark(thread.snippet) : undefined);
 
-export function readableCount(thread: Thread): number {
-  const i = thread.comments.findIndex((c) => c.status === "pending");
-  return i < 0 ? thread.comments.length : i;
-}
-
 export const onShownVersion = (thread: Thread, versions: CommentsApi["versions"]) =>
   thread.anchor.side === null || thread.anchor.commit === versions(thread.anchor.path)[thread.anchor.side];
 
@@ -124,7 +119,6 @@ function CommentForm({ placeholder, initial = "", editing = false, lines, onSubm
   const { pending } = useComments();
   const [text, setText] = useState(initial);
   const [preview, setPreview] = useState<number | null>(null);
-  const asking = !editing && MENTION.test(text);
 
   const form = useRef<HTMLFormElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
@@ -198,11 +192,9 @@ function CommentForm({ placeholder, initial = "", editing = false, lines, onSubm
     action();
   };
 
-  const otherTitle = asking
-    ? "A comment that mentions @claude is answered right away."
-    : pending
-      ? "Send only this comment to Claude now, without the pending review."
-      : "Send this comment to Claude now instead of starting a review.";
+  const otherTitle = pending
+    ? "Send only this comment to Claude now, without the pending review."
+    : "Send this comment to Claude now instead of starting a review.";
 
   return (
     <form
@@ -265,26 +257,18 @@ function CommentForm({ placeholder, initial = "", editing = false, lines, onSubm
         )}
       </div>
       <div className="comment-form-actions">
-        {editing ? (
-          <span className="comment-hint" />
-        ) : (
-          <Either
-            className="comment-hint"
-            show={asking ? 0 : 1}
-            texts={["Claude answers here right away.", "Mention @claude to ask instead of changing code."]}
-          />
-        )}
+        <span className="comment-hint" />
         <span className="comment-form-buttons">
           <button type="button" className="button" onClick={onCancel}>
             Cancel
           </button>
           {!editing && (
-            <button type="button" className="button" onClick={() => submit(true)} disabled={!ready || asking} title={otherTitle}>
+            <button type="button" className="button" onClick={() => submit(true)} disabled={!ready} title={otherTitle}>
               Send now
             </button>
           )}
           <button type="submit" className="button primary" disabled={!ready}>
-            {editing ? "Save" : <Either show={asking ? 0 : pending ? 2 : 1} texts={["Ask Claude", "Start a review", "Add review comment"]} />}
+            {editing ? "Save" : <Either show={pending ? 1 : 0} texts={["Start a review", "Add review comment"]} />}
           </button>
         </span>
       </div>
@@ -293,9 +277,9 @@ function CommentForm({ placeholder, initial = "", editing = false, lines, onSubm
   );
 }
 
-function Either({ show, texts, className }: { show: number; texts: string[]; className?: string }) {
+function Either({ show, texts }: { show: number; texts: string[] }) {
   return (
-    <span className={`either${className ? ` ${className}` : ""}`}>
+    <span className="either">
       {texts.map((t, i) => (
         <span key={i} aria-hidden={i !== show}>
           {t}
@@ -518,10 +502,7 @@ const CommentView = memo(function CommentView({ thread, comment: c, first, editi
           onCancel={() => setEditing(null)}
         />
       ) : (
-        <>
-          {c.status === "error" ? <p className="comment-error">{c.body}</p> : c.body && <Markdown text={c.body} base={suggestionLines(thread)} />}
-          {c.status === "pending" && <p className="comment-activity">{c.activity ? `${c.activity}…` : "Writing…"}</p>}
-        </>
+        c.body && <Markdown text={c.body} base={suggestionLines(thread)} />
       )}
     </div>
   );

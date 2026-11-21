@@ -108,20 +108,12 @@ export function fetchRefs(viewId: string, repo: string | null = null): Promise<R
   return request<RefList>(url, (b) => Array.isArray(b.branches));
 }
 
-export function createThread(
-  viewId: string,
-  compare: Comparison | null,
-  anchor: ThreadAnchor,
-  snippet: string,
-  context: ThreadContext | null,
-  body: string,
-  single: boolean,
-): Promise<Thread> {
-  return threadRequest(withComparison(viewUrl(viewId, "threads"), compare), "POST", { anchor, snippet, context, body, single });
+export function createThread(viewId: string, anchor: ThreadAnchor, snippet: string, context: ThreadContext | null, body: string, single: boolean): Promise<Thread> {
+  return threadRequest(viewUrl(viewId, "threads"), "POST", { anchor, snippet, context, body, single });
 }
 
-export function replyToThread(viewId: string, compare: Comparison | null, threadId: string, body: string, single: boolean): Promise<Thread> {
-  return threadRequest(withComparison(viewUrl(viewId, "threads", threadId, "comments"), compare), "POST", { body, single });
+export function replyToThread(viewId: string, threadId: string, body: string, single: boolean): Promise<Thread> {
+  return threadRequest(viewUrl(viewId, "threads", threadId, "comments"), "POST", { body, single });
 }
 
 export function editComment(viewId: string, threadId: string, commentId: string, body: string): Promise<Thread> {

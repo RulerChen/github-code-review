@@ -79,12 +79,7 @@ export function formatReviewComments(threads: Thread[], submissions: Submission[
   const numbers = new Set(reviews.map((s) => s.n));
   const submitted = threads.filter((t) => t.comments.some((c) => c.review !== null && numbers.has(c.review)));
   const drafts = withDrafts ? threads.filter((t) => !submitted.includes(t) && t.comments.some((c) => c.draft)) : [];
-  const asked = withDrafts
-    ? threads.filter(
-        (t) => t.comments.some((c) => c.author === "user") && t.comments.every((c) => c.author !== "user" || (!c.draft && c.review === null)),
-      )
-    : [];
-  if (!reviews.length && !drafts.length && !asked.length) return null;
+  if (!reviews.length && !drafts.length) return null;
 
   const out: string[] = [];
   const section = (title: string, list: Thread[], showDrafts: boolean) =>
@@ -97,14 +92,13 @@ export function formatReviewComments(threads: Thread[], submissions: Submission[
 
   if (reviews.length) section(`Comments in ${plural(submitted.length, "thread")}:`, submitted, withDrafts);
   if (drafts.length) section(`\nDraft comments the user has not submitted yet, in ${plural(drafts.length, "thread")}:`, drafts, true);
-  if (asked.length) section(`\nQuestions the user asked @claude, answered in the page, in ${plural(asked.length, "thread")}:`, asked, true);
   return out.join("\n");
 }
 
 function formatThread(t: Thread, withDrafts: boolean): string {
   const { anchor } = t;
   const comments = t.comments
-    .filter((c) => c.status === "done" && (withDrafts || !c.draft))
+    .filter((c) => withDrafts || !c.draft)
     .map((c) => {
       const who = c.author === "claude" ? "Claude" : c.draft ? "User (draft)" : c.review ? `User (review ${c.review})` : "User";
       return `  ${who}: ${indent(c.body, "    ").trimStart()}`;

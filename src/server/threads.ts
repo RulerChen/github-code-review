@@ -1,18 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { lineRange, MENTION } from "../shared/comments.js";
-import { describeComparison } from "../shared/comparison.js";
-import type { Comparison, Thread, ThreadAnchor, ThreadComment, ThreadContext } from "../shared/types.js";
-import { errorMessage } from "../shared/util.js";
-import { ask } from "./claude.js";
-
-const EMIT_INTERVAL_MS = 100;
-const REVIEWING = "The user is reviewing the code changes in a diff viewer";
-const STOPPED = "The viewer stopped before Claude answered. Ask again for an answer.";
-const ANSWER =
-  "Answer the last comment in the language it is written in, the way a colleague replies in a review thread: go straight to the answer and stop once the question is answered. " +
-  "Write a short paragraph of plain sentences. Use more than one paragraph, a list, a table or a code block only when the comment asks for that much. " +
-  "Do not add notes on other things you noticed in the code, or advice they did not ask for. " +
-  "To check details you can read files, run read-only git commands such as git diff, git log and git show, and search or fetch the web. Do not change anything.";
+import type { Thread, ThreadAnchor, ThreadComment, ThreadContext } from "../shared/types.js";
 
 const newId = () => randomBytes(6).toString("base64url");
 const now = () => new Date().toISOString();
@@ -30,8 +17,6 @@ export class RepoThreads {
   parentSession: string | null = null;
   onChange: () => void = () => {};
 
-  private fork: { parent: string | null; session: string | null } | null = null;
-  private queue: Promise<void> = Promise.resolve();
   private readonly listeners = new Set<(thread: Thread) => void>();
   private readonly listeningListeners = new Set<(listening: boolean) => void>();
   private readonly waiters = new Set<(s: Submission) => void>();
@@ -53,12 +38,6 @@ export class RepoThreads {
   }
 
   restore(threads: Thread[], submissions: Submission[], read: number): void {
-    for (const c of threads.flatMap((t) => t.comments)) {
-      if (c.status !== "pending") continue;
-      c.status = "error";
-      c.body = STOPPED;
-      c.activity = null;
-    }
     this.threads.push(...threads);
     this.submissions.push(...submissions);
     this.read = read;
@@ -69,15 +48,15 @@ export class RepoThreads {
     this.onChange();
   }
 
-  create(anchor: ThreadAnchor, snippet: string, context: ThreadContext | null, body: string, single: boolean, shown: Comparison): Thread {
+  create(anchor: ThreadAnchor, snippet: string, context: ThreadContext | null, body: string, single: boolean): Thread {
     const thread: Thread = { id: newId(), rev: 0, anchor, snippet, context, comments: [] };
     this.threads.push(thread);
-    this.addComment(thread, body, single, shown);
+    this.addComment(thread, body, single);
     return thread;
   }
 
   addNote(anchor: ThreadAnchor, snippet: string, context: ThreadContext | null, body: string, noteOf: string): void {
-    const thread: Thread = { id: newId(), rev: 0, anchor, snippet, context, comments: [comment("claude", body, "done")], noteOf };
+    const thread: Thread = { id: newId(), rev: 0, anchor, snippet, context, comments: [comment("claude", body)], noteOf };
     this.threads.push(thread);
     this.emit(thread);
   }
@@ -90,9 +69,9 @@ export class RepoThreads {
     }
   }
 
-  reply(threadId: string, body: string, single: boolean, shown: Comparison): Thread | null {
+  reply(threadId: string, body: string, single: boolean): Thread | null {
     const thread = this.find(threadId);
-    if (thread) this.addComment(thread, body, single, shown);
+    if (thread) this.addComment(thread, body, single);
     return thread;
   }
 
@@ -123,7 +102,7 @@ export class RepoThreads {
   replyFromSession(threadId: string, body: string): void {
     const thread = this.find(threadId);
     if (!thread) return;
-    thread.comments.push(comment("claude", body, "done"));
+    thread.comments.push(comment("claude", body));
     this.emit(thread);
   }
 
@@ -185,113 +164,17 @@ export class RepoThreads {
     this.onChange();
   }
 
-  private addComment(thread: Thread, body: string, single: boolean, shown: Comparison): void {
-    const c = comment("user", body, "done");
+  private addComment(thread: Thread, body: string, single: boolean): void {
+    const c = comment("user", body);
     thread.comments.push(c);
-    const asking = MENTION.test(body);
-    const submission = !asking && single ? this.newSubmission("") : null;
-    if (asking) this.answer(thread, shown);
-    c.draft = !asking && !single;
+    const submission = single ? this.newSubmission("") : null;
+    c.draft = !single;
     c.review = submission?.n ?? null;
     this.emit(thread);
     if (submission) this.wake(submission);
   }
-
-  private answer(thread: Thread, shown: Comparison): void {
-    const prompt = buildPrompt(thread, shown);
-    const reply = comment("claude", "", "pending");
-    reply.activity = "Waiting";
-    thread.comments.push(reply);
-    this.queue = this.queue.then(() => this.run(thread, reply, prompt));
-  }
-
-  private async run(thread: Thread, reply: ThreadComment, prompt: string): Promise<void> {
-    if (!this.threads.includes(thread)) return;
-    reply.activity = "Thinking";
-    this.emit(thread);
-
-    let last = 0;
-    const onText = (text: string) => {
-      reply.body = text;
-      reply.activity = null;
-      if (Date.now() - last > EMIT_INTERVAL_MS) {
-        last = Date.now();
-        this.emit(thread);
-      }
-    };
-    const onActivity = (activity: string) => {
-      reply.activity = activity;
-      this.emit(thread);
-    };
-
-    try {
-      const parent = this.parentSession;
-      const known = this.fork?.parent === parent ? this.fork : null;
-      const forking = known === null && parent !== null;
-      let note = "";
-      let res;
-
-      try {
-        res = await ask({ cwd: this.cwd, resume: known ? known.session : parent, fork: forking, prompt, onText, onActivity });
-      } catch (err) {
-        if (!forking) throw err;
-        note = `_Answered without the original conversation, because it could not be resumed: ${errorMessage(err)}_\n\n`;
-        res = await ask({ cwd: this.cwd, resume: null, fork: false, prompt, onText, onActivity });
-        this.fork = { parent, session: res.sessionId };
-      }
-
-      if (res.sessionId) this.fork = { parent, session: res.sessionId };
-      reply.body = note + res.text;
-      reply.status = "done";
-    } catch (err) {
-      reply.body = errorMessage(err);
-      reply.status = "error";
-    }
-
-    reply.activity = null;
-    this.emit(thread);
-  }
 }
 
-function comment(author: ThreadComment["author"], body: string, status: ThreadComment["status"]): ThreadComment {
-  return { id: newId(), author, body, status, activity: null, createdAt: now(), draft: false, review: null, editedAt: null };
-}
-
-function buildPrompt(thread: Thread, shown: Comparison): string {
-  const history = thread.comments
-    .filter((c) => c.status === "done")
-    .map((c) => `${c.author === "user" ? "User" : "Claude"}: ${c.body}`)
-    .join("\n\n");
-  const [intro, ...context] = promptContext(thread.anchor, thread.snippet);
-  const diff = thread.anchor.path === null ? [] : [`The diff on the page is ${describeComparison(shown)}.`];
-  return [intro, ...diff, ANSWER, ...context, "", "Thread:", history].join("\n");
-}
-
-function promptContext(anchor: ThreadAnchor, snippet: string): [string, ...string[]] {
-  if (anchor.path === null) {
-    const topic = `the topic "${anchor.topic}" of ${describeComparison(anchor.compare)}`;
-    return [
-      `${REVIEWING}, where you grouped the changes into topics. They wrote in a comment thread on ${topic} as a whole.`,
-      "",
-      "The topic:",
-      snippet,
-    ];
-  }
-
-  const version = anchor.commit
-    ? ` as of commit ${anchor.commit}. The files on disk are the working tree and can differ from that commit`
-    : anchor.side !== "old"
-      ? " in the working tree"
-      : "";
-  if (anchor.side === null) {
-    return [`${REVIEWING}. They wrote in a comment thread on the whole file ${anchor.path}${version}, not on particular lines.`];
-  }
-  return [
-    `${REVIEWING}. They selected ${lineRange(anchor)} of the ${anchor.side} version of ${anchor.path}${version}. They wrote in a comment thread on these lines.`,
-    "",
-    "Selected lines:",
-    "```",
-    snippet,
-    "```",
-  ];
+function comment(author: ThreadComment["author"], body: string): ThreadComment {
+  return { id: newId(), author, body, createdAt: now(), draft: false, review: null, editedAt: null };
 }

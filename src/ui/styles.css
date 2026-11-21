@@ -1896,12 +1896,6 @@ button {
   background: var(--bg-subtle);
 }
 
-.comment-activity {
-  margin: 0;
-  color: var(--fg-muted);
-  font-size: 12px;
-}
-
 .comment-error {
   margin: 4px 0 0;
   color: var(--danger);

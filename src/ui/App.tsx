@@ -388,10 +388,10 @@ export function App({ viewId }: Props) {
         const full: ThreadAnchor = anchor.path === null ? { ...anchor, compare: current } : { ...anchor, commit: versions(anchor.path)[anchor.side ?? "new"] };
         const lines = full.side === "new" && full.commit === null ? latestLines.current(full.path) : null;
         const context = lines && full.side !== null ? contextOf(lines, full.start, full.end) : null;
-        update(await createThread(viewId, current, full, snippet, context, body, single));
+        update(await createThread(viewId, full, snippet, context, body, single));
       },
       reply: async (threadId, body, single) => {
-        if (viewId) update(await replyToThread(viewId, current, threadId, body, single));
+        if (viewId) update(await replyToThread(viewId, threadId, body, single));
       },
       edit: async (threadId, commentId, body) => {
         if (viewId) update(await editComment(viewId, threadId, commentId, body));

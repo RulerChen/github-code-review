@@ -1,7 +1,5 @@
 import type { ThreadContext } from "./types.js";
 
-export const MENTION = /(^|\s)@claude\b/i;
-
 const CONTEXT_LINES = 3;
 
 export function contextOf(lines: string[], start: number, end: number): ThreadContext {

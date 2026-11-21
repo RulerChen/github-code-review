@@ -132,8 +132,6 @@ export interface ThreadComment {
   id: string;
   author: "user" | "claude";
   body: string;
-  status: "done" | "pending" | "error";
-  activity: string | null;
   createdAt: string;
   draft: boolean;
   review: number | null;

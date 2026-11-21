@@ -38199,7 +38199,6 @@ function hitOf(filePath, no, text, at) {
 }
 
 // src/shared/comments.ts
-var MENTION = /(^|\s)@claude\b/i;
 var CONTEXT_LINES2 = 3;
 function contextOf(lines, start, end) {
   return { before: lines.slice(Math.max(0, start - 1 - CONTEXT_LINES2), start - 1), after: lines.slice(end, end + CONTEXT_LINES2) };
@@ -38272,10 +38271,7 @@ function formatReviewComments(threads, submissions, after, read) {
   const numbers = new Set(reviews.map((s) => s.n));
   const submitted = threads.filter((t) => t.comments.some((c) => c.review !== null && numbers.has(c.review)));
   const drafts = withDrafts ? threads.filter((t) => !submitted.includes(t) && t.comments.some((c) => c.draft)) : [];
-  const asked = withDrafts ? threads.filter(
-    (t) => t.comments.some((c) => c.author === "user") && t.comments.every((c) => c.author !== "user" || !c.draft && c.review === null)
-  ) : [];
-  if (!reviews.length && !drafts.length && !asked.length) return null;
+  if (!reviews.length && !drafts.length) return null;
   const out = [];
   const section = (title, list, showDrafts) => out.push(title, ...list.flatMap((t) => ["", formatThread(t, showDrafts)]));
   for (const s of reviews) {
@@ -38285,13 +38281,11 @@ function formatReviewComments(threads, submissions, after, read) {
   if (reviews.length) section(`Comments in ${plural2(submitted.length, "thread")}:`, submitted, withDrafts);
   if (drafts.length) section(`
 Draft comments the user has not submitted yet, in ${plural2(drafts.length, "thread")}:`, drafts, true);
-  if (asked.length) section(`
-Questions the user asked @claude, answered in the page, in ${plural2(asked.length, "thread")}:`, asked, true);
   return out.join("\n");
 }
 function formatThread(t, withDrafts) {
   const { anchor: anchor2 } = t;
-  const comments = t.comments.filter((c) => c.status === "done" && (withDrafts || !c.draft)).map((c) => {
+  const comments = t.comments.filter((c) => withDrafts || !c.draft).map((c) => {
     const who = c.author === "claude" ? "Claude" : c.draft ? "User (draft)" : c.review ? `User (review ${c.review})` : "User";
     return `  ${who}: ${indent(c.body, "    ").trimStart()}`;
   });
@@ -38557,10 +38551,6 @@ function dropOldStates() {
 
 // src/server/threads.ts
 import { randomBytes } from "node:crypto";
-var EMIT_INTERVAL_MS = 100;
-var REVIEWING = "The user is reviewing the code changes in a diff viewer";
-var STOPPED = "The viewer stopped before Claude answered. Ask again for an answer.";
-var ANSWER = "Answer the last comment in the language it is written in, the way a colleague replies in a review thread: go straight to the answer and stop once the question is answered. Write a short paragraph of plain sentences. Use more than one paragraph, a list, a table or a code block only when the comment asks for that much. Do not add notes on other things you noticed in the code, or advice they did not ask for. To check details you can read files, run read-only git commands such as git diff, git log and git show, and search or fetch the web. Do not change anything.";
 var newId = () => randomBytes(6).toString("base64url");
 var now = () => (/* @__PURE__ */ new Date()).toISOString();
 var RepoThreads = class {
@@ -38574,8 +38564,6 @@ var RepoThreads = class {
   parentSession = null;
   onChange = () => {
   };
-  fork = null;
-  queue = Promise.resolve();
   listeners = /* @__PURE__ */ new Set();
   listeningListeners = /* @__PURE__ */ new Set();
   waiters = /* @__PURE__ */ new Set();
@@ -38591,12 +38579,6 @@ var RepoThreads = class {
     return () => this.listeningListeners.delete(fn);
   }
   restore(threads, submissions, read) {
-    for (const c of threads.flatMap((t) => t.comments)) {
-      if (c.status !== "pending") continue;
-      c.status = "error";
-      c.body = STOPPED;
-      c.activity = null;
-    }
     this.threads.push(...threads);
     this.submissions.push(...submissions);
     this.read = read;
@@ -38605,14 +38587,14 @@ var RepoThreads = class {
     this.read = this.submissions.length;
     this.onChange();
   }
-  create(anchor2, snippet, context, body, single, shown) {
+  create(anchor2, snippet, context, body, single) {
     const thread = { id: newId(), rev: 0, anchor: anchor2, snippet, context, comments: [] };
     this.threads.push(thread);
-    this.addComment(thread, body, single, shown);
+    this.addComment(thread, body, single);
     return thread;
   }
   addNote(anchor2, snippet, context, body, noteOf) {
-    const thread = { id: newId(), rev: 0, anchor: anchor2, snippet, context, comments: [comment("claude", body, "done")], noteOf };
+    const thread = { id: newId(), rev: 0, anchor: anchor2, snippet, context, comments: [comment("claude", body)], noteOf };
     this.threads.push(thread);
     this.emit(thread);
   }
@@ -38623,9 +38605,9 @@ var RepoThreads = class {
       this.emit(thread);
     }
   }
-  reply(threadId, body, single, shown) {
+  reply(threadId, body, single) {
     const thread = this.find(threadId);
-    if (thread) this.addComment(thread, body, single, shown);
+    if (thread) this.addComment(thread, body, single);
     return thread;
   }
   edit(threadId, commentId, body) {
@@ -38653,7 +38635,7 @@ var RepoThreads = class {
   replyFromSession(threadId, body) {
     const thread = this.find(threadId);
     if (!thread) return;
-    thread.comments.push(comment("claude", body, "done"));
+    thread.comments.push(comment("claude", body));
     this.emit(thread);
   }
   submit(body) {
@@ -38707,99 +38689,18 @@ var RepoThreads = class {
     for (const fn of this.listeners) fn(thread);
     this.onChange();
   }
-  addComment(thread, body, single, shown) {
-    const c = comment("user", body, "done");
+  addComment(thread, body, single) {
+    const c = comment("user", body);
     thread.comments.push(c);
-    const asking = MENTION.test(body);
-    const submission = !asking && single ? this.newSubmission("") : null;
-    if (asking) this.answer(thread, shown);
-    c.draft = !asking && !single;
+    const submission = single ? this.newSubmission("") : null;
+    c.draft = !single;
     c.review = submission?.n ?? null;
     this.emit(thread);
     if (submission) this.wake(submission);
   }
-  answer(thread, shown) {
-    const prompt = buildPrompt2(thread, shown);
-    const reply = comment("claude", "", "pending");
-    reply.activity = "Waiting";
-    thread.comments.push(reply);
-    this.queue = this.queue.then(() => this.run(thread, reply, prompt));
-  }
-  async run(thread, reply, prompt) {
-    if (!this.threads.includes(thread)) return;
-    reply.activity = "Thinking";
-    this.emit(thread);
-    let last = 0;
-    const onText = (text) => {
-      reply.body = text;
-      reply.activity = null;
-      if (Date.now() - last > EMIT_INTERVAL_MS) {
-        last = Date.now();
-        this.emit(thread);
-      }
-    };
-    const onActivity = (activity) => {
-      reply.activity = activity;
-      this.emit(thread);
-    };
-    try {
-      const parent = this.parentSession;
-      const known = this.fork?.parent === parent ? this.fork : null;
-      const forking = known === null && parent !== null;
-      let note = "";
-      let res;
-      try {
-        res = await ask({ cwd: this.cwd, resume: known ? known.session : parent, fork: forking, prompt, onText, onActivity });
-      } catch (err) {
-        if (!forking) throw err;
-        note = `_Answered without the original conversation, because it could not be resumed: ${errorMessage(err)}_
-
-`;
-        res = await ask({ cwd: this.cwd, resume: null, fork: false, prompt, onText, onActivity });
-        this.fork = { parent, session: res.sessionId };
-      }
-      if (res.sessionId) this.fork = { parent, session: res.sessionId };
-      reply.body = note + res.text;
-      reply.status = "done";
-    } catch (err) {
-      reply.body = errorMessage(err);
-      reply.status = "error";
-    }
-    reply.activity = null;
-    this.emit(thread);
-  }
 };
-function comment(author, body, status) {
-  return { id: newId(), author, body, status, activity: null, createdAt: now(), draft: false, review: null, editedAt: null };
-}
-function buildPrompt2(thread, shown) {
-  const history = thread.comments.filter((c) => c.status === "done").map((c) => `${c.author === "user" ? "User" : "Claude"}: ${c.body}`).join("\n\n");
-  const [intro, ...context] = promptContext(thread.anchor, thread.snippet);
-  const diff = thread.anchor.path === null ? [] : [`The diff on the page is ${describeComparison(shown)}.`];
-  return [intro, ...diff, ANSWER, ...context, "", "Thread:", history].join("\n");
-}
-function promptContext(anchor2, snippet) {
-  if (anchor2.path === null) {
-    const topic = `the topic "${anchor2.topic}" of ${describeComparison(anchor2.compare)}`;
-    return [
-      `${REVIEWING}, where you grouped the changes into topics. They wrote in a comment thread on ${topic} as a whole.`,
-      "",
-      "The topic:",
-      snippet
-    ];
-  }
-  const version2 = anchor2.commit ? ` as of commit ${anchor2.commit}. The files on disk are the working tree and can differ from that commit` : anchor2.side !== "old" ? " in the working tree" : "";
-  if (anchor2.side === null) {
-    return [`${REVIEWING}. They wrote in a comment thread on the whole file ${anchor2.path}${version2}, not on particular lines.`];
-  }
-  return [
-    `${REVIEWING}. They selected ${lineRange(anchor2)} of the ${anchor2.side} version of ${anchor2.path}${version2}. They wrote in a comment thread on these lines.`,
-    "",
-    "Selected lines:",
-    "```",
-    snippet,
-    "```"
-  ];
+function comment(author, body) {
+  return { id: newId(), author, body, createdAt: now(), draft: false, review: null, editedAt: null };
 }
 
 // src/server/http.ts
@@ -39164,12 +39065,12 @@ var ReviewServer = class {
         if (!isComment(body, single) || !isAnchor(anchor2) || !isText(snippet, MAX_SNIPPET) || !isContext(context)) {
           return sendJson(res, 400, { error: "Invalid comment" });
         }
-        return sendJson(res, 201, { thread: threads.create(anchor2, snippet, context, body.trim(), single === true, compare) });
+        return sendJson(res, 201, { thread: threads.create(anchor2, snippet, context, body.trim(), single === true) });
       }
       case "POST threads/thread": {
         const { body, single } = await readJson(req);
         if (!isComment(body, single)) return sendJson(res, 400, { error: "Invalid comment" });
-        return sendThread(res, threads.reply(threadId, body.trim(), single === true, compare), "Unknown thread");
+        return sendThread(res, threads.reply(threadId, body.trim(), single === true), "Unknown thread");
       }
       case "PATCH threads/comment": {
         const { body } = await readJson(req);
@@ -39465,7 +39366,7 @@ async function runMcp() {
         overrides,
         focus: external_exports.string().optional().describe("What the user wants to review, in their words."),
         session: external_exports.string().optional().describe(
-          "The current Claude Code session id. @claude questions in the page continue a fork of this session, and the review's comments are saved under it, so they come back when the session opens the viewer again."
+          "The current Claude Code session id. The review's comments are saved under it, so they come back when the session opens the viewer again."
         ),
         topics: external_exports.array(
           external_exports.object({
@@ -39505,7 +39406,7 @@ async function runMcp() {
     "get_review_comments",
     {
       title: "Get review comments",
-      description: "Read the review the user submitted in the diff viewer: their comment on the whole review and each comment thread with its id, the selected lines (or the whole file or topic) and the earlier comments. Without after it also lists draft comments they have not submitted yet and their @claude questions. A ```suggestion block in a comment holds the lines the user wants in place of the thread's selected lines. Use it when the wait command from open_diff_viewer finishes, or when the user asks you to address their review comments.",
+      description: "Read the review the user submitted in the diff viewer: their comment on the whole review and each comment thread with its id, the selected lines (or the whole file or topic) and the earlier comments. Without after it also lists draft comments they have not submitted yet. A ```suggestion block in a comment holds the lines the user wants in place of the thread's selected lines. Use it when the wait command from open_diff_viewer finishes, or when the user asks you to address their review comments.",
       inputSchema: {
         repo: external_exports.string().optional().describe("The repository the wait command names. Omit it to read every repository with a viewer open."),
         after: external_exports.number().int().min(0).optional().describe(

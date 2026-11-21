@@ -446,12 +446,12 @@ export class ReviewServer {
         if (!isComment(body, single) || !isAnchor(anchor) || !isText(snippet, MAX_SNIPPET) || !isContext(context)) {
           return sendJson(res, 400, { error: "Invalid comment" });
         }
-        return sendJson(res, 201, { thread: threads.create(anchor, snippet, context, body.trim(), single === true, compare) });
+        return sendJson(res, 201, { thread: threads.create(anchor, snippet, context, body.trim(), single === true) });
       }
       case "POST threads/thread": {
         const { body, single } = await readJson(req);
         if (!isComment(body, single)) return sendJson(res, 400, { error: "Invalid comment" });
-        return sendThread(res, threads.reply(threadId!, body.trim(), single === true, compare), "Unknown thread");
+        return sendThread(res, threads.reply(threadId!, body.trim(), single === true), "Unknown thread");
       }
       case "PATCH threads/comment": {
         const { body } = await readJson(req);
