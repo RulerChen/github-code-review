@@ -179,10 +179,10 @@ export const FileIcon = ({ className }: { className: string }) => (
 
 export const WholeWordIcon = () => (
   <Svg>
-    <text x="8" y="9.5" textAnchor="middle" fontSize="9" fontWeight="600" fill="currentColor">
+    <text x="8" y="9" textAnchor="middle" fontSize="9" fontWeight="600" fill="currentColor">
       ab
     </text>
-    <path d="M1.75 11v2.25h12.5V11" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+    <path d="M1.75 10.5v2.25h12.5V10.5" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
   </Svg>
 );
 

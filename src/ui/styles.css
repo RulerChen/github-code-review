@@ -284,17 +284,21 @@ button {
   position: relative;
   flex: 1;
   min-width: 0;
+  margin-bottom: 8px;
 }
 
 .search-box > .filter {
+  margin-bottom: 0;
   padding-right: 32px;
 }
 
 .search-option {
   position: absolute;
-  top: 4px;
+  top: 0;
   right: 4px;
+  bottom: 0;
   display: grid;
+  margin: auto 0;
   place-items: center;
   width: 22px;
   height: 22px;
