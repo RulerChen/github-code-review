@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { withExcluded, withOverride, withRange } from "../shared/comparison";
 import type { CommitInfo, Comparison, DiffResult, RefList, RefRange } from "../shared/types";
 import { compareText, errorMessage, plural } from "../shared/util";
@@ -49,9 +49,11 @@ export function RepoComparisons({ diff, loadRefs, onCompare }: ReposProps) {
 
   useDismiss(root, open, () => setOpen(false));
   usePlaceBelow(button, menu, open);
+  useLayoutEffect(() => {
+    const m = menu.current;
+    if (m) m.style.minWidth = `min(${m.offsetWidth}px, 100vw - 32px)`;
+  });
   if (diff.repos[0]?.dir === "") return null;
-  const own = diff.overrides.length;
-  const out = diff.excluded.length;
   const byDir = new Map(diff.repos.map((r) => [r.dir, r]));
   const dirs = [...byDir.keys(), ...diff.excluded].sort(compareText);
   const working = diff.repos.filter((r) => r.error === null).length;
@@ -64,12 +66,10 @@ export function RepoComparisons({ diff, loadRefs, onCompare }: ReposProps) {
         className="picker-button"
         aria-haspopup="dialog"
         aria-expanded={open}
-        title={own === 1 ? "1 repository compares refs of its own" : own ? `${own} repositories compare refs of their own` : title}
+        title={title}
         onClick={() => setOpen(!open)}
       >
         <span className="picker-value">{plural(dirs.length, "repo")}</span>
-        {own > 0 && <span className="picker-role">· {own} custom</span>}
-        {out > 0 && <span className="picker-role">· {out} excluded</span>}
         <CaretIcon />
       </button>
       {open && (
