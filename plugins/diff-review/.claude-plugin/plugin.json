@@ -5,11 +5,5 @@
   "version": "0.12.0",
   "author": {
     "name": "RulerChen"
-  },
-  "keywords": [
-    "diff",
-    "code-review",
-    "git",
-    "mcp"
-  ]
+  }
 }
