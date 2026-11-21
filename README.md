@@ -5,11 +5,11 @@ A Claude Code plugin that shows your code changes in a GitHub-style diff viewer 
 ![Demo](docs/demo.gif)
 
 ```
-/diff-review:review                          uncommitted changes
-/diff-review:review main...feature           a branch, compared like a pull request
-/diff-review:review topics: parser, docs     grouped into topics that Claude explains
-/diff-review:review ~/work                   every repository in a folder, on one page
+/diff-review:review             uncommitted changes in the current repository
+/diff-review:review ~/work      every repository in a folder, on one page
 ```
+
+In the page you pick other branches, tags or commits to compare, and have Claude group the changes into topics that it explains.
 
 ## Setup
 
