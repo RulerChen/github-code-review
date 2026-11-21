@@ -37531,7 +37531,8 @@ var C_OPENS = "\\((?:[^;]*$|[^;{]*\\)[^;{]*\\{)";
 var LANGUAGES = [
   {
     exts: ["py", "pyi"],
-    patterns: (n) => [`^${S}*(async${S}+)?def${S}+${n}${S}*\\(`, `^${S}*class${S}+${n}${END}`, `^${n}${S}*(:[^=]*)?=([^=]|$)`],
+    patterns: (n) => [`^${S}*(async${S}+)?def${S}+${n}${S}*\\(`, `^${S}*class${S}+${n}${END}`],
+    values: (n) => [`^${n}${S}*(:[^=]*)?=([^=]|$)`],
     locals: (n) => [
       `^\\s*(?:[\\w.\\[\\]*]+\\s*,\\s*)*\\*?${n}${E}\\s*(?:,\\s*\\*?[\\w.\\[\\]]+\\s*)*,?\\s*(?::[^=]+)?=(?!=)(?!.*,\\s*$)`,
       `\\bfor\\s+(?:[^:]*?[\\s,(])?${n}${E}(?:\\s*[,)][^:]*?)?\\s+in\\b`,
@@ -37550,13 +37551,14 @@ var LANGUAGES = [
   },
   {
     exts: ["js", "jsx", "mjs", "cjs", "ts", "tsx", "mts", "cts"],
+    shorthand: true,
     patterns: (n) => [
       `${START}function${S}*\\*?${S}*${n}${S}*[(<]`,
       `${START}(class|interface|type|enum|namespace)${S}+${n}${END}`,
-      `${START}(const|let|var)${S}+${n}${S}*(:[^=]*)?=([^=]|$)`,
       `^${S}*((public|private|protected|static|async|readonly|override|abstract|get|set)${S}+)*\\*?${n}${S}*(<[^>]*>)?\\([^;]*\\)[^;]*\\{${S}*$`,
       `^${S}*((public|private|protected|static|readonly|override)${S}+)*${n}${S}*(:[^=]*)?=${S}*(async${S}*)?(\\(|[[:alnum:]_$]+${S}*=>)`
     ],
+    values: (n) => [`${START}(const|let|var)${S}+${n}${S}*(:[^=]*)?=([^=]|$)`],
     locals: (n) => [
       `^\\s*(?:export\\s+)?(?:declare\\s+)?(?:const|let|var)\\s+${n}${E}`,
       `^\\s*(?:export\\s+)?(?:const|let|var)\\s*[{\\[](?:[^=]*?(?:[,{\\[\\s:]|\\.\\.\\.))?${n}${E}\\s*(?:=[^,}\\]]*)?[,}\\]]`,
@@ -37588,7 +37590,8 @@ var LANGUAGES = [
   },
   {
     exts: ["go"],
-    patterns: (n) => [`^func${S}*(\\([^)]*\\)${S}*)?${n}${S}*[([]`, `^${S}*type${S}+${n}${END}`, `^(var|const)${S}+${n}${END}`],
+    patterns: (n) => [`^func${S}*(\\([^)]*\\)${S}*)?${n}${S}*[([]`, `^${S}*type${S}+${n}${END}`],
+    values: (n) => [`^(var|const)${S}+${n}${END}`],
     locals: (n) => [
       `^\\s*(?:\\w+\\s*,\\s*)*${n}${E}\\s*(?:,\\s*\\w+\\s*)*:=`,
       `^\\s*(?:var|const)\\s+${n}${E}`,
@@ -37605,11 +37608,13 @@ var LANGUAGES = [
   },
   {
     exts: ["rs"],
+    shorthand: true,
     patterns: (n) => [
       `${START}fn${S}+${n}${S}*[(<]`,
       `${START}(struct|enum|trait|type|union|mod|const|static)${S}+${n}${END}`,
       `macro_rules!${S}*${n}${END}`
     ],
+    values: () => [],
     locals: (n) => [
       `^\\s*let\\s+(?:mut\\s+)?${n}${E}`,
       `^\\s*let\\s+(?:mut\\s+)?[^=]*?[\\s({\\[,&]\\s*(?:mut\\s+|ref\\s+)*${LOWER}${n}${E}\\s*[,)}\\]:]`,
@@ -37644,6 +37649,7 @@ var LANGUAGES = [
       `^${S}*typedef[^;]*[^[:alnum:]_]${n}${S}*;`,
       `${START}using${S}+${n}${S}*=`
     ],
+    values: () => [],
     locals: (n) => [
       `^\\s*${typed(n)}\\s*(?:[=;,\\[({:]|$)`,
       `^\\s*${C_TYPE}(?:\\s*[*&]+\\s*|\\s+)[^;=(]*,\\s*[*&]*\\s*${n}${E}\\s*(?:[=;,\\[]|$)`,
@@ -37671,6 +37677,7 @@ var KEYWORDS = "def|defp|defmodule|fn|fun|func|function|sub|proc|class|struct|in
 var GENERIC = {
   exts: [],
   patterns: (n) => [`${START}(${KEYWORDS})${S}+${n}${END}`],
+  values: () => [],
   locals: (n) => [
     `^\\s*(?:(?:export|pub|public|private|protected|internal|open|override|static|final|readonly|declare(?:\\s+-\\w+)*)\\s+)*(?:let|var|val|const|local|my|our|alias)\\s+(?:mut\\s+)?[$@%]?${n}${E}`,
     `^\\s*(?:(?:export|local|readonly|declare(?:\\s+-\\w+)*)\\s+)?[$@%]?${n}\\s*=(?![=~>])`,
@@ -37730,11 +37737,11 @@ function scopeOf(text, no, col, name, filePath) {
   if (line === void 0 || line.slice(col, col + name.length) !== name) return { kind: "free" };
   const before = line.slice(0, col);
   if (/(?:\.|->|::)\s*$/.test(before) && !/\.\.\.\s*$/.test(before)) {
-    return { kind: "member", own: /(?<![\w$.])(?:this|self|cls)\s*(?:\.|->)\s*$/.test(before) };
+    return { kind: "member", own: /(?<![\w$.])(?:this|self|cls)\s*(?:\.|->)\s*$/.test(before), call: /^\s*(?:<[^()]*>)?\(/.test(line.slice(col + name.length)) };
   }
   const lang = languageOf(filePath);
   const n = `(?<n>${name.replaceAll("$", "\\$")})`;
-  const declared = finder([...lang.patterns(n).map(fromPosix), ...lang.locals(n)]);
+  const declared = finder([...lang.patterns(n), ...lang.values(n)].map(fromPosix).concat(lang.locals(n)));
   const bound = finder(lang.binders(n));
   const listed = finder(lang.params(n));
   const declares = (l) => declared(l).length > 0;
@@ -37747,6 +37754,7 @@ function scopeOf(text, no, col, name, filePath) {
   const here = [...declared(line), ...bound(line), ...inList(lines, no) ? listed(line) : []];
   if (here.includes(col)) return { kind: "declared" };
   if (here.some((c) => c < col)) return at(no);
+  if (usesOf(text, filePath)(no, col, name).key) return { kind: "member", own: false, call: false };
   let min = indentOf(line);
   let list = null;
   for (let k = no - 1; k >= 1; k--) {
@@ -37782,11 +37790,15 @@ function inList(lines, no) {
 }
 var NAMES = 2;
 var MACRO = /^\s*#\s*define\s+(\w+)/;
-function insideOf(text, filePath) {
+function reader(text) {
   const lines = text.split("\n");
-  const scopes = languageOf(filePath).scopes;
   const indents = [];
   const indentAt = (k) => indents[k] ??= /^(?:#|$)/.test(lines[k - 1].trim()) || NO_SCOPE.test(lines[k - 1].trim()) ? -1 : indentOf(lines[k - 1]);
+  return { lines, indentAt };
+}
+function insideOf(text, filePath) {
+  const { lines, indentAt } = reader(text);
+  const scopes = languageOf(filePath).scopes;
   const header = (k, indent2) => {
     const l = lines[k - 1].trimEnd();
     if (!l.endsWith("(")) return l;
@@ -37823,6 +37835,129 @@ function insideOf(text, filePath) {
       else opened = closesList(l.trim()) || under && /^(?:[)\]]|where\b)/.test(l.trim());
     }
     return names.length ? names.join(" \u203A ") : null;
+  };
+}
+var ASSIGN = "(?:[-+*/%&|^:]|<<|>>>?|\\*\\*|\\?\\?|\\|\\||&&)?=(?![=>~])";
+var ASSIGNED = new RegExp(`^\\s*(?:\\[[^\\]]*\\]\\s*)*${ASSIGN}|^\\s*(?:\\+\\+|--)`);
+var ASSIGNED_WITH = new RegExp(`^\\s*(?:,\\s*[\\w$.*]+\\s*)+${ASSIGN}`);
+var ANNOTATED = /^\s*:[^=:(){}]*[^=!<>:(){}]=(?![=>])/;
+var MODS = "(?:(?:readonly|public|private|protected|internal|static|declare|override|abstract|final|pub(?:\\([^)]*\\))?|mut|const|volatile|export|default|-|\\+)\\s+)*";
+var ONLY_MODS = new RegExp(`^\\s*${MODS}$`);
+var C_FIELD_LEAD = /^\s*(?:[\w@][\w:<>,.?*&[\]]*\s+)+[*&\s]*$/;
+var C_FIELD_REST = /^\s*(?:\[[^\]]*\]\s*)*(?:=[^;]*)?[;,]/;
+var TYPE_HEAD = /\b(?:interface|class|struct|union|enum|trait)\b[^=]*$|\btype\s+[\w$]+(?:<[^=]*>)?\s*=(?!=)[^;]*$/;
+var PATTERN_HEAD = /(?:^|[\s(,;])(?:const|let|var|import|export)(?:\s+type)?\s*$|\bfunction\b[^)]*\($|=\s*(?:async\s*)?\($/;
+var TYPE_BEFORE = /[<|&]\s*$|\b(?:as|satisfies|extends)\s*$|\):\s*$|(?:\b(?:const|let|var)\s+|\(\s*)[\w$]+\??\s*:\s*$/;
+var NOT_KEYS = /(?:>|\$)$/;
+var JSX_VALUE = /[\w-]=$/;
+var VALUE_BEFORE = /(?:^|[=(,[:?{|&]|\breturn|=>)\s*$/;
+var TYPE_VALUE = /^\s*(?:readonly\s+)?(?:string|number|boolean|bigint|symbol|unknown|any|never)\b|^[^,;{}()]*;/;
+var ANNOTATION = /`[^`]*\b\w+:$|@(?:JsonProperty|JsonAlias|JsonKey|SerializedName|SerialName)\s*\((?:[^)]*=\s*)?$|\b(?:\w*alias|rename)\s*=\s*$/;
+var DEFINES = /\b(?:def|function|fn|func|fun|sub|lambda)\b[^()]*$/;
+var ARROW_PARAMS = /^\s*(?::[^=()]*)?(?:,[^()]*)?\)\s*(?::[^=]+)?=>/;
+var STRING = /(["'`])(?:\\.|(?!\1).)*\1/g;
+function enclosure(lead) {
+  const stack = [];
+  let quote = "";
+  for (let i = 0; i < lead.length; i++) {
+    const c = lead[i];
+    if (quote) {
+      if (c === "\\") i++;
+      else if (c === quote) quote = "";
+    } else if (c === '"' || c === "'") quote = c;
+    else if (c === "(" || c === "[" || c === "{") stack.push(i);
+    else if (c === ")" || c === "]" || c === "}") stack.pop();
+  }
+  const at = stack.at(-1);
+  return at === void 0 ? null : { open: lead[at], head: lead.slice(0, at).trimEnd(), inner: lead.slice(at + 1) };
+}
+function afterGroup(rest) {
+  let depth = 0;
+  for (let i = 0; i < rest.length; i++) {
+    const c = rest[i];
+    if ("([{".includes(c)) depth++;
+    else if (")]}".includes(c) && depth-- === 0) return rest.slice(i + 1);
+  }
+  return null;
+}
+function rolesOf(text, filePath) {
+  const uses = usesOf(text, filePath);
+  return (no, col, name) => uses(no, col, name).role;
+}
+function usesOf(text, filePath) {
+  const { lines, indentAt } = reader(text);
+  const lang = languageOf(filePath);
+  const jsx = /\.[jt]sx$/.test(filePath);
+  const around = (no, lead) => {
+    const here = enclosure(lead);
+    if (here) return here;
+    const indent2 = indentOf(lines[no - 1]);
+    for (let k = no - 1; k >= 1; k--) {
+      const i = indentAt(k);
+      if (i < 0 || i >= indent2) continue;
+      const t = lines[k - 1].trim().replace(/\s*(?:\/\/|#\s).*$/, "");
+      const open2 = t.at(-1) ?? "";
+      return "([{:".includes(open2) ? { open: open2, head: t.slice(0, -1).trimEnd(), inner: "" } : { open: "", head: t, inner: "" };
+    }
+    return { open: "", head: "", inner: "" };
+  };
+  const kindOf = ({ open: open2, head, inner }, value) => {
+    if (open2 === "(") return "params";
+    if (open2 !== "{" && open2 !== ":" || NOT_KEYS.test(head) || jsx && JSX_VALUE.test(head)) return "other";
+    if (TYPE_HEAD.test(head) || TYPE_BEFORE.test(head)) return "type";
+    if (open2 === ":") return lang === GENERIC ? "literal" : "other";
+    if (PATTERN_HEAD.test(head)) return "pattern";
+    if (/:\s*$/.test(head) && TYPE_VALUE.test(value)) return "type";
+    if (/;/.test(`${inner} ${/^[^,{}()]*/.exec(value)[0]}`.replace(STRING, ""))) return "type";
+    return jsx && !VALUE_BEFORE.test(head) ? "other" : "literal";
+  };
+  const closing = (no, lead, rest) => {
+    if (enclosure(lead)) return afterGroup(rest) ?? "";
+    const indent2 = indentOf(lines[no - 1]);
+    for (let k = no + 1; k <= lines.length; k++) {
+      const i = indentAt(k);
+      if (i < 0 || i >= indent2) continue;
+      const t = lines[k - 1].trim();
+      return t.startsWith("}") ? t.slice(1) : "";
+    }
+    return "";
+  };
+  const none = { role: null, key: false };
+  const field = { role: "field", key: true };
+  return (no, col, name) => {
+    const line = lines[no - 1];
+    if (line === void 0 || line.slice(col, col + name.length) !== name) return none;
+    let lead = line.slice(0, col);
+    let rest = line.slice(col + name.length);
+    const quoted = /["'`]$/.test(lead) && /^["'`]/.test(rest);
+    if (quoted) {
+      if (ANNOTATION.test(lead.slice(0, -1))) return field;
+      if (/^.\]\s*(?:[-+*/%&|^]|\?\?)?=(?![=>])/.test(rest)) return { role: "write", key: true };
+      lead = lead.slice(0, -1);
+      rest = rest.slice(1);
+    }
+    if (/(?:^|[\s(,])[\w$]+\??\s*:(?!:)[^=,;(){}]*$|\btype\s+$/.test(lead)) return none;
+    if (/(?:\+\+|--)\s*(?:[\w$]+(?:\.|->))*$/.test(lead) && !/^(?:\.|->|\[)/.test(rest)) return { role: "write", key: false };
+    const start = ONLY_MODS.test(lead);
+    const key = /^\??\s*:(?![:=])/.test(rest);
+    const short = lang.shorthand === true && /^\s*(?:[,}]|$)/.test(rest);
+    const placed = start || /[{(,;]\s*$/.test(lead);
+    if (!quoted && (ASSIGNED.test(rest) || ANNOTATED.test(rest) || start && ASSIGNED_WITH.test(rest))) {
+      const at = around(no, lead);
+      if (at.open === "(" && (DEFINES.test(at.head) || start && inList(lines, no) && !/^(?:async\s+)?(?:with|class)\b/.test(at.head))) return none;
+      if (start && kindOf(at, "") === "type") return field;
+      return { role: "write", key: jsx && /^=[{"']/.test(rest) };
+    }
+    if ((key || short) && placed) {
+      const kind = kindOf(around(no, lead), rest.replace(/^\??\s*:/, ""));
+      if (kind === "type") return key ? field : none;
+      return kind === "literal" && !ARROW_PARAMS.test(closing(no, lead, rest)) ? { role: "write", key } : none;
+    }
+    if (!quoted && !line.includes("(") && kindOf(around(no, lead), "") === "type") {
+      if (C_FIELD_LEAD.test(lead) && !/(?<!:):(?!:)/.test(lead) && C_FIELD_REST.test(rest)) return field;
+      if (start && /^\s+[\w*[\]<.]/.test(rest)) return field;
+    }
+    return none;
   };
 }
 
@@ -37871,18 +38006,25 @@ async function grepRepo(diff, query, whole, signal) {
   const busy = searchable(diff).filter((r) => r.dir !== "" && diff.files.some((f) => f.path.startsWith(`${r.dir}/`)));
   const far = (p) => changed.has(p) ? 0 : busy.length === 0 || busy.some((r) => p.startsWith(`${r.dir}/`)) ? 1 : 2;
   const lines = await grepLines(diff, searchable(diff), ["-E", "-i", ...match], ["."], MAX_HITS, signal, (text) => found?.exec(text)?.index ?? -1, far);
-  if (!signal.aborted) await nameFunctions(diff, lines.hits);
+  if (!signal.aborted) await describe4(diff, lines.hits, found);
   return lines;
 }
-async function nameFunctions(diff, hits) {
+async function describe4(diff, hits, found) {
   const texts = await readTexts(diff, [...new Set(hits.map((h) => h.path))].slice(0, MAX_READ_FILES));
   const files = /* @__PURE__ */ new Map();
+  const every = found && new RegExp(found.source, `${found.flags.replace("g", "")}g`);
   for (const h of hits) {
     const text = texts.get(h.path);
     if (text === void 0) continue;
-    let inside = files.get(h.path);
-    if (!inside) files.set(h.path, inside = insideOf(text, h.path));
-    h.inside = inside(h.no);
+    let file2 = files.get(h.path);
+    if (!file2) files.set(h.path, file2 = { lines: text.split("\n"), inside: insideOf(text, h.path), roles: rolesOf(text, h.path) });
+    h.inside = file2.inside(h.no);
+    const line = file2.lines[h.no - 1] ?? "";
+    for (const m of every ? line.matchAll(every) : []) {
+      if (!IDENTIFIER.test(m[0]) || /[\w$]/.test((line[m.index - 1] ?? "") + (line[m.index + m[0].length] ?? ""))) continue;
+      const role = file2.roles(h.no, m.index, m[0]);
+      if (role === "field" || role && !h.role) h.role = role;
+    }
   }
 }
 async function readTexts(diff, paths) {
@@ -37937,32 +38079,52 @@ var isIdentifier = (name) => IDENTIFIER.test(name);
 async function findDefinitions(diff, name, from, click, signal) {
   const text = click ? (await readRepoFile(diff, from))?.text ?? null : null;
   const scoped = click && text !== null ? scopeOf(text, click.line, click.col, name, from) : { kind: "free" };
-  const only = (hits) => ({ hits, capped: false, declared: false });
+  const member = scoped.kind === "member" && !scoped.call;
+  const only = (hits) => ({ hits, capped: false, declared: false, member, byName: false });
+  const itself = { hits: [], capped: false, declared: true, member, byName: false };
   const lineOf = (no) => {
     const line = text.split("\n")[no - 1];
     return hitOf(from, no, line, line.indexOf(name));
   };
-  if (scoped.kind === "declared") return { hits: [], capped: false, declared: true };
+  if (scoped.kind === "declared") return itself;
   if (scoped.kind === "bound" && scoped.module === null) return only([lineOf(scoped.line)]);
   const language = languageOf(from);
   const escaped = name.replaceAll("$", "\\$");
   const pathspecs = language.exts.length ? language.exts.map((e) => `*.${e}`) : ["."];
   const own2 = repoOf(diff, from)?.repo;
   const all = searchable(diff);
-  const found = await nearestFirst(
+  const lookUp = (patterns) => nearestFirst(
     own2 ? [[own2], all.filter((r) => r !== own2)] : [all],
-    (repos) => grepLines(diff, repos, defines(escaped, language.patterns(escaped)), pathspecs, MAX_DEFINITIONS, signal, (line) => line.indexOf(name))
+    (repos) => grepLines(diff, repos, defines(escaped, patterns), pathspecs, MAX_DEFINITIONS, signal, (line) => line.indexOf(name))
   );
-  const clicked = click && text !== null ? text.split("\n")[click.line - 1] ?? "" : "";
-  if (click && clicked.indexOf(name) === click.col && found.hits.some((h) => h.path === from && h.no === click.line)) {
-    return { hits: [], capped: false, declared: true };
+  const fields = async () => {
+    const lines = await grepRepo(diff, name, true, signal);
+    const hits = lines.hits.filter((h) => h.role === "field" && h.text.slice(h.at, h.at + name.length) === name);
+    return { hits: hits.slice(0, MAX_DEFINITIONS), capped: hits.length > MAX_DEFINITIONS || lines.capped };
+  };
+  const methods = () => lookUp(language.patterns(escaped));
+  let found;
+  let byName = false;
+  if (scoped.kind !== "member") found = await lookUp([...language.patterns(escaped), ...language.values(escaped)]);
+  else if (scoped.call) {
+    found = await methods();
+    if (!found.hits.length) {
+      found = await fields();
+      byName = found.hits.length > 0;
+    }
+  } else {
+    const [declared, defined] = await Promise.all([fields(), methods()]);
+    byName = declared.hits.length > 0;
+    found = byName ? declared : defined;
   }
+  const clicked = click && text !== null ? text.split("\n")[click.line - 1] ?? "" : "";
+  if (click && clicked.indexOf(name) === click.col && found.hits.some((h) => h.path === from && h.no === click.line)) return itself;
   if (scoped.kind === "bound") {
     const imported = inModule(found.hits, scoped.module, from);
     return only(imported.length ? imported : found.hits.length === 1 ? found.hits : [lineOf(scoped.line)]);
   }
   const here = scoped.kind === "free" || scoped.own ? found.hits.filter((h) => h.path === from) : [];
-  return here.length === 1 ? only(here) : { ...found, declared: false };
+  return here.length === 1 ? only(here) : { ...found, declared: false, member, byName };
 }
 function inModule(hits, module, from) {
   const bare = (p) => p.replace(/\.[^./]+$/, "").replace(/\/(?:index|__init__|mod)$/, "");
@@ -37988,7 +38150,7 @@ function findDefinitionsAnywhere(diff, name, signal) {
   return nearestFirst([changed, all.filter((r) => !changed.includes(r))], async (repos) => {
     const find = (patterns, pathspecs) => grepLines(diff, repos, ["-i", ...defines(escaped, patterns)], pathspecs, MAX_DEFINITIONS, signal, (text) => text.toLowerCase().indexOf(lower));
     const found = await Promise.all([
-      ...LANGUAGES.map((l) => find(l.patterns(escaped), l.exts.map((e) => `*.${e}`))),
+      ...LANGUAGES.map((l) => find([...l.patterns(escaped), ...l.values(escaped)], l.exts.map((e) => `*.${e}`))),
       find(GENERIC.patterns(escaped), [".", ...LANGUAGES.flatMap((l) => l.exts).map((e) => `:(exclude)*.${e}`)])
     ]);
     const hits = found.flatMap((f) => f.hits).sort((a, b) => compareText(a.path, b.path) || a.no - b.no);

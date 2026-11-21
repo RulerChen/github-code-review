@@ -4,7 +4,7 @@ import type { DiffRepo, DiffResult, RepoFile, RepoHit } from "../shared/types.js
 import { compareText } from "../shared/util.js";
 import { ABSENT, classify, type Content, MAX_CONTENT_BYTES, mapLimit, readWorkTree, REPO_LIMIT } from "./diff.js";
 import { git, gitLines } from "./git.js";
-import { GENERIC, insideOf, LANGUAGES, languageOf, type Scoped, scopeOf } from "../shared/scope.js";
+import { GENERIC, insideOf, LANGUAGES, languageOf, rolesOf, type Scoped, scopeOf } from "../shared/scope.js";
 
 export const MAX_HITS = 500;
 const MAX_DEFINITIONS = 50;
@@ -57,20 +57,28 @@ export async function grepRepo(diff: DiffResult, query: string, whole: boolean, 
   const busy = searchable(diff).filter((r) => r.dir !== "" && diff.files.some((f) => f.path.startsWith(`${r.dir}/`)));
   const far = (p: string) => (changed.has(p) ? 0 : busy.length === 0 || busy.some((r) => p.startsWith(`${r.dir}/`)) ? 1 : 2);
   const lines = await grepLines(diff, searchable(diff), ["-E", "-i", ...match], ["."], MAX_HITS, signal, (text) => found?.exec(text)?.index ?? -1, far);
-  if (!signal.aborted) await nameFunctions(diff, lines.hits);
+  if (!signal.aborted) await describe(diff, lines.hits, found);
   return lines;
 }
 
-// Says which function each line is in, so a list of uses reads as a list of callers. The hits are in order of distance from the diff, so the files nearest it are the ones read.
-async function nameFunctions(diff: DiffResult, hits: RepoHit[]): Promise<void> {
+// Says which function each line is in, so a list of uses reads as a list of callers, and whether the line writes the name or only reads it. The hits are in order of distance from the diff, so the files nearest it are the ones read.
+async function describe(diff: DiffResult, hits: RepoHit[], found: RegExp | null): Promise<void> {
   const texts = await readTexts(diff, [...new Set(hits.map((h) => h.path))].slice(0, MAX_READ_FILES));
-  const files = new Map<string, (no: number) => string | null>();
+  const files = new Map<string, { lines: string[]; inside: ReturnType<typeof insideOf>; roles: ReturnType<typeof rolesOf> }>();
+  const every = found && new RegExp(found.source, `${found.flags.replace("g", "")}g`);
   for (const h of hits) {
     const text = texts.get(h.path);
     if (text === undefined) continue;
-    let inside = files.get(h.path);
-    if (!inside) files.set(h.path, (inside = insideOf(text, h.path)));
-    h.inside = inside(h.no);
+    let file = files.get(h.path);
+    if (!file) files.set(h.path, (file = { lines: text.split("\n"), inside: insideOf(text, h.path), roles: rolesOf(text, h.path) }));
+    h.inside = file.inside(h.no);
+    // The whole line, since the text of a hit is cut when it is long. A line can have the name more than once: a place that declares a field counts first, then one that writes.
+    const line = file.lines[h.no - 1] ?? "";
+    for (const m of every ? line.matchAll(every) : []) {
+      if (!IDENTIFIER.test(m[0]) || /[\w$]/.test((line[m.index - 1] ?? "") + (line[m.index + m[0].length] ?? ""))) continue;
+      const role = file.roles(h.no, m.index, m[0]);
+      if (role === "field" || (role && !h.role)) h.role = role;
+    }
   }
 }
 
@@ -139,18 +147,20 @@ export interface Click {
   col: number;
 }
 
-type Defined = Found & { declared: boolean };
+type Defined = Found & { declared: boolean; member: boolean; byName: boolean };
 
 // The file of the click settles what it can: the name is declared right there, or by a line that encloses the click. Only an imported name, or one the file does not declare, is looked up in the repositories. declared says the click is on a definition, so the question is who uses the name.
 export async function findDefinitions(diff: DiffResult, name: string, from: string, click: Click | null, signal: AbortSignal): Promise<Defined> {
   const text = click ? ((await readRepoFile(diff, from))?.text ?? null) : null;
   const scoped: Scoped = click && text !== null ? scopeOf(text, click.line, click.col, name, from) : { kind: "free" };
-  const only = (hits: RepoHit[]): Defined => ({ hits, capped: false, declared: false });
+  const member = scoped.kind === "member" && !scoped.call;
+  const only = (hits: RepoHit[]): Defined => ({ hits, capped: false, declared: false, member, byName: false });
+  const itself: Defined = { hits: [], capped: false, declared: true, member, byName: false };
   const lineOf = (no: number) => {
     const line = text!.split("\n")[no - 1]!;
     return hitOf(from, no, line, line.indexOf(name));
   };
-  if (scoped.kind === "declared") return { hits: [], capped: false, declared: true };
+  if (scoped.kind === "declared") return itself;
   if (scoped.kind === "bound" && scoped.module === null) return only([lineOf(scoped.line)]);
 
   const language = languageOf(from);
@@ -158,13 +168,34 @@ export async function findDefinitions(diff: DiffResult, name: string, from: stri
   const pathspecs = language.exts.length ? language.exts.map((e) => `*.${e}`) : ["."];
   const own = repoOf(diff, from)?.repo;
   const all = searchable(diff);
-  const found = await nearestFirst(own ? [[own], all.filter((r) => r !== own)] : [all], (repos) =>
-    grepLines(diff, repos, defines(escaped, language.patterns(escaped)), pathspecs, MAX_DEFINITIONS, signal, (line) => line.indexOf(name)),
-  );
-  const clicked = click && text !== null ? (text.split("\n")[click.line - 1] ?? "") : "";
-  if (click && clicked.indexOf(name) === click.col && found.hits.some((h) => h.path === from && h.no === click.line)) {
-    return { hits: [], capped: false, declared: true };
+  const lookUp = (patterns: string[]) =>
+    nearestFirst(own ? [[own], all.filter((r) => r !== own)] : [all], (repos) =>
+      grepLines(diff, repos, defines(escaped, patterns), pathspecs, MAX_DEFINITIONS, signal, (line) => line.indexOf(name)),
+    );
+  // A member is a method, or a field that some type declares. Which one is looked for first follows from whether the member is called.
+  const fields = async (): Promise<Found> => {
+    const lines = await grepRepo(diff, name, true, signal);
+    const hits = lines.hits.filter((h) => h.role === "field" && h.text.slice(h.at, h.at + name.length) === name);
+    return { hits: hits.slice(0, MAX_DEFINITIONS), capped: hits.length > MAX_DEFINITIONS || lines.capped };
+  };
+  const methods = () => lookUp(language.patterns(escaped));
+  let found: Found;
+  let byName = false;
+  if (scoped.kind !== "member") found = await lookUp([...language.patterns(escaped), ...language.values(escaped)]);
+  else if (scoped.call) {
+    found = await methods();
+    if (!found.hits.length) {
+      found = await fields();
+      byName = found.hits.length > 0;
+    }
+  } else {
+    // Both at once: a member that no type declares would otherwise wait for one search after the other.
+    const [declared, defined] = await Promise.all([fields(), methods()]);
+    byName = declared.hits.length > 0;
+    found = byName ? declared : defined;
   }
+  const clicked = click && text !== null ? (text.split("\n")[click.line - 1] ?? "") : "";
+  if (click && clicked.indexOf(name) === click.col && found.hits.some((h) => h.path === from && h.no === click.line)) return itself;
 
   if (scoped.kind === "bound") {
     const imported = inModule(found.hits, scoped.module!, from);
@@ -172,7 +203,7 @@ export async function findDefinitions(diff: DiffResult, name: string, from: stri
   }
   // A single definition in the clicked file wins over the same name defined in other files.
   const here = scoped.kind === "free" || scoped.own ? found.hits.filter((h) => h.path === from) : [];
-  return here.length === 1 ? only(here) : { ...found, declared: false };
+  return here.length === 1 ? only(here) : { ...found, declared: false, member, byName };
 }
 
 // The definitions in the file an import names: "./diff.js" next to the importing file, or "airflow.models.dag" and "crate::engine::diff" as the end of a path.
@@ -202,7 +233,7 @@ export function findDefinitionsAnywhere(diff: DiffResult, name: string, signal: 
     const find = (patterns: string[], pathspecs: string[]) =>
       grepLines(diff, repos, ["-i", ...defines(escaped, patterns)], pathspecs, MAX_DEFINITIONS, signal, (text) => text.toLowerCase().indexOf(lower));
     const found = await Promise.all([
-      ...LANGUAGES.map((l) => find(l.patterns(escaped), l.exts.map((e) => `*.${e}`))),
+      ...LANGUAGES.map((l) => find([...l.patterns(escaped), ...l.values(escaped)], l.exts.map((e) => `*.${e}`))),
       find(GENERIC.patterns(escaped), [".", ...LANGUAGES.flatMap((l) => l.exts).map((e) => `:(exclude)*.${e}`)]),
     ]);
     const hits = found.flatMap((f) => f.hits).sort((a, b) => compareText(a.path, b.path) || a.no - b.no);

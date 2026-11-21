@@ -70,13 +70,14 @@ export function searchChanges(files: FileDiff[], query: string, whole: boolean):
 }
 
 const SECTIONS = [
+  ["writes", "Writes", "Lines that give the name a value: an assignment, a key of an object, an argument passed by name. A line opens its file on the right."],
   ["changes", "In the changes", "Lines the diff adds or removes. A line goes to its place in the diff."],
   ["files", "Rest of the changed files", "Lines the diff leaves as they are, in the files it changes. A line opens its file on the right."],
   ["repo", "Unchanged files", "Files the diff does not touch. A line opens its file on the right."],
   ["repos", "Other repositories", "Repositories with no changes in the diff. A line opens its file on the right."],
 ] as const;
 
-// Orders the matches by how close they are to the diff: its changed lines, the rest of its files, the files it does not touch, and the repositories with no changes at all. A line listed as a definition is left out of the lines that open the same way.
+// Puts the lines that write the name first, since they answer where a value comes from, then orders the rest by how close they are to the diff: its changed lines, the rest of its files, the files it does not touch, and the repositories with no changes at all. A line listed as a definition is left out of the lines that open the same way.
 export function searchSections(
   changes: Found,
   repo: { hits: RepoHit[]; capped: boolean } | null,
@@ -89,15 +90,17 @@ export function searchSections(
   const word = wordRegExp(query, whole);
   const changed = new Map(files.map((f) => [f.path, f]));
   const idOf = (h: { path: string; no: number }) => `${h.path}\0${h.no}`;
-  const listed = new Set([...(definitions?.hits ?? []), ...changes.hits.filter((h) => h.side === "new")].map(idOf));
+  const defined = new Set((definitions?.hits ?? []).map(idOf));
+  const changing = new Set(changes.hits.filter((h) => h.side === "new").map(idOf));
   const quiet = repos.filter((r) => r.dir !== "" && !files.some((f) => f.path.startsWith(`${r.dir}/`)));
   const added = new Map<string, Set<number>>();
-  const lists: Record<string, Map<string, Hit[]>> = { files: new Map(), repo: new Map(), repos: new Map() };
+  const lists: Record<string, Map<string, Hit[]>> = { writes: new Map(), files: new Map(), repo: new Map(), repos: new Map() };
 
   for (const h of repo?.hits ?? []) {
-    if (listed.has(idOf(h))) continue;
+    const write = h.role === "write";
+    if (defined.has(idOf(h)) || (!write && changing.has(idOf(h)))) continue;
     const file = changed.get(h.path);
-    const key = file ? "files" : quiet.some((r) => h.path.startsWith(`${r.dir}/`)) ? "repos" : "repo";
+    const key = write ? "writes" : file ? "files" : quiet.some((r) => h.path.startsWith(`${r.dir}/`)) ? "repos" : "repo";
     let lines = added.get(h.path);
     if (!lines) added.set(h.path, (lines = addedLines(file)));
     const match = word?.exec(h.text);

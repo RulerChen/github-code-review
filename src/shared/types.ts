@@ -179,6 +179,8 @@ export interface RepoHit {
   at: number;
   // The function, method or class the line is in. Null at the top level, and absent when the file was not read.
   inside?: string | null;
+  // Set when the line declares a field of the name searched for, or gives that name a value.
+  role?: "field" | "write";
 }
 
 export interface RepoHits {
@@ -189,6 +191,10 @@ export interface RepoHits {
 
 export interface Definitions extends RepoHits {
   declared: boolean;
+  // The name was clicked as a field of something. With no definition, what is left to show is where it is written.
+  member: boolean;
+  // The hits are fields that share the name. Nothing ties the clicked member to their types, so the page asks before it goes to one.
+  byName: boolean;
 }
 
 export interface RefRange {

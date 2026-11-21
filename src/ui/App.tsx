@@ -284,7 +284,7 @@ export function App({ viewId }: Props) {
           fail,
         );
 
-      setLookup({ name: text, from, x, y, hits: null, lines: false, capped: false, error: null });
+      setLookup({ name: text, from, byName: false, x, y, hits: null, lines: false, capped: false, error: null });
       if (!isName(text)) return void findLines();
       fetchDefinitions(viewId, requested.current, text, from).then((r) => {
         if (seq !== lookupSeq.current) return;
@@ -294,13 +294,19 @@ export function App({ viewId }: Props) {
           return;
         }
         const hits = rankDefinitions(r.hits, from.path);
+        // Nothing declares the member, as with data that comes from somewhere else. The list of its lines starts with the ones that write it.
+        if (hits.length === 0 && r.member) {
+          closeLookup();
+          searchFor(text);
+          return;
+        }
         if (hits.length === 0) return void findLines();
-        if (hits.length === 1 && !r.capped) {
+        if (hits.length === 1 && !r.capped && !r.byName) {
           closeLookup();
           openCode(hits[0]!.path, hits[0]!.no, from, text);
           return;
         }
-        current((l) => ({ ...l, hits, capped: r.capped }));
+        current((l) => ({ ...l, hits, capped: r.capped, byName: r.byName }));
       }, fail);
     },
     [viewId, openCode, closeLookup, searchFor],
@@ -541,8 +547,11 @@ export function App({ viewId }: Props) {
   const repos = diff?.repos;
   const definitions = useMemo(() => {
     const result = defined?.name === searchedName && defined.result.version === loadedVersion ? defined.result : null;
-    return result?.hits.length ? definitionsFound(result.hits, result.capped, repoFiles ?? [], searchedName) : null;
-  }, [defined, searchedName, loadedVersion, repoFiles]);
+    // A line that declares a field of the name defines it too.
+    const fields = (searchedName ? (repoResult?.hits ?? []) : []).filter((f) => f.role === "field" && !result?.hits.some((h) => h.path === f.path && h.no === f.no));
+    const hits = [...(result?.hits ?? []), ...fields];
+    return hits.length ? definitionsFound(hits, result?.capped ?? false, repoFiles ?? [], searchedName) : null;
+  }, [defined, searchedName, loadedVersion, repoFiles, repoResult]);
   const changesFound = useMemo(() => searchChanges(shown.map((e) => e.file), searched, wholeWord), [shown, searched, wholeWord]);
   const sections = useMemo(
     () => searchSections(changesFound, repoResult, repoFiles ?? [], repos ?? [], repoQuery, wholeWord, definitions),

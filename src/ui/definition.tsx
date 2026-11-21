@@ -60,6 +60,8 @@ export function rankDefinitions(hits: RepoHit[], from: string): RepoHit[] {
 export interface DefinitionLookup {
   name: string;
   from: ClickedAt;
+  // The hits are fields found by their name alone.
+  byName: boolean;
   x: number;
   y: number;
   hits: RepoHit[] | null;
@@ -109,16 +111,23 @@ export function DefinitionMenu({ lookup, onPick, onSearch, onClose }: Props) {
                 <button onClick={() => onPick(h)} title={`${h.path}:${h.no}`}>
                   <span className="picker-item-label definition-code">{h.text.trim()}</span>
                   <span className="picker-item-detail">
+                    {h.inside ? `${h.inside} · ` : ""}
                     {basename(h.path)}:{h.no}
                   </span>
                 </button>
               </li>
             ))}
           </ul>
-          {shown.length < hits.length && (
+          {shown.length < hits.length ? (
             <button className="definition-more" onClick={onSearch}>
               Show all {capped ? "" : `${hits.length} `}in the search
             </button>
+          ) : (
+            lookup.byName && (
+              <button className="definition-more" onClick={onSearch}>
+                Show where it is written in the search
+              </button>
+            )
           )}
         </>
       )}
