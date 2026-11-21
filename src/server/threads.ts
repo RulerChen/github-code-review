@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import type { Thread, ThreadAnchor, ThreadComment, ThreadContext } from "../shared/types.js";
+import type { SessionStatus, Thread, ThreadAnchor, ThreadComment, ThreadContext } from "../shared/types.js";
 
 const newId = () => randomBytes(6).toString("base64url");
 const now = () => new Date().toISOString();
@@ -17,8 +17,9 @@ export class RepoThreads {
   parentSession: string | null = null;
   onChange: () => void = () => {};
 
+  private workingSince: string | null = null;
   private readonly listeners = new Set<(thread: Thread) => void>();
-  private readonly listeningListeners = new Set<(listening: boolean) => void>();
+  private readonly statusListeners = new Set<(status: SessionStatus) => void>();
   private readonly waiters = new Set<(s: Submission) => void>();
 
   constructor(public cwd: string) {}
@@ -28,13 +29,13 @@ export class RepoThreads {
     return () => this.listeners.delete(fn);
   }
 
-  get listening(): boolean {
-    return this.waiters.size > 0;
+  get status(): SessionStatus {
+    return { listening: this.waiters.size > 0, workingSince: this.workingSince, read: this.read };
   }
 
-  subscribeListening(fn: (listening: boolean) => void): () => void {
-    this.listeningListeners.add(fn);
-    return () => this.listeningListeners.delete(fn);
+  subscribeStatus(fn: (status: SessionStatus) => void): () => void {
+    this.statusListeners.add(fn);
+    return () => this.statusListeners.delete(fn);
   }
 
   restore(threads: Thread[], submissions: Submission[], read: number): void {
@@ -44,8 +45,11 @@ export class RepoThreads {
   }
 
   markRead(): void {
+    if (this.read === this.submissions.length) return;
     this.read = this.submissions.length;
+    this.workingSince ??= now();
     this.onChange();
+    this.emitStatus();
   }
 
   create(anchor: ThreadAnchor, snippet: string, context: ThreadContext | null, body: string, single: boolean): Thread {
@@ -125,13 +129,16 @@ export class RepoThreads {
     const latest = this.submissions.at(-1);
     if (latest && latest.n > after) {
       onReview(latest);
+      this.workingSince = now();
+      this.emitStatus();
       return () => {};
     }
 
     this.waiters.add(onReview);
-    if (this.waiters.size === 1) this.emitListening();
+    this.workingSince = null;
+    if (this.waiters.size === 1) this.emitStatus();
     return () => {
-      if (this.waiters.delete(onReview) && this.waiters.size === 0) this.emitListening();
+      if (this.waiters.delete(onReview) && this.waiters.size === 0) this.emitStatus();
     };
   }
 
@@ -150,12 +157,16 @@ export class RepoThreads {
     const delivered = this.waiters.size > 0;
     for (const wake of this.waiters) wake(submission);
     this.waiters.clear();
-    if (delivered) this.emitListening();
+    if (delivered) {
+      this.workingSince = now();
+      this.emitStatus();
+    }
     return delivered;
   }
 
-  private emitListening(): void {
-    for (const fn of this.listeningListeners) fn(this.listening);
+  private emitStatus(): void {
+    const status = this.status;
+    for (const fn of this.statusListeners) fn(status);
   }
 
   private emit(thread: Thread): void {

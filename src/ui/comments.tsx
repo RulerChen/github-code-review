@@ -24,7 +24,7 @@ export interface CommentsApi {
   isFolded: (threadId: string, byDefault: boolean) => boolean;
   setFolded: (threadId: string, folded: boolean, byDefault: boolean) => void;
   pending: boolean;
-  listening: boolean;
+  read: number;
   revealSeq: number;
   peekReveal: () => Thread | null;
   takeReveal: (threadId: string) => boolean;
@@ -39,6 +39,16 @@ export const useComments = () => useContext(CommentsContext)!;
 export const useCommentActions = () => useContext(CommentActionsContext)!;
 
 export const authorName = (c: ThreadComment) => (c.author === "claude" ? "Claude" : "You");
+
+const unreadBy = (read: number) => (c: ThreadComment) => c.author === "user" && !c.draft && c.review !== null && c.review > read;
+
+function NotRead() {
+  return (
+    <span className="unread-label" title="Claude hasn't read this comment yet.">
+      Not read yet
+    </span>
+  );
+}
 
 export const preview = (text: string) =>
   text
@@ -345,7 +355,8 @@ function flash(el: HTMLElement): void {
 }
 
 export function ThreadView({ thread, withVersion = false }: { thread: Thread; withVersion?: boolean }) {
-  const { reply, unread, markRead, revealSeq, peekReveal, takeReveal, isFolded, setFolded } = useComments();
+  const { reply, unread, markRead, revealSeq, peekReveal, takeReveal, isFolded, setFolded, read } = useComments();
+  const notRead = unreadBy(read);
   const [replying, setReplying] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
   const [moving, setMoving] = useState(false);
@@ -408,6 +419,7 @@ export function ThreadView({ thread, withVersion = false }: { thread: Thread; wi
         <span className={`comment-author comment-author-${first.author}`}>{authorName(first)}</span>
         {gone && <span className="outdated-label">Outdated</span>}
         {(folded ? thread.comments.some((c) => c.draft) : first.draft) && <span className="pending-label">Pending</span>}
+        {(folded ? thread.comments.some(notRead) : notRead(first)) && <NotRead />}
         {folded ? (
           <>
             <span className="thread-preview">{preview(first.body)}</span>
@@ -426,7 +438,7 @@ export function ThreadView({ thread, withVersion = false }: { thread: Thread; wi
         <div className="thread-body-inner">
           {gone && <OutdatedLines snippet={thread.snippet} />}
           {thread.comments.map((c, i) => (
-            <CommentView key={c.id} thread={thread} comment={c} first={i === 0} editing={editing === c.id} setEditing={setEditing} />
+            <CommentView key={c.id} thread={thread} comment={c} first={i === 0} notRead={notRead(c)} editing={editing === c.id} setEditing={setEditing} />
           ))}
           <div className="thread-foot">
             {replying ? (
@@ -472,11 +484,12 @@ interface CommentViewProps {
   thread: Thread;
   comment: ThreadComment;
   first: boolean;
+  notRead: boolean;
   editing: boolean;
   setEditing: (commentId: string | null) => void;
 }
 
-const CommentView = memo(function CommentView({ thread, comment: c, first, editing, setEditing }: CommentViewProps) {
+const CommentView = memo(function CommentView({ thread, comment: c, first, notRead, editing, setEditing }: CommentViewProps) {
   const { edit } = useCommentActions();
 
   return (
@@ -485,6 +498,7 @@ const CommentView = memo(function CommentView({ thread, comment: c, first, editi
         <div className="comment-head">
           <span className="comment-author">{authorName(c)}</span>
           {c.draft && <span className="pending-label">Pending</span>}
+          {notRead && <NotRead />}
           {c.editedAt && <span className="comment-edited">edited</span>}
           {c.author === "user" && !editing && <CommentTools thread={thread} comment={c} onEdit={() => setEditing(c.id)} />}
         </div>

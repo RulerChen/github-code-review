@@ -160,7 +160,13 @@ export interface ViewData {
   reviews: Review[];
   groupings: Grouping[];
   threads: Thread[];
+  status: SessionStatus;
+}
+
+export interface SessionStatus {
   listening: boolean;
+  workingSince: string | null;
+  read: number;
 }
 
 export interface RepoFile {

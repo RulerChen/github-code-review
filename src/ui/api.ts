@@ -29,7 +29,9 @@ interface SubmitResult {
   threads: Thread[];
 }
 
-export const viewUrl = (viewId: string, ...parts: string[]) => `/api/views/${[viewId, ...parts].map(encodeURIComponent).join("/")}`;
+export const UNREACHABLE = "Could not reach the viewer. It stops when the Claude Code session ends: ask Claude to open it again.";
+
+export const viewUrl =(viewId: string, ...parts: string[]) => `/api/views/${[viewId, ...parts].map(encodeURIComponent).join("/")}`;
 
 const withComparison = (url: string, compare: Comparison | null) => (compare ? `${url}?${comparisonQuery(compare)}` : url);
 
@@ -38,7 +40,13 @@ async function request<T>(url: string, ok: (body: Partial<T>) => boolean, method
     payload === undefined
       ? { method, cache: "no-store", signal }
       : { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) };
-  const res = await fetch(url, init);
+  let res: Response;
+  try {
+    res = await fetch(url, init);
+  } catch (e) {
+    if (signal?.aborted) throw e;
+    throw new ApiError(UNREACHABLE, 0);
+  }
   const body = (await res.json().catch(() => null)) as (Partial<T> & { error?: string }) | null;
   if (!res.ok || !body || !ok(body)) throw new ApiError(body?.error ?? `HTTP ${res.status}`, res.status);
   return body as T;

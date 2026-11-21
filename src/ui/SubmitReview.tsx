@@ -3,20 +3,25 @@ import type { Thread, ThreadComment } from "../shared/types";
 import { plural } from "../shared/util";
 import { focusInPlace } from "./anchor";
 import { preview } from "./comments";
-import { CopyButton } from "./controls";
 import { ThreadWhere } from "./Conversations";
 import { useAction, useDismiss } from "./hooks";
+import { AskInTerminal, type Claude } from "./Status";
 
-const ASK = "address my review comments";
+const STATUS: Record<Claude, string> = {
+  waiting: "Claude is waiting for this review and starts on it as soon as you submit.",
+  working: "Claude is still working on what you sent before and picks this review up when it is done.",
+  idle: "Claude isn't waiting for a review right now. Submitting saves it, and Claude works on it once you ask in the terminal.",
+  gone: "The viewer can't be reached, so the review can't be submitted. If the Claude Code session ended, ask Claude to open the viewer again.",
+};
 
 interface Props {
   pending: { thread: Thread; comment: ThreadComment }[];
-  listening: boolean;
+  state: Claude;
   onSubmit: (body: string) => Promise<boolean>;
   onOpen: (thread: Thread) => void;
 }
 
-export function SubmitReview({ pending, listening, onSubmit, onOpen }: Props) {
+export function SubmitReview({ pending, state, onSubmit, onOpen }: Props) {
   const drafts = pending.length;
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
@@ -51,11 +56,9 @@ export function SubmitReview({ pending, listening, onSubmit, onOpen }: Props) {
           <div className="picker-title">Finish your review</div>
           {delivered === null ? (
             <form className="comment-form" onSubmit={submit}>
-              <p className={`review-status${listening ? " is-listening" : ""}`}>
+              <p className={`review-status is-${state}`}>
                 <span className="status-dot" aria-hidden="true" />
-                {listening
-                  ? "Claude is waiting for this review and starts on it as soon as you submit."
-                  : "Claude isn't waiting for a review right now. Submitting saves it, and Claude works on it once you ask in the terminal."}
+                {STATUS[state]}
               </p>
               {drafts > 0 && (
                 <ul className="review-drafts" aria-label="Pending comments">
@@ -97,13 +100,12 @@ export function SubmitReview({ pending, listening, onSubmit, onOpen }: Props) {
             </form>
           ) : delivered ? (
             <p className="review-sent">Review sent. Claude is working on it in the terminal and will reply on each thread here.</p>
+          ) : state === "working" ? (
+            <p className="review-sent">Review saved. Claude picks it up when it finishes what it is working on.</p>
           ) : (
             <div className="review-sent">
               <p>Review saved. Claude wasn't waiting for one, so nothing has started yet. To start, tell Claude in the terminal:</p>
-              <p className="review-ask">
-                <code>{ASK}</code>
-                <CopyButton text={ASK} label="Copy" />
-              </p>
+              <AskInTerminal />
             </div>
           )}
         </div>

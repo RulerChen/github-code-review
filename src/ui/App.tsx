@@ -2,7 +2,7 @@ import { type ReactNode, useCallback, useDeferredValue, useEffect, useLayoutEffe
 import { contextOf } from "../shared/comments";
 import { comparisonFromQuery, comparisonQuery, isFor, repoFailures, sameComparison } from "../shared/comparison";
 import { changeIds, splitLines } from "../shared/hunks";
-import type { CommitInfo, Comparison, DiffResult, FileDiff, Grouping, RepoHits, Review, Thread, ThreadAnchor, ViewData } from "../shared/types";
+import type { CommitInfo, Comparison, DiffResult, FileDiff, Grouping, RepoHits, Review, SessionStatus, Thread, ThreadAnchor, ViewData } from "../shared/types";
 import { errorMessage } from "../shared/util";
 import { followActiveFile } from "./active";
 import { scrollToTop, startAnchoring } from "./anchor";
@@ -41,6 +41,7 @@ import { locate } from "./locate";
 import { comparePaths } from "./paths";
 import { ReviewBar } from "./ReviewBar";
 import { definitionsFound, type Hit, revealLine, searchChanges, SearchResults, searchSections } from "./Search";
+import { claudeState, ClaudeStatus } from "./Status";
 import { useStoredState, useViewed } from "./storage";
 import { SubmitReview } from "./SubmitReview";
 import { ChangeStats, RefreshButton, SidebarToggle, type Tab, ThemeToggle, ViewTabs } from "./TopBar";
@@ -90,7 +91,8 @@ export function App({ viewId }: Props) {
   const [error, setError] = useState<{ message: string; status: number } | null>(null);
   const [loading, setLoading] = useState(false);
   const [switching, setSwitching] = useState(false);
-  const [listening, setListening] = useState(false);
+  const [status, setStatus] = useState<SessionStatus | null>(null);
+  const [connected, setConnected] = useState(true);
   const [stale, setStale] = useState(false);
 
   const [tab, setTab] = useState<Tab>("topics");
@@ -159,7 +161,7 @@ export function App({ viewId }: Props) {
       setReviews(result.reviews);
       setGroupings(result.groupings);
       setThreads((prev) => mergeThreads(prev, result.threads));
-      setListening(result.listening);
+      setStatus(result.status);
       setError(null);
       setStale(false);
     } catch (e) {
@@ -345,7 +347,9 @@ export function App({ viewId }: Props) {
     const on = <T,>(name: string, fn: (data: T) => void) =>
       events.addEventListener(name, (e) => fn(JSON.parse((e as MessageEvent<string>).data) as T));
     on<Thread>("thread", (thread) => setThreads((prev) => mergeThreads(prev, [thread])));
-    on<boolean>("listening", setListening);
+    on<SessionStatus>("status", setStatus);
+    events.addEventListener("open", () => setConnected(true));
+    events.addEventListener("error", () => setConnected(false));
     on<Review[]>("reviews", setReviews);
     on<Grouping[]>("groupings", setGroupings);
     on<Opened>("view", (o) => onOpened.current(o));
@@ -419,7 +423,7 @@ export function App({ viewId }: Props) {
   const live = useMemo(() => threads.filter((t) => t.comments.length > 0).map(placed), [threads, placed]);
 
   const pathThreads = useRef(new Map<string, Thread[]>());
-  const comments = useMemo<Pick<CommentsApi, keyof CommentActions | "threadsFor" | "threadsForTopic" | "pending" | "listening">>(() => {
+  const comments = useMemo<Pick<CommentsApi, keyof CommentActions | "threadsFor" | "threadsForTopic" | "pending" | "read">>(() => {
     const byPath = new Map<string, Thread[]>();
     const byTopic = new Map<string, Thread[]>();
     const add = (map: Map<string, Thread[]>, key: string, t: Thread) => {
@@ -444,9 +448,9 @@ export function App({ viewId }: Props) {
       threadsFor: (path) => byPath.get(path) ?? NO_THREADS,
       threadsForTopic: (title) => byTopic.get(title) ?? NO_THREADS,
       pending: live.some((t) => t.comments.some((c) => c.draft)),
-      listening,
+      read: status?.read ?? 0,
     };
-  }, [live, actions, current, listening]);
+  }, [live, actions, current, status?.read]);
 
   const submit = async (body: string) => {
     if (!viewId) return false;
@@ -650,6 +654,7 @@ export function App({ viewId }: Props) {
     [conv.ordered],
   );
 
+  const claude = claudeState(status, connected);
   const [help, setHelp] = useState(false);
   useShortcuts({
     j: () => stepSection(1),
@@ -751,7 +756,8 @@ export function App({ viewId }: Props) {
                 />
                 <KeyboardButton onClick={() => setHelp(true)} />
                 <ThemeToggle />
-                <SubmitReview pending={pendingComments} listening={listening} onSubmit={submit} onOpen={conv.reveal} />
+                <ClaudeStatus state={claude} since={status?.workingSince ?? null} />
+                <SubmitReview pending={pendingComments} state={claude} onSubmit={submit} onOpen={conv.reveal} />
               </header>
 
               {error && <div className="banner">{error.message}</div>}

@@ -1678,6 +1678,17 @@ button {
   line-height: 18px;
 }
 
+.unread-label {
+  flex: none;
+  padding: 0 7px;
+  border: 1px solid var(--accent);
+  border-radius: 2em;
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 18px;
+}
+
 .outdated-label {
   flex: none;
   padding: 0 7px;
@@ -1835,8 +1846,45 @@ button {
   background: var(--bar-neutral);
 }
 
-.review-status.is-listening .status-dot {
+.is-waiting > .status-dot {
   background: var(--success);
+}
+
+.is-working > .status-dot {
+  background: var(--accent);
+  animation: status-pulse 1.6s var(--ease-in-out) infinite;
+}
+
+.is-gone > .status-dot {
+  background: var(--danger);
+}
+
+@keyframes status-pulse {
+  50% {
+    opacity: 0.3;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .is-working > .status-dot {
+    animation: none;
+  }
+}
+
+.status-menu > .status-button {
+  min-width: 0;
+  color: var(--fg-muted);
+  font-weight: 400;
+  white-space: nowrap;
+}
+
+.status-menu > .status-button.is-gone {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.status-popover {
+  width: 360px;
 }
 
 .review-drafts {

@@ -38564,19 +38564,20 @@ var RepoThreads = class {
   parentSession = null;
   onChange = () => {
   };
+  workingSince = null;
   listeners = /* @__PURE__ */ new Set();
-  listeningListeners = /* @__PURE__ */ new Set();
+  statusListeners = /* @__PURE__ */ new Set();
   waiters = /* @__PURE__ */ new Set();
   subscribe(fn) {
     this.listeners.add(fn);
     return () => this.listeners.delete(fn);
   }
-  get listening() {
-    return this.waiters.size > 0;
+  get status() {
+    return { listening: this.waiters.size > 0, workingSince: this.workingSince, read: this.read };
   }
-  subscribeListening(fn) {
-    this.listeningListeners.add(fn);
-    return () => this.listeningListeners.delete(fn);
+  subscribeStatus(fn) {
+    this.statusListeners.add(fn);
+    return () => this.statusListeners.delete(fn);
   }
   restore(threads, submissions, read) {
     this.threads.push(...threads);
@@ -38584,8 +38585,11 @@ var RepoThreads = class {
     this.read = read;
   }
   markRead() {
+    if (this.read === this.submissions.length) return;
     this.read = this.submissions.length;
+    this.workingSince ??= now();
     this.onChange();
+    this.emitStatus();
   }
   create(anchor2, snippet, context, body, single) {
     const thread = { id: newId(), rev: 0, anchor: anchor2, snippet, context, comments: [] };
@@ -38656,13 +38660,16 @@ var RepoThreads = class {
     const latest = this.submissions.at(-1);
     if (latest && latest.n > after) {
       onReview(latest);
+      this.workingSince = now();
+      this.emitStatus();
       return () => {
       };
     }
     this.waiters.add(onReview);
-    if (this.waiters.size === 1) this.emitListening();
+    this.workingSince = null;
+    if (this.waiters.size === 1) this.emitStatus();
     return () => {
-      if (this.waiters.delete(onReview) && this.waiters.size === 0) this.emitListening();
+      if (this.waiters.delete(onReview) && this.waiters.size === 0) this.emitStatus();
     };
   }
   find(threadId) {
@@ -38678,11 +38685,15 @@ var RepoThreads = class {
     const delivered = this.waiters.size > 0;
     for (const wake of this.waiters) wake(submission);
     this.waiters.clear();
-    if (delivered) this.emitListening();
+    if (delivered) {
+      this.workingSince = now();
+      this.emitStatus();
+    }
     return delivered;
   }
-  emitListening() {
-    for (const fn of this.listeningListeners) fn(this.listening);
+  emitStatus() {
+    const status = this.status;
+    for (const fn of this.statusListeners) fn(status);
   }
   emit(thread) {
     thread.rev++;
@@ -38994,7 +39005,7 @@ var ReviewServer = class {
           reviews: this.reviews,
           groupings: this.groupings,
           threads: threads.threads,
-          listening: threads.listening
+          status: threads.status
         };
         const remote = SSH_HOST !== null && /\bgzip\b/.test(String(req.headers["accept-encoding"]));
         return remote ? sendGzipped(res, data) : sendJson(res, 200, data);
@@ -39113,10 +39124,10 @@ data: ${JSON.stringify(data)}
 
 `);
     const unsubscribe = threads.subscribe((thread) => send("thread", thread));
-    send("listening", threads.listening);
+    send("status", threads.status);
     send("reviews", this.reviews);
     send("groupings", this.groupings);
-    const unlisten = threads.subscribeListening((on) => send("listening", on));
+    const unlisten = threads.subscribeStatus((status) => send("status", status));
     this.pages.add(send);
     const ping = setInterval(() => res.write(": ping\n\n"), PING_MS);
     req.on("close", () => {

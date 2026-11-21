@@ -376,7 +376,7 @@ export class ReviewServer {
           reviews: this.reviews,
           groupings: this.groupings,
           threads: threads.threads,
-          listening: threads.listening,
+          status: threads.status,
         };
         const remote = SSH_HOST !== null && /\bgzip\b/.test(String(req.headers["accept-encoding"]));
         return remote ? sendGzipped(res, data) : sendJson(res, 200, data);
@@ -495,10 +495,10 @@ export class ReviewServer {
 
     const send = (event: string, data: unknown) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
     const unsubscribe = threads.subscribe((thread) => send("thread", thread));
-    send("listening", threads.listening);
+    send("status", threads.status);
     send("reviews", this.reviews);
     send("groupings", this.groupings);
-    const unlisten = threads.subscribeListening((on) => send("listening", on));
+    const unlisten = threads.subscribeStatus((status) => send("status", status));
     this.pages.add(send);
     const ping = setInterval(() => res.write(": ping\n\n"), PING_MS);
 
