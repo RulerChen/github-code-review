@@ -177,7 +177,11 @@ async function runMcp(): Promise<void> {
           .array(
             z.object({
               title: z.string().describe("A few words naming the topic."),
-              summary: z.string().describe("Markdown explaining what changed in this topic and why."),
+              summary: z
+                .string()
+                .describe(
+                  "Markdown on what behaves differently after this topic's changes: each function or file involved, what it did before and what it does now, and why in one sentence. No commit hashes, no account of which commit did what, and no advice to the reviewer.",
+                ),
               ids: z.array(z.string()).describe("Ids from list_changes of the changes in this topic."),
             }),
           )
@@ -252,14 +256,20 @@ async function runMcp(): Promise<void> {
     {
       title: "Reply to review",
       description:
-        "Reply on comment threads in the diff viewer after addressing the user's review, saying what you changed or " +
-        "answering the comment, in a short paragraph of plain sentences. The replies show in the page.",
+        "Reply on comment threads in the diff viewer after addressing the user's review. Each reply opens with what " +
+        "you changed or the answer, followed only by what is needed to follow it, in a short paragraph of plain " +
+        "sentences. The replies show in the page.",
       inputSchema: {
         replies: z
           .array(
             z.object({
               thread: z.string().describe("A thread id from get_review_comments."),
-              body: z.string().min(1).describe("Markdown: what you changed, or your answer, in a short paragraph of plain sentences."),
+              body: z
+                .string()
+                .min(1)
+                .describe(
+                  "Markdown: what you changed or your answer first, then only what is needed to follow it, in a short paragraph of plain sentences. No commit history, no account of how you found it, no closing offer.",
+                ),
             }),
           )
           .min(1),

@@ -38364,6 +38364,7 @@ function checkTopics(diff, topics) {
 }
 
 // src/server/group.ts
+var SUMMARY_RULES = "Add why in one sentence when you know it. Describe the end result of the changes as listed: no commit hashes, no account of which commit did what, nothing about code these changes leave alone, and no advice to the reviewer.";
 var REPLY = 'Reply with only a JSON object and no other text: {"topics": [{"title": "...", "summary": "...", "ids": ["..."]}]}';
 async function askTopics(o, prompt, allowEmpty, check2) {
   const run = (resume, fork, prompt2) => ask({ cwd: o.cwd, resume, fork, prompt: prompt2, onText: () => {
@@ -38402,10 +38403,10 @@ function buildPrompt(diff, focus, names) {
   const scope = names ? `Use exactly these topics, in this order and with these titles: ${names.map((n) => JSON.stringify(n)).join(", ")}. Do not add topics of your own. Put each change in the topic it belongs to, leave out the changes that fit none of them, and leave out a topic that no change belongs to.${empty}` : focus ? `Make topics only for the changes the focus asks for. Leave every other change out of your answer, and do not make a topic for changes that have nothing to do with the focus. The reviewer still finds those in the list of all files.${empty}` : "Put every id in a topic.";
   return [
     `The user is reviewing code changes in a diff viewer and asked, from the page, for them to be grouped into topics${focus ? `, with this focus: ${JSON.stringify(focus)}` : ""}.`,
-    "A topic is one feature, fix or purpose, and can span files. Use what you know about why the changes were made, and the commit messages for the why. You can read files to check details, but do not change anything.",
+    "A topic is one feature, fix or purpose, and can span files. Use what you know about why the changes were made, and the commit messages, to tell which changes belong together. You can read files to check details, but do not change anything.",
     "For each topic give:",
     '- "title": a few words.',
-    '- "summary": two to six sentences of Markdown on what changed and why, naming the files and functions involved and anything the reviewer should check closely.',
+    `- "summary": two to six sentences of Markdown on what behaves differently after these changes: name each function or file involved and say what it did before, what it does now, and in which cases. ${SUMMARY_RULES}`,
     '- "ids": the ids of all changes in the topic, exactly as listed below.',
     scope,
     "Order the topics the way a reviewer should read them. Write titles and summaries in the language the user writes in.",
@@ -38481,7 +38482,7 @@ function buildSyncPrompt(review, diff, delta) {
     "",
     "Give each topic that gains or loses changes, and each new topic:",
     '- "title": the title exactly as above, or a few words for a new topic.',
-    '- "summary": two to six sentences of Markdown on what the topic changes now and why, naming the files and functions involved and anything the reviewer should check closely.',
+    `- "summary": two to six sentences of Markdown on what behaves differently after the topic's changes as they are now: name each function or file involved and say what it did before, what it does now, and in which cases. ${SUMMARY_RULES}`,
     '- "ids": the ids of the new and edited changes that belong in the topic. Leave out the ids it already has.',
     `${scope} Leave out the topics that neither gain nor lose changes. Write in the language of the summaries above.`,
     REPLY
@@ -39405,7 +39406,9 @@ async function runMcp() {
         topics: external_exports.array(
           external_exports.object({
             title: external_exports.string().describe("A few words naming the topic."),
-            summary: external_exports.string().describe("Markdown explaining what changed in this topic and why."),
+            summary: external_exports.string().describe(
+              "Markdown on what behaves differently after this topic's changes: each function or file involved, what it did before and what it does now, and why in one sentence. No commit hashes, no account of which commit did what, and no advice to the reviewer."
+            ),
             ids: external_exports.array(external_exports.string()).describe("Ids from list_changes of the changes in this topic.")
           })
         ).optional().describe(
@@ -39463,12 +39466,14 @@ When you have addressed it, reply on each thread with reply_to_review. Then wait
     "reply_to_review",
     {
       title: "Reply to review",
-      description: "Reply on comment threads in the diff viewer after addressing the user's review, saying what you changed or answering the comment, in a short paragraph of plain sentences. The replies show in the page.",
+      description: "Reply on comment threads in the diff viewer after addressing the user's review. Each reply opens with what you changed or the answer, followed only by what is needed to follow it, in a short paragraph of plain sentences. The replies show in the page.",
       inputSchema: {
         replies: external_exports.array(
           external_exports.object({
             thread: external_exports.string().describe("A thread id from get_review_comments."),
-            body: external_exports.string().min(1).describe("Markdown: what you changed, or your answer, in a short paragraph of plain sentences.")
+            body: external_exports.string().min(1).describe(
+              "Markdown: what you changed or your answer first, then only what is needed to follow it, in a short paragraph of plain sentences. No commit history, no account of how you found it, no closing offer."
+            )
           })
         ).min(1)
       },

@@ -16,6 +16,8 @@ interface GroupOptions extends AskOptions {
   names: string[] | null;
 }
 
+const SUMMARY_RULES = "Add why in one sentence when you know it. Describe the end result of the changes as listed: no commit hashes, no account of which commit did what, nothing about code these changes leave alone, and no advice to the reviewer.";
+
 const REPLY = 'Reply with only a JSON object and no other text: {"topics": [{"title": "...", "summary": "...", "ids": ["..."]}]}';
 
 async function askTopics(o: AskOptions, prompt: string, allowEmpty: boolean, check: (topics: Topic[]) => string | null): Promise<Topic[]> {
@@ -64,10 +66,10 @@ function buildPrompt(diff: DiffResult, focus: string | null, names: string[] | n
       : "Put every id in a topic.";
   return [
     `The user is reviewing code changes in a diff viewer and asked, from the page, for them to be grouped into topics${focus ? `, with this focus: ${JSON.stringify(focus)}` : ""}.`,
-    "A topic is one feature, fix or purpose, and can span files. Use what you know about why the changes were made, and the commit messages for the why. You can read files to check details, but do not change anything.",
+    "A topic is one feature, fix or purpose, and can span files. Use what you know about why the changes were made, and the commit messages, to tell which changes belong together. You can read files to check details, but do not change anything.",
     "For each topic give:",
     '- "title": a few words.',
-    '- "summary": two to six sentences of Markdown on what changed and why, naming the files and functions involved and anything the reviewer should check closely.',
+    `- "summary": two to six sentences of Markdown on what behaves differently after these changes: name each function or file involved and say what it did before, what it does now, and in which cases. ${SUMMARY_RULES}`,
     '- "ids": the ids of all changes in the topic, exactly as listed below.',
     scope,
     "Order the topics the way a reviewer should read them. Write titles and summaries in the language the user writes in.",
@@ -164,7 +166,7 @@ function buildSyncPrompt(review: Review, diff: DiffResult, delta: TopicDelta): s
     "",
     "Give each topic that gains or loses changes, and each new topic:",
     '- "title": the title exactly as above, or a few words for a new topic.',
-    '- "summary": two to six sentences of Markdown on what the topic changes now and why, naming the files and functions involved and anything the reviewer should check closely.',
+    `- "summary": two to six sentences of Markdown on what behaves differently after the topic's changes as they are now: name each function or file involved and say what it did before, what it does now, and in which cases. ${SUMMARY_RULES}`,
     '- "ids": the ids of the new and edited changes that belong in the topic. Leave out the ids it already has.',
     `${scope} Leave out the topics that neither gain nor lose changes. Write in the language of the summaries above.`,
     REPLY,
