@@ -38406,7 +38406,7 @@ function buildPrompt(diff, focus, names) {
     "A topic is one feature, fix or purpose, and can span files. Use what you know about why the changes were made, and the commit messages, to tell which changes belong together. You can read files to check details, but do not change anything.",
     "For each topic give:",
     '- "title": a few words.',
-    `- "summary": two to six sentences of Markdown on what behaves differently after these changes: name each function or file involved and say what it did before, what it does now, and in which cases. ${SUMMARY_RULES}`,
+    `- "summary": Markdown on what behaves differently after these changes: name each function or file involved and say what it did before, what it does now, and in which cases. ${SUMMARY_RULES}`,
     '- "ids": the ids of all changes in the topic, exactly as listed below.',
     scope,
     "Order the topics the way a reviewer should read them. Write titles and summaries in the language the user writes in.",
@@ -38482,7 +38482,7 @@ function buildSyncPrompt(review, diff, delta) {
     "",
     "Give each topic that gains or loses changes, and each new topic:",
     '- "title": the title exactly as above, or a few words for a new topic.',
-    `- "summary": two to six sentences of Markdown on what behaves differently after the topic's changes as they are now: name each function or file involved and say what it did before, what it does now, and in which cases. ${SUMMARY_RULES}`,
+    `- "summary": Markdown on what behaves differently after the topic's changes as they are now: name each function or file involved and say what it did before, what it does now, and in which cases. ${SUMMARY_RULES}`,
     '- "ids": the ids of the new and edited changes that belong in the topic. Leave out the ids it already has.',
     `${scope} Leave out the topics that neither gain nor lose changes. Write in the language of the summaries above.`,
     REPLY
