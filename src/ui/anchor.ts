@@ -99,7 +99,10 @@ function record(): void {
 
 function settle(): void {
   if (anchor && laidOut(anchor.el)) {
-    const drift = anchor.el.getBoundingClientRect().top - topBar() - (anchor.top - (window.scrollY - anchor.scrollY));
+    const max = document.documentElement.scrollHeight - window.innerHeight;
+    const clamped = window.scrollY < anchor.scrollY && window.scrollY >= max - 1;
+    const scrolled = clamped ? 0 : window.scrollY - anchor.scrollY;
+    const drift = anchor.el.getBoundingClientRect().top - topBar() - (anchor.top - scrolled);
     if (Math.abs(drift) >= 0.5) window.scrollBy(0, drift);
   }
   record();
