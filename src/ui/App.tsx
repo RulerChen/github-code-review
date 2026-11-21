@@ -553,7 +553,6 @@ export function App({ viewId }: Props) {
   }, [searchedName, viewId, loadedVersion]);
 
   const repoFiles = diff?.files;
-  const repos = diff?.repos;
   const definitions = useMemo(() => {
     const result = defined?.name === searchedName && defined.result.version === loadedVersion ? defined.result : null;
     const fields = (repoResult?.hits ?? []).filter((f) => f.role === "field" && !result?.hits.some((h) => h.path === f.path && h.no === f.no));
@@ -562,8 +561,8 @@ export function App({ viewId }: Props) {
   }, [defined, searched, searchedName, loadedVersion, repoFiles, repoResult]);
   const changesFound = useMemo(() => searchChanges(shown.map((e) => e.file), searched, wholeWord), [shown, searched, wholeWord]);
   const sections = useMemo(
-    () => searchSections(changesFound, repoResult, repoFiles ?? [], repos ?? [], repoQuery, wholeWord, definitions),
-    [changesFound, repoResult, repoFiles, repos, repoQuery, wholeWord, definitions],
+    () => searchSections(changesFound, repoResult, repoFiles ?? [], repoQuery, wholeWord, definitions),
+    [changesFound, repoResult, repoFiles, repoQuery, wholeWord, definitions],
   );
   let searchNote: string | null = null;
   if (repoError) searchNote = `Could not search the repository: ${repoError}`;

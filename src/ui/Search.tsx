@@ -1,7 +1,7 @@
 import { useEffect, useRef, useSyncExternalStore } from "react";
 import { insideOf } from "../shared/scope";
 import { wordRegExp } from "../shared/search";
-import type { DiffLine, DiffRepo, FileDiff, RepoHit } from "../shared/types";
+import type { DiffLine, FileDiff, RepoHit } from "../shared/types";
 import { plural } from "../shared/util";
 import { pin } from "./anchor";
 import { addedLines } from "./CodePanel";
@@ -68,20 +68,13 @@ export function searchChanges(files: FileDiff[], query: string, whole: boolean):
   return found;
 }
 
-const SECTIONS = [
-  [
-    "references",
-    "References",
-    "Every other line with the name: the files the diff changes come first, each read from top to bottom, then the files it leaves alone. A line the diff adds or removes goes to its place in the diff. Any other line opens its file on the right.",
-  ],
-  ["repos", "Other repositories", "Repositories with no changes in the diff. A line opens its file on the right."],
-] as const;
+const REFERENCES_HINT =
+  "Every other line with the name, in every repository: the files the diff changes come first, each read from top to bottom. A line the diff adds or removes goes to its place in the diff. Any other line opens its file on the right.";
 
 export function searchSections(
   changes: Found,
   repo: { hits: RepoHit[]; capped: boolean } | null,
   files: FileDiff[],
-  repos: DiffRepo[],
   query: string,
   whole: boolean,
   definitions: Found | null,
@@ -91,17 +84,15 @@ export function searchSections(
   const idOf = (h: { path: string; no: number }) => `${h.path}\0${h.no}`;
   const defined = new Set((definitions?.hits ?? []).map(idOf));
   const changing = new Set(changes.hits.filter((h) => h.side === "new").map(idOf));
-  const quiet = repos.filter((r) => r.dir !== "" && !files.some((f) => f.path.startsWith(`${r.dir}/`)));
   const added = new Map<string, Set<number>>();
-  const lists: Record<string, Map<string, Hit[]>> = { references: new Map(), repos: new Map() };
-  const put = (key: string, hit: Hit) => {
-    const list = lists[key]!;
-    const hits = list.get(hit.path);
+  const byFile = new Map<string, Hit[]>();
+  const put = (hit: Hit) => {
+    const hits = byFile.get(hit.path);
     if (hits) hits.push(hit);
-    else list.set(hit.path, [hit]);
+    else byFile.set(hit.path, [hit]);
   };
 
-  for (const h of changes.hits) if (h.side === "old" || !defined.has(idOf(h))) put("references", h);
+  for (const h of changes.hits) if (h.side === "old" || !defined.has(idOf(h))) put(h);
   for (const h of repo?.hits ?? []) {
     if (defined.has(idOf(h)) || changing.has(idOf(h))) continue;
     let lines = added.get(h.path);
@@ -109,19 +100,15 @@ export function searchSections(
     const match = word?.exec(h.text);
     const kind = lines.has(h.no) ? "add" : "context";
     const at = match?.index ?? -1;
-    const hit: Hit = { path: h.path, side: "new", no: h.no, order: h.no, kind, text: h.text, at, length: match?.[0].length ?? 0, inDiff: false, inside: h.inside ?? null };
-    put(quiet.some((r) => h.path.startsWith(`${r.dir}/`)) ? "repos" : "references", hit);
+    put({ path: h.path, side: "new", no: h.no, order: h.no, kind, text: h.text, at, length: match?.[0].length ?? 0, inDiff: false, inside: h.inside ?? null });
   }
 
-  const out: Section[] = [];
-  for (const [key, title, hint] of SECTIONS) {
-    const groups = [...lists[key]!]
-      .sort(([a], [b]) => Number(!changed.has(a)) - Number(!changed.has(b)) || comparePaths(a, b))
-      .map(([path, hits]) => ({ path, hits: hits.sort((a, b) => a.order - b.order) }));
-    const capped = (repo?.capped ?? false) || (key === "references" && changes.capped);
-    if (groups.length) out.push({ key, title, hint, found: { groups, hits: groups.flatMap((g) => g.hits), capped } });
-  }
-  return out;
+  const groups = [...byFile]
+    .sort(([a], [b]) => Number(!changed.has(a)) - Number(!changed.has(b)) || comparePaths(a, b))
+    .map(([path, hits]) => ({ path, hits: hits.sort((x, y) => x.order - y.order) }));
+  if (!groups.length) return [];
+  const capped = changes.capped || (repo?.capped ?? false);
+  return [{ key: "references", title: "References", hint: REFERENCES_HINT, found: { groups, hits: groups.flatMap((g) => g.hits), capped } }];
 }
 
 export function definitionsFound(hits: RepoHit[], capped: boolean, files: FileDiff[], name: string): Found {

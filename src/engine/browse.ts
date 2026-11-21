@@ -261,22 +261,20 @@ function inModule(hits: RepoHit[], module: string, from: string): RepoHit[] {
   return [];
 }
 
-export function findDefinitionsAnywhere(diff: DiffResult, name: string, signal: AbortSignal): Promise<Found> {
+export async function findDefinitionsAnywhere(diff: DiffResult, name: string, signal: AbortSignal): Promise<Found> {
   const spelled = wordPattern(name, false);
   const word = wordRegExp(name, true);
   const plain = plainOf(name);
-  const all = searchable(diff);
-  const changed = all.filter((r) => diff.files.some((f) => r.dir === "" || f.path.startsWith(`${r.dir}/`)));
-  return nearestFirst([changed, all.filter((r) => !changed.includes(r))], async (repos) => {
-    const find = (patterns: string[], pathspecs: string[]) =>
-      grepLines(diff, repos, ["-i", ...defines(plain, patterns)], pathspecs, MAX_DEFINITIONS, signal, (text) => word?.exec(text)?.index ?? -1);
-    const found = await Promise.all([
-      ...LANGUAGES.map((l) => find([...l.patterns(spelled), ...l.values(spelled)], l.exts.map((e) => `*.${e}`))),
-      find(GENERIC.patterns(spelled), [".", ...LANGUAGES.flatMap((l) => l.exts).map((e) => `:(exclude)*.${e}`)]),
-    ]);
-    const hits = found.flatMap((f) => f.hits).sort((a, b) => compareText(a.path, b.path) || a.no - b.no);
-    return { hits: hits.slice(0, MAX_DEFINITIONS), capped: hits.length > MAX_DEFINITIONS || found.some((f) => f.capped) };
-  });
+  const changed = new Set(diff.files.map((f) => f.path));
+  const far = (p: string) => (changed.has(p) ? 0 : 1);
+  const find = (patterns: string[], pathspecs: string[]) =>
+    grepLines(diff, searchable(diff), ["-i", ...defines(plain, patterns)], pathspecs, MAX_DEFINITIONS, signal, (text) => word?.exec(text)?.index ?? -1, far);
+  const found = await Promise.all([
+    ...LANGUAGES.map((l) => find([...l.patterns(spelled), ...l.values(spelled)], l.exts.map((e) => `*.${e}`))),
+    find(GENERIC.patterns(spelled), [".", ...LANGUAGES.flatMap((l) => l.exts).map((e) => `:(exclude)*.${e}`)]),
+  ]);
+  const hits = found.flatMap((f) => f.hits).sort((a, b) => far(a.path) - far(b.path) || compareText(a.path, b.path) || a.no - b.no);
+  return { hits: hits.slice(0, MAX_DEFINITIONS), capped: hits.length > MAX_DEFINITIONS || found.some((f) => f.capped) };
 }
 
 async function grepLines(
