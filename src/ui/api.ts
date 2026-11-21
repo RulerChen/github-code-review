@@ -1,5 +1,18 @@
 import { comparisonQuery } from "../shared/comparison";
-import type { Comparison, FileDiff, Grouping, RefList, RepoFile, RepoHits, Review, Thread, ThreadAnchor, ThreadContext, ViewData } from "../shared/types";
+import type {
+  Comparison,
+  Definitions,
+  FileDiff,
+  Grouping,
+  RefList,
+  RepoFile,
+  RepoHits,
+  Review,
+  Thread,
+  ThreadAnchor,
+  ThreadContext,
+  ViewData,
+} from "../shared/types";
 
 export class ApiError extends Error {
   constructor(
@@ -61,10 +74,24 @@ export function searchRepo(viewId: string, compare: Comparison | null, query: st
   return request<RepoHits>(`${viewUrl(viewId, "grep")}?${params}`, (b) => Array.isArray(b.hits), "GET", undefined, signal);
 }
 
-export function fetchDefinitions(viewId: string, compare: Comparison | null, name: string, from: string | null, signal?: AbortSignal): Promise<RepoHits> {
+// Where a name was clicked. The line is null on the old side of a diff and for selected text.
+export interface ClickedAt {
+  path: string;
+  line: number | null;
+  col: number;
+}
+
+export function fetchDefinitions(viewId: string, compare: Comparison | null, name: string, from: ClickedAt): Promise<Definitions> {
   const params = new URLSearchParams(compare ? comparisonQuery(compare) : "");
   params.set("name", name);
-  if (from !== null) params.set("path", from);
+  params.set("path", from.path);
+  if (from.line !== null) params.set("line", String(from.line));
+  return request<Definitions>(`${viewUrl(viewId, "defs")}?${params}`, (b) => Array.isArray(b.hits));
+}
+
+export function searchDefinitions(viewId: string, compare: Comparison | null, name: string, signal: AbortSignal): Promise<RepoHits> {
+  const params = new URLSearchParams(compare ? comparisonQuery(compare) : "");
+  params.set("name", name);
   return request<RepoHits>(`${viewUrl(viewId, "defs")}?${params}`, (b) => Array.isArray(b.hits), "GET", undefined, signal);
 }
 

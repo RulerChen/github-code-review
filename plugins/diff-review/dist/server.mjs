@@ -37604,7 +37604,7 @@ async function nearestFirst(groups, find) {
 }
 var defines = (name, patterns) => ["-E", "-e", name, "--and", "(", ...patterns.flatMap((p) => ["-e", p]), ")"];
 var isIdentifier = (name) => IDENTIFIER.test(name);
-function findDefinitions(diff, name, from, signal) {
+async function findDefinitions(diff, name, from, line, signal) {
   const base = from.slice(from.lastIndexOf("/") + 1);
   const ext = base.includes(".") ? base.slice(base.lastIndexOf(".") + 1).toLowerCase() : "";
   const language = LANGUAGES.find((l) => l.exts.includes(ext));
@@ -37614,10 +37614,11 @@ function findDefinitions(diff, name, from, signal) {
   const pathspecs = exts.length ? exts.map((e) => `*.${e}`) : ["."];
   const own2 = repoOf(diff, from)?.repo;
   const all = searchable(diff);
-  return nearestFirst(
+  const found = await nearestFirst(
     own2 ? [[own2], all.filter((r) => r !== own2)] : [all],
     (repos) => grepLines(diff, repos, defines(escaped, patterns), pathspecs, MAX_DEFINITIONS, signal, (text) => text.indexOf(name))
   );
+  return { ...found, declared: found.hits.some((h) => h.path === from && h.no === line) };
 }
 function findDefinitionsAnywhere(diff, name, signal) {
   const escaped = name.replaceAll("$", "\\$");
@@ -38591,9 +38592,10 @@ var ReviewServer = class {
         const name = query.get("name") ?? "";
         const from = query.get("path");
         if (!isIdentifier(name) || (from?.length ?? 0) > MAX_PATH) return sendJson(res, 400, { error: "Invalid name" });
+        const line = Number(query.get("line"));
         const { version: version2, diff } = await this.loadDiff(view.repo, compare);
         if (from === null) return sendFound(res, version2, (signal) => findDefinitionsAnywhere(diff, name, signal));
-        return sendFound(res, version2, (signal) => findDefinitions(diff, name, from, signal));
+        return sendFound(res, version2, (signal) => findDefinitions(diff, name, from, Number.isInteger(line) && line > 0 ? line : null, signal));
       }
       case "GET version":
         return sendJson(res, 200, { version: (await probeDiff(view.repo, compare)).version });

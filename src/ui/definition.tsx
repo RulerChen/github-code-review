@@ -1,10 +1,11 @@
 import { createContext, useLayoutEffect, useRef } from "react";
 import type { RepoHit } from "../shared/types";
 import { plural } from "../shared/util";
+import type { ClickedAt } from "./api";
 import { useDismiss } from "./hooks";
 import { basename, comparePaths, dirPrefix } from "./paths";
 
-export type FindDefinition = (text: string, from: string, x: number, y: number) => void;
+export type FindDefinition = (text: string, from: ClickedAt, x: number, y: number) => void;
 
 export const FindDefinitionContext = createContext<FindDefinition | null>(null);
 
@@ -25,7 +26,7 @@ function caretAt(x: number, y: number): { node: Node; offset: number } | null {
   return r && { node: r.startContainer, offset: r.startOffset };
 }
 
-export function wordAt(x: number, y: number): string | null {
+export function wordAt(x: number, y: number): { text: string; col: number } | null {
   const caret = caretAt(x, y);
   const cell = caret?.node.parentElement?.closest("td.code");
   if (!caret || !(caret.node instanceof Text) || !cell) return null;
@@ -39,7 +40,7 @@ export function wordAt(x: number, y: number): string | null {
   while (start > 0 && WORD.test(text[start - 1]!)) start--;
   while (end < text.length && WORD.test(text[end]!)) end++;
   const word = text.slice(start, end);
-  return FIRST.test(word) ? word : null;
+  return FIRST.test(word) ? { text: word, col: start } : null;
 }
 
 export function selectedAt(x: number, y: number): string | null {

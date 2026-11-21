@@ -119,7 +119,14 @@ const defines = (name: string, patterns: string[]) => ["-E", "-e", name, "--and"
 
 export const isIdentifier = (name: string) => IDENTIFIER.test(name);
 
-export function findDefinitions(diff: DiffResult, name: string, from: string, signal: AbortSignal): Promise<Found> {
+// declared says the clicked line is one of the definitions, so the question is who uses the name.
+export async function findDefinitions(
+  diff: DiffResult,
+  name: string,
+  from: string,
+  line: number | null,
+  signal: AbortSignal,
+): Promise<Found & { declared: boolean }> {
   const base = from.slice(from.lastIndexOf("/") + 1);
   const ext = base.includes(".") ? base.slice(base.lastIndexOf(".") + 1).toLowerCase() : "";
   const language = LANGUAGES.find((l) => l.exts.includes(ext));
@@ -129,9 +136,10 @@ export function findDefinitions(diff: DiffResult, name: string, from: string, si
   const pathspecs = exts.length ? exts.map((e) => `*.${e}`) : ["."];
   const own = repoOf(diff, from)?.repo;
   const all = searchable(diff);
-  return nearestFirst(own ? [[own], all.filter((r) => r !== own)] : [all], (repos) =>
+  const found = await nearestFirst(own ? [[own], all.filter((r) => r !== own)] : [all], (repos) =>
     grepLines(diff, repos, defines(escaped, patterns), pathspecs, MAX_DEFINITIONS, signal, (text) => text.indexOf(name)),
   );
+  return { ...found, declared: found.hits.some((h) => h.path === from && h.no === line) };
 }
 
 export function findDefinitionsAnywhere(diff: DiffResult, name: string, signal: AbortSignal): Promise<Found> {

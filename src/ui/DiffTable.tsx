@@ -152,10 +152,12 @@ export const DiffTable = memo(function DiffTable({ path, hunks, oldTokens, newTo
 
   const lookUp = (e: MouseEvent) => {
     if (!findDefinition || e.button !== 0 || !(e.ctrlKey || e.metaKey)) return;
-    const text = selected.current ?? wordAt(e.clientX, e.clientY);
+    const word = selected.current === null ? wordAt(e.clientX, e.clientY) : null;
+    const text = selected.current ?? word?.text;
     if (!text) return;
     e.preventDefault();
-    findDefinition(text, path, e.clientX, e.clientY);
+    const line = word ? lineAt(e.target, false) : null;
+    findDefinition(text, { path, line: line?.[0] === "new" ? line[1] : null, col: word?.col ?? 0 }, e.clientX, e.clientY);
   };
 
   const submit = async (body: string, single: boolean) => {

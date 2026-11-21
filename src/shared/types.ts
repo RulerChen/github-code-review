@@ -185,6 +185,10 @@ export interface RepoHits {
   capped: boolean;
 }
 
+export interface Definitions extends RepoHits {
+  declared: boolean;
+}
+
 export interface RefRange {
   base: string;
   head: string | null;

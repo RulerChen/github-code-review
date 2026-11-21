@@ -20,6 +20,7 @@ import {
   fetchView,
   groupTopics,
   replyToThread,
+  searchDefinitions,
   searchRepo,
   submitReview,
   type TopicRequest,
@@ -226,6 +227,16 @@ export function App({ viewId }: Props) {
     lookupSeq.current++;
     setLookup(null);
   }, []);
+  const searchFor = useCallback(
+    (text: string) => {
+      setScope("repo");
+      setWholeWord(true);
+      setQuery(text);
+      setHit(null);
+      setSidebarOpen(true);
+    },
+    [setSidebarOpen],
+  );
   const findDefinition = useCallback<FindDefinition>(
     (text, from, x, y) => {
       if (!viewId) return;
@@ -235,7 +246,7 @@ export function App({ viewId }: Props) {
       const fail = (e: unknown) => current((l) => ({ ...l, error: errorMessage(e) }));
       const findLines = () =>
         searchRepo(viewId, requested.current, text, true, new AbortController().signal).then(
-          (r) => current((l) => ({ ...l, hits: rankDefinitions(r.hits, from), lines: true, capped: r.capped })),
+          (r) => current((l) => ({ ...l, hits: rankDefinitions(r.hits, from.path), lines: true, capped: r.capped })),
           fail,
         );
 
@@ -243,7 +254,12 @@ export function App({ viewId }: Props) {
       if (!isName(text)) return void findLines();
       fetchDefinitions(viewId, requested.current, text, from).then((r) => {
         if (seq !== lookupSeq.current) return;
-        const hits = rankDefinitions(r.hits, from);
+        if (r.declared) {
+          closeLookup();
+          searchFor(text);
+          return;
+        }
+        const hits = rankDefinitions(r.hits, from.path);
         if (hits.length === 0) return void findLines();
         if (hits.length === 1 && !r.capped) {
           closeLookup();
@@ -253,17 +269,8 @@ export function App({ viewId }: Props) {
         current((l) => ({ ...l, hits, capped: r.capped }));
       }, fail);
     },
-    [viewId, openCode, closeLookup],
+    [viewId, openCode, closeLookup, searchFor],
   );
-  const searchLookup = () => {
-    if (!lookup) return;
-    setScope("repo");
-    setWholeWord(true);
-    setQuery(lookup.name);
-    setHit(null);
-    setSidebarOpen(true);
-    closeLookup();
-  };
 
   const diff = data?.diff ?? null;
   const compareWith = (next: Comparison, nextTab?: Tab, nextRange: CommitRange | null = null) => {
@@ -485,7 +492,7 @@ export function App({ viewId }: Props) {
     if (!searchedName || !viewId || loadedVersion === null) return;
     const aborted = new AbortController();
     const timer = window.setTimeout(() => {
-      fetchDefinitions(viewId, requested.current, searchedName, null, aborted.signal).then(
+      searchDefinitions(viewId, requested.current, searchedName, aborted.signal).then(
         (result) => setDefined({ name: searchedName, result }),
         () => {},
       );
@@ -893,7 +900,10 @@ export function App({ viewId }: Props) {
                   closeLookup();
                   openCode(h.path, h.no, true);
                 }}
-                onSearch={searchLookup}
+                onSearch={() => {
+                  searchFor(lookup.name);
+                  closeLookup();
+                }}
                 onClose={closeLookup}
               />
             )}
