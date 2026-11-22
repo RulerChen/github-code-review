@@ -1362,9 +1362,7 @@ body.is-resizing .file {
   overflow-x: auto;
   border: 1px solid var(--border-muted);
   border-radius: 6px;
-  background-color: var(--bg-subtle);
-  background-image: radial-gradient(var(--border) 0.8px, transparent 0.8px);
-  background-size: 16px 16px;
+  background: var(--bg-subtle);
 }
 
 .flow-diagram svg {
@@ -1459,40 +1457,6 @@ body.is-resizing .file {
 .flow-sub {
   fill: var(--fg-muted);
   font-size: 10px;
-}
-
-.flow-legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 16px;
-  margin-top: 6px;
-  padding: 0 4px;
-  color: var(--fg-muted);
-  font-size: 11px;
-}
-
-.flow-legend span {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.flow-key-box {
-  width: 16px;
-  height: 10px;
-  border: 1.25px solid var(--fg);
-  border-radius: 3px;
-  background: var(--bg);
-}
-
-.flow-key-box.is-dashed {
-  border: 1px dashed var(--fg-muted);
-}
-
-.flow-key-arrow {
-  width: 18px;
-  height: 0;
-  border-top: 1.5px solid var(--accent);
 }
 
 .flow-place {

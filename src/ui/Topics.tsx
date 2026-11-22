@@ -157,8 +157,8 @@ export function TopicSection({ topic, viewed, opening, onToggleViewed, onOpenSte
     if (thread && topicShows(topic, thread, versions)) setCollapsed(false);
   }, [revealSeq]);
   const [commenting, setCommenting] = useState(false);
-  const [summaryOpen, setSummaryOpen] = useState(true);
-  const [flowOpen, setFlowOpen] = useState(true);
+  const [summaryOpen, setSummaryOpen] = useState(false);
+  const [flowOpen, setFlowOpen] = useState(false);
   const threads = threadsForTopic(topic.title);
 
   const header = useRef<HTMLElement>(null);

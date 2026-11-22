@@ -1,6 +1,6 @@
 import type { KeyboardEvent } from "react";
 import type { DiffRepo, FlowStep } from "../shared/types";
-import { basename, dirPrefix } from "./paths";
+import { basename } from "./paths";
 
 export interface FlowItem {
   step: FlowStep;
@@ -9,25 +9,14 @@ export interface FlowItem {
 }
 
 export interface FlowLanes {
-  kind: "repository" | "folder" | "file";
-  lanes: { key: string; label: string }[];
+  lanes: string[];
   laneOf: number[];
 }
 
 export function flowLanes(steps: FlowStep[], repos: DiffRepo[]): FlowLanes {
-  const repoOf = (p: string) => repos.find((r) => r.dir !== "" && p.startsWith(`${r.dir}/`))?.dir ?? "";
-  const dirOf = (p: string) => dirPrefix(p).replace(/\/$/, "");
-  const ways = [
-    { kind: "repository", keyOf: repoOf, label: (k: string) => k },
-    { kind: "folder", keyOf: dirOf, label: (k: string) => k || "/" },
-    { kind: "file", keyOf: (p: string) => p, label: basename },
-  ] as const;
-  for (const { kind, keyOf, label } of ways) {
-    const keys = steps.map((s) => keyOf(s.path));
-    const order = [...new Set(keys)];
-    if (order.length > 1) return { kind, lanes: order.map((key) => ({ key, label: label(key) })), laneOf: keys.map((k) => order.indexOf(k)) };
-  }
-  return { kind: "file", lanes: [], laneOf: steps.map(() => 0) };
+  const keys = steps.map((s) => repos.find((r) => r.dir !== "" && s.path.startsWith(`${r.dir}/`))?.dir ?? "");
+  const lanes = [...new Set(keys)];
+  return lanes.length > 1 ? { lanes, laneOf: keys.map((k) => lanes.indexOf(k)) } : { lanes: [], laneOf: steps.map(() => 0) };
 }
 
 const LANE = 200;
@@ -87,11 +76,11 @@ export function FlowDiagram({ items, lanes, current, onPick }: Props) {
     <div className="flow-diagram">
       <svg viewBox={`0 0 ${width} ${height}`} style={{ maxWidth: width, minWidth: width * 0.75 }} role="group" aria-label="Flow diagram">
         {lanes.lanes.map((lane, i) => (
-          <g key={lane.key}>
+          <g key={lane}>
             {i > 0 && <line className="flow-divider" x1={i * LANE} y1={4} x2={i * LANE} y2={height - 4} />}
             <text className="flow-lane" x={center(i)} y={18} textAnchor="middle">
-              <title>{lane.key || lane.label}</title>
-              {clip(lane.label, 22)}
+              <title>{lane}</title>
+              {clip(lane, 22)}
             </text>
           </g>
         ))}
@@ -132,17 +121,6 @@ export function FlowDiagram({ items, lanes, current, onPick }: Props) {
           );
         })}
       </svg>
-      <div className="flow-legend">
-        <span>
-          <i className="flow-key-box" /> changed line
-        </span>
-        <span>
-          <i className="flow-key-box is-dashed" /> unchanged code
-        </span>
-        <span>
-          <i className="flow-key-arrow" /> into another {lanes.kind}
-        </span>
-      </div>
     </div>
   );
 }
