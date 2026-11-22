@@ -1386,17 +1386,16 @@ body.is-resizing .file {
   line-height: 20px;
 }
 
-.flow-from,
-.flow-when {
-  font: 11px/18px var(--mono);
+.flow-branch {
+  margin: 0 0 4px 32px;
+  padding-left: 8px;
+  border-left: 2px solid var(--border);
 }
 
-.flow-from {
-  color: var(--fg-muted);
-}
-
-.flow-when {
+.flow-branch-head {
+  padding: 4px 8px 0;
   color: var(--attention);
+  font: 11px/18px var(--mono);
 }
 
 .flow-via {
