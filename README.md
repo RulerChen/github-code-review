@@ -9,7 +9,7 @@ A Claude Code plugin that shows your code changes in a GitHub-style diff viewer 
 /diff-review:review ~/work      every repository in a folder, on one page
 ```
 
-In the page you pick other branches, tags or commits to compare, and have Claude group the changes into topics that it explains. A topic can also list the flow its changes sit on, step by step through unchanged code and across repositories, and each step opens that line beside the diff.
+In the page you pick other branches, tags or commits to compare, and have Claude group the changes into topics that it explains. A topic can also list the flow its changes sit on, step by step through unchanged code and across repositories, drawn as a diagram with a lane per repository, and each step opens that line beside the diff.
 
 ## Setup
 

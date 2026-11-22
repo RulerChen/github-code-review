@@ -1,5 +1,6 @@
 import { readRepoFile } from "../engine/browse.js";
 import { changeIds, editedInto, oldCommitOf } from "../shared/hunks.js";
+import { insideOf } from "../shared/scope.js";
 import type { DiffResult, FlowStep, Review, Topic } from "../shared/types.js";
 import { isRecord, plural } from "../shared/util.js";
 import { ask } from "./claude.js";
@@ -55,7 +56,8 @@ export async function groupChanges(o: GroupOptions): Promise<Topic[]> {
   );
 
   const known = new Set(o.diff.files.flatMap(changeIds));
-  const kept = withoutSteps(topics, await missingSteps(o.diff, topics))
+  const named = await nameSteps(o.diff, withoutSteps(topics, await missingSteps(o.diff, topics)));
+  const kept = named
     .map((t) => ({ ...t, ids: t.ids.filter((id) => known.has(id)) }))
     .filter((t) => t.ids.length > 0);
   if (!kept.length) {
@@ -118,7 +120,7 @@ export async function syncTopics(o: SyncOptions): Promise<Topic[]> {
   const answer = await askTopics(o, buildSyncPrompt(review, diff, delta), true, async (t) =>
     problems(syncProblem(t, delta.added, review.focus !== null), flowProblem(await missingSteps(diff, t), diff.repoRoot)),
   );
-  return mergeSync(review, diff, delta, withoutSteps(answer, await missingSteps(diff, answer)));
+  return mergeSync(review, diff, delta, await nameSteps(diff, withoutSteps(answer, await missingSteps(diff, answer))));
 }
 
 export function mergeSync(review: Review, diff: DiffResult, delta: TopicDelta, answer: Topic[]): Topic[] {
@@ -251,6 +253,21 @@ export async function missingSteps(diff: DiffResult, topics: Topic[]): Promise<M
 
 export function flowProblem(bad: Map<FlowStep, string>, root: string): string | null {
   return bad.size ? `These flow steps point to no line of the compared version: ${[...bad.values()].join(", ")}. Paths are relative to ${root}.` : null;
+}
+
+export async function nameSteps(diff: DiffResult, topics: Topic[]): Promise<Topic[]> {
+  const scopes = new Map<string, Promise<((no: number) => string | null) | null>>();
+  const scopeOf = (p: string) => {
+    if (!scopes.has(p)) scopes.set(p, readRepoFile(diff, p).then((f) => (f?.text ? insideOf(f.text, p) : null), () => null));
+    return scopes.get(p)!;
+  };
+  const name = async (s: FlowStep): Promise<FlowStep> => {
+    const inside = await scopeOf(s.path);
+    const here = inside?.(s.line) ?? null;
+    const next = inside?.(s.line + 1) ?? null;
+    return { ...s, inside: next && (here === null || next.startsWith(`${here} \u203a `)) ? next : here };
+  };
+  return Promise.all(topics.map(async (t) => (t.flow ? { ...t, flow: await Promise.all(t.flow.map(name)) } : t)));
 }
 
 function withoutSteps(topics: Topic[], bad: Map<FlowStep, string>): Topic[] {

@@ -31,6 +31,8 @@
   --tree-dir-icon: #54aeff;
   --overlay-shadow: 0 1px 3px #1f232814, 0 8px 24px #424a5329;
   --tab-active: #fd8c73;
+  --focal: #bf4520;
+  --focal-tint: rgba(191, 69, 32, 0.08);
   --topbar-h: 56px;
   --sidebar-w: 300px;
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
@@ -67,6 +69,8 @@
   --primary-fg: #ffffff;
   --tree-dir-icon: var(--fg-muted);
   --overlay-shadow: 0 0 0 1px #3d444d, 0 8px 24px #010409;
+  --focal: #f08a59;
+  --focal-tint: rgba(240, 138, 89, 0.12);
 }
 
 :root[data-theme="dark"] .tok {
@@ -1350,6 +1354,145 @@ body.is-resizing .file {
 .topic-flow li::marker {
   color: var(--fg-muted);
   font: 12px var(--mono);
+}
+
+.flow-diagram {
+  margin: 0 0 12px;
+  padding: 8px 8px 10px;
+  overflow-x: auto;
+  border: 1px solid var(--border-muted);
+  border-radius: 6px;
+  background-color: var(--bg-subtle);
+  background-image: radial-gradient(var(--border) 0.8px, transparent 0.8px);
+  background-size: 16px 16px;
+}
+
+.flow-diagram svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin: 0 auto;
+}
+
+.flow-diagram text {
+  font-family: var(--sans);
+}
+
+.flow-diagram text.flow-lane,
+.flow-diagram text.flow-num,
+.flow-diagram text.flow-sub {
+  font-family: var(--mono);
+}
+
+.flow-lane {
+  fill: var(--fg-muted);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.flow-divider {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
+.flow-arrow path {
+  fill: none;
+  stroke: var(--fg-muted);
+  stroke-width: 1.25;
+}
+
+.flow-arrow path.flow-arrow-head {
+  fill: var(--fg-muted);
+  stroke: none;
+}
+
+.flow-arrow.is-cross path {
+  stroke: var(--accent);
+}
+
+.flow-arrow.is-cross path.flow-arrow-head {
+  fill: var(--accent);
+}
+
+.flow-node {
+  cursor: pointer;
+  outline: none;
+}
+
+.flow-node rect {
+  fill: var(--bg);
+  stroke: var(--fg-muted);
+  stroke-width: 1;
+  stroke-dasharray: 4 3;
+}
+
+.flow-node.is-changed rect {
+  stroke: var(--fg);
+  stroke-width: 1.25;
+  stroke-dasharray: none;
+}
+
+.flow-node:hover rect,
+.flow-node:focus-visible rect {
+  stroke: var(--accent);
+}
+
+.flow-node.is-current rect {
+  fill: var(--focal-tint);
+  stroke: var(--focal);
+  stroke-width: 1.5;
+}
+
+.flow-num {
+  fill: var(--fg-muted);
+  font-size: 10px;
+}
+
+.flow-title {
+  fill: var(--fg);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.flow-sub {
+  fill: var(--fg-muted);
+  font-size: 10px;
+}
+
+.flow-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin-top: 6px;
+  padding: 0 4px;
+  color: var(--fg-muted);
+  font-size: 11px;
+}
+
+.flow-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.flow-key-box {
+  width: 16px;
+  height: 10px;
+  border: 1.25px solid var(--fg);
+  border-radius: 3px;
+  background: var(--bg);
+}
+
+.flow-key-box.is-dashed {
+  border: 1px dashed var(--fg-muted);
+}
+
+.flow-key-arrow {
+  width: 18px;
+  height: 0;
+  border-top: 1.5px solid var(--accent);
 }
 
 .flow-place {

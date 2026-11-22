@@ -8,6 +8,7 @@ import { type CommentsApi, onShownVersion, ThreadList, useComments } from "./com
 import { CollapseButton, CommentButton, ViewedToggle } from "./controls";
 import { hasLine } from "./DiffTable";
 import { baseHunksOf, FileCard } from "./FileCard";
+import { FlowDiagram, type FlowItem, type FlowLanes, flowLanes } from "./FlowDiagram";
 import { ChevronIcon } from "./icons";
 import { Markdown } from "./Markdown";
 import { basename, dirPrefix } from "./paths";
@@ -23,7 +24,8 @@ export interface TopicView {
   anchor: string;
   title: string;
   summary: string;
-  flow: { step: FlowStep; changed: boolean }[];
+  flow: FlowItem[];
+  lanes: FlowLanes;
   parts: TopicPart[];
   changeCount: number;
   edited: number;
@@ -53,12 +55,15 @@ export function buildTopics(review: Review, files: FileDiff[], repos: DiffRepo[]
       seen.add(f.path);
     });
 
+    const steps = t.flow ?? [];
+    const lanes = flowLanes(steps, repos);
     return {
       key: `topic:${t.title}`,
       anchor: `topic-${index}`,
       title: t.title,
       summary: t.summary,
-      flow: (t.flow ?? []).map((step) => ({ step, changed: addedLines(files.find((f) => f.path === step.path)).has(step.line) })),
+      flow: steps.map((step, i) => ({ step, changed: addedLines(files.find((f) => f.path === step.path)).has(step.line), lane: lanes.laneOf[i]! })),
+      lanes,
       parts,
       changeCount: chosen.size,
       edited: edited.length,
@@ -113,29 +118,28 @@ function TopicPart({ title, className, open, onToggle, children }: PartProps) {
   );
 }
 
-function TopicFlow({ flow, onOpen }: { flow: TopicView["flow"]; onOpen: (step: FlowStep) => void }) {
+function TopicFlow({ flow, lanes, onOpen }: { flow: FlowItem[]; lanes: FlowLanes; onOpen: (step: FlowStep) => void }) {
   const [current, setCurrent] = useState<number | null>(null);
+  const pick = (i: number) => {
+    setCurrent(i);
+    onOpen(flow[i]!.step);
+  };
   return (
-    <ol>
-      {flow.map(({ step, changed }, i) => (
-        <li key={i} className={current === i ? "is-current" : undefined}>
-          <button
-            type="button"
-            className="flow-place"
-            title="Open this line on the right"
-            onClick={() => {
-              setCurrent(i);
-              onOpen(step);
-            }}
-          >
-            <span className="flow-dir">{dirPrefix(step.path)}</span>
-            {basename(step.path)}:{step.line}
-          </button>
-          {changed && <span className="flow-changed">changed</span>}
-          <Markdown className="flow-text" text={step.text} />
-        </li>
-      ))}
-    </ol>
+    <>
+      {lanes.lanes.length > 1 && <FlowDiagram items={flow} lanes={lanes} current={current} onPick={pick} />}
+      <ol>
+        {flow.map(({ step, changed }, i) => (
+          <li key={i} className={current === i ? "is-current" : undefined}>
+            <button type="button" className="flow-place" title="Open this line on the right" onClick={() => pick(i)}>
+              <span className="flow-dir">{dirPrefix(step.path)}</span>
+              {basename(step.path)}:{step.line}
+            </button>
+            {changed && <span className="flow-changed">changed</span>}
+            <Markdown className="flow-text" text={step.text} />
+          </li>
+        ))}
+      </ol>
+    </>
   );
 }
 
@@ -208,7 +212,7 @@ export function TopicSection({ topic, viewed, opening, onToggleViewed, onOpenSte
           )}
           {topic.flow.length > 0 && (
             <TopicPart title="Flow" className="topic-flow" open={flowOpen} onToggle={() => setFlowOpen(!flowOpen)}>
-              <TopicFlow flow={topic.flow} onOpen={onOpenStep} />
+              <TopicFlow flow={topic.flow} lanes={topic.lanes} onOpen={onOpenStep} />
             </TopicPart>
           )}
           <ThreadList

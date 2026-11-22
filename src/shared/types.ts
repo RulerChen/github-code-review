@@ -61,6 +61,7 @@ export interface FlowStep {
   path: string;
   line: number;
   text: string;
+  inside?: string | null;
 }
 
 export interface Topic {

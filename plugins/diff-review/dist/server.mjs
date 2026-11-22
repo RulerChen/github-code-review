@@ -38384,7 +38384,8 @@ async function groupChanges(o) {
     async (t) => problems(unknownIds(o.diff, t), flowProblem(await missingSteps(o.diff, t), o.diff.repoRoot))
   );
   const known = new Set(o.diff.files.flatMap(changeIds));
-  const kept = withoutSteps(topics, await missingSteps(o.diff, topics)).map((t) => ({ ...t, ids: t.ids.filter((id) => known.has(id)) })).filter((t) => t.ids.length > 0);
+  const named2 = await nameSteps(o.diff, withoutSteps(topics, await missingSteps(o.diff, topics)));
+  const kept = named2.map((t) => ({ ...t, ids: t.ids.filter((id) => known.has(id)) })).filter((t) => t.ids.length > 0);
   if (!kept.length) {
     throw new Error(
       o.names ? "No change belongs to these topics." : focused ? "No change matches the focus." : "Claude's answer put no change of this comparison in a topic."
@@ -38429,7 +38430,7 @@ async function syncTopics(o) {
     true,
     async (t) => problems(syncProblem(t, delta.added, review.focus !== null), flowProblem(await missingSteps(diff, t), diff.repoRoot))
   );
-  return mergeSync(review, diff, delta, withoutSteps(answer, await missingSteps(diff, answer)));
+  return mergeSync(review, diff, delta, await nameSteps(diff, withoutSteps(answer, await missingSteps(diff, answer))));
 }
 function mergeSync(review, diff, delta, answer) {
   const now2 = new Set(diff.files.flatMap(changeIds));
@@ -38547,6 +38548,20 @@ async function missingSteps(diff, topics) {
 }
 function flowProblem(bad, root) {
   return bad.size ? `These flow steps point to no line of the compared version: ${[...bad.values()].join(", ")}. Paths are relative to ${root}.` : null;
+}
+async function nameSteps(diff, topics) {
+  const scopes = /* @__PURE__ */ new Map();
+  const scopeOf2 = (p) => {
+    if (!scopes.has(p)) scopes.set(p, readRepoFile(diff, p).then((f) => f?.text ? insideOf(f.text, p) : null, () => null));
+    return scopes.get(p);
+  };
+  const name = async (s) => {
+    const inside = await scopeOf2(s.path);
+    const here = inside?.(s.line) ?? null;
+    const next = inside?.(s.line + 1) ?? null;
+    return { ...s, inside: next && (here === null || next.startsWith(`${here} \u203A `)) ? next : here };
+  };
+  return Promise.all(topics.map(async (t) => t.flow ? { ...t, flow: await Promise.all(t.flow.map(name)) } : t));
 }
 function withoutSteps(topics, bad) {
   return topics.map((t) => t.flow ? { ...t, flow: t.flow.filter((s) => !bad.has(s)) } : t);
@@ -39379,7 +39394,7 @@ async function openViewer(repo, compare, focus, topics, session) {
       note = `
 ${unassigned.length} change(s) are in no topic, so they appear only in the Files tab: ${unassigned.join(", ")}`;
     }
-    grouped = { focus: focus?.trim() || null, topics, diff };
+    grouped = { focus: focus?.trim() || null, topics: await nameSteps(diff, topics), diff };
   }
   const server = await getServer();
   server.keepDiff(diff.repoRoot, compare, { version: probe.version, diff });

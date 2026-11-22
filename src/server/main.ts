@@ -9,7 +9,7 @@ import { sameRange, sortOverrides } from "../shared/comparison.js";
 import type { Comparison, DiffResult, Topic } from "../shared/types.js";
 import { errorMessage, plural } from "../shared/util.js";
 import { stopAll } from "./claude.js";
-import { flowProblem, missingSteps } from "./group.js";
+import { flowProblem, missingSteps, nameSteps } from "./group.js";
 import { ReviewServer } from "./http.js";
 import { checkTopics, formatChanges, formatReviewComments } from "./review.js";
 
@@ -59,7 +59,7 @@ async function openViewer(repo: string, compare: Comparison, focus?: string, top
     if (unassigned.length) {
       note = `\n${unassigned.length} change(s) are in no topic, so they appear only in the Files tab: ${unassigned.join(", ")}`;
     }
-    grouped = { focus: focus?.trim() || null, topics, diff };
+    grouped = { focus: focus?.trim() || null, topics: await nameSteps(diff, topics), diff };
   }
 
   const server = await getServer();
