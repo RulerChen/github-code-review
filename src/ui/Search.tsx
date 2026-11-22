@@ -10,7 +10,6 @@ import { basename, comparePaths, dirPrefix } from "./paths";
 
 const LEAD_CHARS = 16;
 const PAGE_ROWS = 300;
-const FOUND_MS = 2500;
 
 export interface Hit {
   path: string;
@@ -121,6 +120,7 @@ export function definitionsFound(hits: RepoHit[], files: FileDiff[], name: strin
 }
 
 let target: Hit | null = null;
+let foundRow: Element | null = null;
 let seq = 0;
 const listeners = new Set<() => void>();
 
@@ -148,8 +148,9 @@ export function showLineTarget(card: HTMLElement | null, path: string): void {
   target = null;
   row.scrollIntoView({ block: "center" });
   pin(row);
+  foundRow?.classList.remove("is-found");
   row.classList.add("is-found");
-  setTimeout(() => row.classList.remove("is-found"), FOUND_MS);
+  foundRow = row;
 }
 
 const MARK = { add: "+", context: "" } as const;
@@ -161,6 +162,7 @@ interface Props {
   sections: Section[];
   note: string | null;
   current: Hit | null;
+  foldReferences: boolean;
   onOpen: (hit: Hit) => void;
 }
 
@@ -178,7 +180,7 @@ interface Planned {
 
 const groupKey = (section: string, path: string) => `${section}\0${path}`;
 
-function plan(listed: Listed[], folded: ReadonlySet<string>, rows: number): { planned: { section: Listed; groups: Planned[] }[]; cut: boolean } {
+function plan(listed: Listed[], isOpen: (key: string) => boolean, rows: number): { planned: { section: Listed; groups: Planned[] }[]; cut: boolean } {
   let left = rows;
   let cut = false;
   const planned: { section: Listed; groups: Planned[] }[] = [];
@@ -189,14 +191,14 @@ function plan(listed: Listed[], folded: ReadonlySet<string>, rows: number): { pl
     }
     const groups: Planned[] = [];
     planned.push({ section, groups });
-    if (folded.has(section.key)) continue;
+    if (!isOpen(section.key)) continue;
     for (const g of section.found.groups) {
       if (left <= 0) {
         cut = true;
         break;
       }
       const key = groupKey(section.key, g.path);
-      const open = !folded.has(key);
+      const open = isOpen(key);
       const hits = open ? g.hits.slice(0, left - 1) : [];
       if (hits.length < (open ? g.hits.length : 0)) cut = true;
       left -= 1 + hits.length;
@@ -206,13 +208,13 @@ function plan(listed: Listed[], folded: ReadonlySet<string>, rows: number): { pl
   return { planned, cut };
 }
 
-function rowsBefore(listed: Listed[], folded: ReadonlySet<string>, target: Hit): number {
+function rowsBefore(listed: Listed[], isOpen: (key: string) => boolean, target: Hit): number {
   let rows = 0;
   for (const s of listed) {
-    if (folded.has(s.key)) continue;
+    if (!isOpen(s.key)) continue;
     for (const g of s.found.groups) {
       rows++;
-      if (folded.has(groupKey(s.key, g.path))) continue;
+      if (!isOpen(groupKey(s.key, g.path))) continue;
       const at = g.hits.indexOf(target);
       if (at >= 0) return rows + at + 1;
       rows += g.hits.length;
@@ -221,29 +223,26 @@ function rowsBefore(listed: Listed[], folded: ReadonlySet<string>, target: Hit):
   return rows;
 }
 
-export function SearchResults({ definitions, sections, note, current, onOpen }: Props) {
-  const [folded, setFolded] = useState<ReadonlySet<string>>(() => new Set());
+export function SearchResults({ definitions, sections, note, current, foldReferences, onOpen }: Props) {
+  const [chosen, setChosen] = useState<ReadonlyMap<string, boolean>>(() => new Map());
   const [rows, setRows] = useState(PAGE_ROWS);
   const more = useRef<HTMLDivElement>(null);
   const listed: Listed[] = [
     ...(definitions ? [{ key: "definitions", title: "Definitions", hint: DEFINITIONS_HINT, found: definitions, count: String(definitions.hits.length) }] : []),
     ...sections.map((s) => ({ ...s, count: plural(s.found.hits.length, "line") })),
   ];
-  const { planned, cut } = plan(listed, folded, rows);
-  const toggle = (key: string) =>
-    setFolded((prev) => {
-      const next = new Set(prev);
-      if (!next.delete(key)) next.add(key);
-      return next;
-    });
+  const openIn = (choices: ReadonlyMap<string, boolean>) => (key: string) => choices.get(key) ?? !(foldReferences && key === "references");
+  const isOpen = openIn(chosen);
+  const { planned, cut } = plan(listed, isOpen, rows);
+  const toggle = (key: string) => setChosen((prev) => new Map(prev).set(key, !openIn(prev)(key)));
 
   useEffect(() => {
     const section = current && listed.find((l) => l.found.hits.includes(current));
     if (!current || !section) return;
     const keys = [section.key, groupKey(section.key, current.path)];
-    const open = keys.some((k) => folded.has(k)) ? new Set([...folded].filter((k) => !keys.includes(k))) : folded;
-    if (open !== folded) setFolded(open);
-    setRows((r) => Math.max(r, rowsBefore(listed, open, current) + PAGE_ROWS));
+    const next = keys.every(isOpen) ? chosen : new Map([...chosen, ...keys.map((k) => [k, true] as const)]);
+    if (next !== chosen) setChosen(next);
+    setRows((r) => Math.max(r, rowsBefore(listed, openIn(next), current) + PAGE_ROWS));
   }, [current]);
 
   useEffect(() => {
@@ -260,7 +259,7 @@ export function SearchResults({ definitions, sections, note, current, onOpen }: 
   return (
     <div className="search-results">
       {planned.map(({ section, groups }) => {
-        const open = !folded.has(section.key);
+        const open = isOpen(section.key);
         return (
           <div className="search-section" key={section.key}>
             <button className="search-count" aria-expanded={open} title={section.hint} onClick={() => toggle(section.key)}>

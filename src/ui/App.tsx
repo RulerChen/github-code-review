@@ -41,6 +41,7 @@ import { FoldIcon, MatchCaseIcon, WholeWordIcon } from "./icons";
 import { go, KeyboardButton, ShortcutHelp, stepSection, useShortcuts } from "./keyboard";
 import { locate } from "./locate";
 import { comparePaths } from "./paths";
+import { EDGES, ResizeHandle } from "./resize";
 import { ReviewBar } from "./ReviewBar";
 import { definitionsFound, type Hit, revealLine, searchChanges, SearchResults, searchSections } from "./Search";
 import { claudeState, ClaudeStatus } from "./Status";
@@ -567,6 +568,8 @@ export function App({ viewId }: Props) {
     () => searchSections(changesFound, repoResult, repoFiles ?? [], repoQuery, wholeWord, matchCase, definitions),
     [changesFound, repoResult, repoFiles, repoQuery, wholeWord, matchCase, definitions],
   );
+  const definedSettled = defined?.key === definedKey && defined.result.version === loadedVersion;
+  const foldReferences = definitions !== null || (searchedName !== "" && !repoError && !(definedSettled && repoResult));
   let searchNote: string | null = null;
   if (repoError) searchNote = `Could not search the repository: ${repoError}`;
   else if (repoStale) searchNote = "The files changed. Load the new changes to search the repository.";
@@ -910,7 +913,15 @@ export function App({ viewId }: Props) {
                         </div>
                       </div>
                       {searched.trim() ? (
-                        <SearchResults key={repoKey} definitions={definitions} sections={sections} note={searchNote} current={hit} onOpen={openHit} />
+                        <SearchResults
+                          key={repoKey}
+                          definitions={definitions}
+                          sections={sections}
+                          note={searchNote}
+                          current={hit}
+                          foldReferences={foldReferences}
+                          onOpen={openHit}
+                        />
                       ) : treeList ? (
                         <FileTree
                           entries={treeList}
@@ -928,6 +939,7 @@ export function App({ viewId }: Props) {
                       )}
                     </div>
                   </aside>
+                  {sidebarOpen && <ResizeHandle edge={EDGES.sidebar} label="Resize the sidebar" />}
 
                   <main className={`files${switching ? " is-switching" : ""}`}>
                     {view !== "code" &&

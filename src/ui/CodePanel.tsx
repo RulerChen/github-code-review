@@ -9,6 +9,7 @@ import { DiffTable, type OnExpand } from "./DiffTable";
 import { highlight, languageFor, type TokenLines } from "./highlight";
 import { ArrowLeftIcon, CloseIcon } from "./icons";
 import { basename, dirPrefix } from "./paths";
+import { EDGES, ResizeHandle } from "./resize";
 import "./code-panel.css";
 
 export interface Peek {
@@ -21,7 +22,6 @@ export interface Peek {
 
 const WINDOW = 500;
 const MAX_CRUMBS = 5;
-const FOUND_MS = 2500;
 
 export function addedLines(file: FileDiff | undefined): Set<number> {
   const out = new Set<number>();
@@ -138,11 +138,7 @@ export function CodePanel({ peek, file, revision, version, load, raw, trail, onG
     const b = box.getBoundingClientRect();
     box.scrollTop += r.top - b.top - (box.clientHeight - r.height) / 2;
     row.classList.add("is-found");
-    const timer = setTimeout(() => row.classList.remove("is-found"), FOUND_MS);
-    return () => {
-      clearTimeout(timer);
-      row.classList.remove("is-found");
-    };
+    return () => row.classList.remove("is-found");
   }, [path, peek.seq, ready]);
 
   const { threadsFor } = useComments();
@@ -171,6 +167,7 @@ export function CodePanel({ peek, file, revision, version, load, raw, trail, onG
 
   return (
     <aside className={`code-panel${full ? " is-full" : ""}`} aria-label={`Code of ${path}`}>
+      {!full && <ResizeHandle edge={EDGES.code} label="Resize the code panel" />}
       <header className="code-head">
         {trail.length > 1 && (
           <button className="icon-button" onClick={() => onGo(-1)} aria-label="Back" title="Back (Alt+←)">

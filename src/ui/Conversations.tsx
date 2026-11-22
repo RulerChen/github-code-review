@@ -5,6 +5,7 @@ import { anchorLabel, authorName, type CommentsApi, preview, ThreadView } from "
 import { CloseIcon, ConversationIcon } from "./icons";
 import { isOutdated } from "./locate";
 import { basename, comparePaths, dirPrefix } from "./paths";
+import { EDGES, ResizeHandle } from "./resize";
 import { readStorage, useStoredState, writeStorage } from "./storage";
 import "./conversations.css";
 
@@ -212,6 +213,7 @@ export function ConversationsPanel({ conv }: { conv: Conversations }) {
   const { ordered, placeOf, api, unreadThreads } = conv;
   return (
     <aside className="conversations" aria-label="Conversations">
+      <ResizeHandle edge={EDGES.conversations} label="Resize the conversations" />
       <header className="conversations-head">
         <h2>Conversations</h2>
         <span className="conversations-count">{ordered.length}</span>
