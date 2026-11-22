@@ -189,10 +189,16 @@ async function runMcp(): Promise<void> {
               flow: z
                 .array(
                   z.object({
+                    component: z
+                      .string()
+                      .optional()
+                      .describe('The part of the system the step runs in, in a few words, such as "web client", "gateway" or "orders service", the same for every step there.'),
                     action: z.string().describe("What happens there, in a few words, starting with a verb."),
                     path: z.string().describe("The file, as list_changes prints paths."),
                     line: z.number().int().positive().describe("The line where it happens in the new version of the file."),
                     text: z.string().describe("How, in one sentence, naming the function."),
+                    input: z.string().optional().describe('What data the step takes in, in a few words, such as "order id, region".'),
+                    output: z.string().optional().describe('What data the step hands on, in a few words, such as "Order with converted total".'),
                     from: z
                       .number()
                       .int()

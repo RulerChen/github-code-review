@@ -67,8 +67,11 @@ export interface FlowVia {
 export interface FlowStep {
   path: string;
   line: number;
+  component?: string;
   action?: string;
   text: string;
+  input?: string;
+  output?: string;
   from?: number;
   when?: string;
   via?: FlowVia | null;

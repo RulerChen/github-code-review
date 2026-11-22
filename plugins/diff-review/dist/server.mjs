@@ -36692,8 +36692,14 @@ function isRecord(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 function describeStep(s) {
-  const how = [s.from ? `from ${s.from}` : "", s.when ? `when ${s.when}` : "", s.via ? `via ${s.via.kind}${s.via.label ? ` ${s.via.label}` : ""}` : ""].filter(Boolean);
-  return `${s.path}:${s.line} ${s.action ? `${s.action}: ` : ""}${s.text}${how.length ? ` (${how.join("; ")})` : ""}`;
+  const how = [
+    s.input ? `in: ${s.input}` : "",
+    s.output ? `out: ${s.output}` : "",
+    s.from ? `from ${s.from}` : "",
+    s.when ? `when ${s.when}` : "",
+    s.via ? `via ${s.via.kind}${s.via.label ? ` ${s.via.label}` : ""}` : ""
+  ].filter(Boolean);
+  return `${s.path}:${s.line} ${s.component ? `[${s.component}] ` : ""}${s.action ? `${s.action}: ` : ""}${s.text}${how.length ? ` (${how.join("; ")})` : ""}`;
 }
 
 // src/shared/comparison.ts
@@ -38369,10 +38375,12 @@ var flowRules = (diff) => {
     `Follow each request and message to the code that receives it${follow}, and give every service it passes through on the way a step, such as a gateway, a proxy or a worker, even where its code is unchanged.`,
     'The flow can branch. List the main path first, from start to end: the way the flow usually goes, such as a request that succeeds. Then list each branch, starting with "from": another way a step can go, such as an error, a fallback or an early return, a second hand-off such as a request that also publishes a message, or a second consumer of the same message.',
     "Give a branch where the changes add or touch it, or where it decides what the caller or the next service gets.",
-    'Each step is {"action", "path", "line", "text", "from", "when", "via"}.',
+    'Each step is {"component", "action", "path", "line", "text", "input", "output", "from", "when", "via"}.',
+    '"component" names the part of the system the step runs in, in a few words, such as "web client", "gateway" or "orders service": a process, a service or a clearly separate layer such as a UI, a server or a worker. Use the same name for every step in that part.',
     '"action" says what happens there in a few words, starting with a verb.',
     `"path" is relative to ${diff.repoRoot}, like the paths below, and "line" is the line where it happens in the new version of the file.`,
     '"text" says in one sentence how, naming the function.',
+    '"input" and "output" say in a few words what data the step takes in and what it hands on, such as "order id, region" and "Order with converted total".',
     '"from" is the number of the step this one comes from, counting from 1, on the first step of a branch; leave it out when a step follows the one listed just before it.',
     '"when" says in a few words when the flow goes this way, such as "order not found" or "upstream fails", on a step that is one of several ways on; leave it out otherwise.',
     '"via" is how the flow gets here from the step it comes from, as {"kind", "label"}: kind is "call" for a function call in the same process, "return" for going back to the caller, including the response to a request, "request" for a synchronous request to another process such as HTTP or gRPC, "message" for an asynchronous hand-off through a broker, queue, topic or event such as Kafka, RabbitMQ or a webhook, "storage" for data the step before writes to a database, cache or file and this step reads later, not for a plain read, and "other" for anything else.',
@@ -38380,7 +38388,7 @@ var flowRules = (diff) => {
     "Give [] when the changes do not sit on a path through several steps."
   ].join(" ");
 };
-var REPLY = 'Reply with only a JSON object and no other text: {"topics": [{"title": "...", "summary": "...", "ids": ["..."], "flow": [{"action": "...", "path": "...", "line": 1, "text": "..."}, {"action": "...", "path": "...", "line": 1, "text": "...", "via": {"kind": "call", "label": ""}}, {"action": "...", "path": "...", "line": 1, "text": "...", "from": 1, "when": "...", "via": {"kind": "return", "label": "..."}}]}]}';
+var REPLY = 'Reply with only a JSON object and no other text: {"topics": [{"title": "...", "summary": "...", "ids": ["..."], "flow": [{"component": "...", "action": "...", "path": "...", "line": 1, "text": "...", "input": "...", "output": "..."}, {"component": "...", "action": "...", "path": "...", "line": 1, "text": "...", "input": "...", "output": "...", "via": {"kind": "request", "label": "..."}}, {"component": "...", "action": "...", "path": "...", "line": 1, "text": "...", "input": "...", "output": "...", "from": 1, "when": "...", "via": {"kind": "return", "label": "..."}}]}]}';
 async function askTopics(o, prompt, allowEmpty, check2) {
   const run = (resume, fork, prompt2) => ask({ cwd: o.cwd, resume, fork, prompt: prompt2, onText: () => {
   }, onActivity: o.onActivity });
@@ -38550,8 +38558,10 @@ function toTopic(t) {
   if (steps.some((s) => s === null)) return null;
   return { title: title.trim(), summary: summary.trim(), ids, flow: steps };
 }
+var optionalText = (v) => typeof v === "string" && v.trim() ? v.trim() : void 0;
 function toStep(s, index) {
   if (!isRecord(s) || typeof s.path !== "string" || !s.path.trim() || typeof s.text !== "string") return null;
+  if ([s.component, s.input, s.output].some((v) => v !== void 0 && v !== null && typeof v !== "string")) return null;
   if (typeof s.action !== "string" || !s.action.trim()) return null;
   if (typeof s.line !== "number" || !Number.isInteger(s.line) || s.line < 1) return null;
   if (s.from !== void 0 && s.from !== null && (typeof s.from !== "number" || !Number.isInteger(s.from) || s.from < 1 || s.from > index)) return null;
@@ -38560,7 +38570,9 @@ function toStep(s, index) {
   if (via === void 0) return null;
   const from = typeof s.from === "number" && s.from < index ? { from: s.from } : {};
   const when = typeof s.when === "string" && s.when.trim() ? { when: s.when.trim() } : {};
-  return { path: s.path.trim(), line: s.line, action: s.action.trim(), text: s.text.trim(), ...from, ...when, via };
+  const parts2 = { component: optionalText(s.component), input: optionalText(s.input), output: optionalText(s.output) };
+  const named2 = Object.fromEntries(Object.entries(parts2).filter(([, v]) => v !== void 0));
+  return { path: s.path.trim(), line: s.line, ...named2, action: s.action.trim(), text: s.text.trim(), ...from, ...when, via };
 }
 function toVia(v) {
   if (!isRecord(v) || typeof v.label !== "string") return void 0;
@@ -39537,10 +39549,13 @@ async function runMcp() {
             ids: external_exports.array(external_exports.string()).describe("Ids from list_changes of the changes in this topic."),
             flow: external_exports.array(
               external_exports.object({
+                component: external_exports.string().optional().describe('The part of the system the step runs in, in a few words, such as "web client", "gateway" or "orders service", the same for every step there.'),
                 action: external_exports.string().describe("What happens there, in a few words, starting with a verb."),
                 path: external_exports.string().describe("The file, as list_changes prints paths."),
                 line: external_exports.number().int().positive().describe("The line where it happens in the new version of the file."),
                 text: external_exports.string().describe("How, in one sentence, naming the function."),
+                input: external_exports.string().optional().describe('What data the step takes in, in a few words, such as "order id, region".'),
+                output: external_exports.string().optional().describe('What data the step hands on, in a few words, such as "Order with converted total".'),
                 from: external_exports.number().int().positive().optional().describe("On the first step of a branch, the number of the step it comes from, counting from 1. Leave it out when the step follows the one listed just before it."),
                 when: external_exports.string().optional().describe('When the flow goes this way, such as "order not found" or "upstream fails", on a step that is one of several ways on.'),
                 via: external_exports.object({

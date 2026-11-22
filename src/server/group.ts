@@ -29,10 +29,12 @@ const flowRules = (diff: DiffResult) => {
     `Follow each request and message to the code that receives it${follow}, and give every service it passes through on the way a step, such as a gateway, a proxy or a worker, even where its code is unchanged.`,
     "The flow can branch. List the main path first, from start to end: the way the flow usually goes, such as a request that succeeds. Then list each branch, starting with \"from\": another way a step can go, such as an error, a fallback or an early return, a second hand-off such as a request that also publishes a message, or a second consumer of the same message.",
     "Give a branch where the changes add or touch it, or where it decides what the caller or the next service gets.",
-    'Each step is {"action", "path", "line", "text", "from", "when", "via"}.',
+    'Each step is {"component", "action", "path", "line", "text", "input", "output", "from", "when", "via"}.',
+    '"component" names the part of the system the step runs in, in a few words, such as "web client", "gateway" or "orders service": a process, a service or a clearly separate layer such as a UI, a server or a worker. Use the same name for every step in that part.',
     '"action" says what happens there in a few words, starting with a verb.',
     `"path" is relative to ${diff.repoRoot}, like the paths below, and "line" is the line where it happens in the new version of the file.`,
     '"text" says in one sentence how, naming the function.',
+    '"input" and "output" say in a few words what data the step takes in and what it hands on, such as "order id, region" and "Order with converted total".',
     '"from" is the number of the step this one comes from, counting from 1, on the first step of a branch; leave it out when a step follows the one listed just before it.',
     '"when" says in a few words when the flow goes this way, such as "order not found" or "upstream fails", on a step that is one of several ways on; leave it out otherwise.',
     '"via" is how the flow gets here from the step it comes from, as {"kind", "label"}: kind is "call" for a function call in the same process, "return" for going back to the caller, including the response to a request, "request" for a synchronous request to another process such as HTTP or gRPC, "message" for an asynchronous hand-off through a broker, queue, topic or event such as Kafka, RabbitMQ or a webhook, "storage" for data the step before writes to a database, cache or file and this step reads later, not for a plain read, and "other" for anything else.',
@@ -42,7 +44,7 @@ const flowRules = (diff: DiffResult) => {
 };
 
 const REPLY =
-  'Reply with only a JSON object and no other text: {"topics": [{"title": "...", "summary": "...", "ids": ["..."], "flow": [{"action": "...", "path": "...", "line": 1, "text": "..."}, {"action": "...", "path": "...", "line": 1, "text": "...", "via": {"kind": "call", "label": ""}}, {"action": "...", "path": "...", "line": 1, "text": "...", "from": 1, "when": "...", "via": {"kind": "return", "label": "..."}}]}]}';
+  'Reply with only a JSON object and no other text: {"topics": [{"title": "...", "summary": "...", "ids": ["..."], "flow": [{"component": "...", "action": "...", "path": "...", "line": 1, "text": "...", "input": "...", "output": "..."}, {"component": "...", "action": "...", "path": "...", "line": 1, "text": "...", "input": "...", "output": "...", "via": {"kind": "request", "label": "..."}}, {"component": "...", "action": "...", "path": "...", "line": 1, "text": "...", "input": "...", "output": "...", "from": 1, "when": "...", "via": {"kind": "return", "label": "..."}}]}]}';
 
 async function askTopics(o: AskOptions, prompt: string, allowEmpty: boolean, check: (topics: Topic[]) => Promise<string | null>): Promise<Topic[]> {
   const run = (resume: string | null, fork: boolean, prompt: string) =>
@@ -245,8 +247,11 @@ function toTopic(t: unknown): Topic | null {
   return { title: title.trim(), summary: summary.trim(), ids, flow: steps as FlowStep[] };
 }
 
+const optionalText = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : undefined);
+
 function toStep(s: unknown, index: number): FlowStep | null {
   if (!isRecord(s) || typeof s.path !== "string" || !s.path.trim() || typeof s.text !== "string") return null;
+  if ([s.component, s.input, s.output].some((v) => v !== undefined && v !== null && typeof v !== "string")) return null;
   if (typeof s.action !== "string" || !s.action.trim()) return null;
   if (typeof s.line !== "number" || !Number.isInteger(s.line) || s.line < 1) return null;
   if (s.from !== undefined && s.from !== null && (typeof s.from !== "number" || !Number.isInteger(s.from) || s.from < 1 || s.from > index)) return null;
@@ -255,7 +260,9 @@ function toStep(s: unknown, index: number): FlowStep | null {
   if (via === undefined) return null;
   const from = typeof s.from === "number" && s.from < index ? { from: s.from } : {};
   const when = typeof s.when === "string" && s.when.trim() ? { when: s.when.trim() } : {};
-  return { path: s.path.trim(), line: s.line, action: s.action.trim(), text: s.text.trim(), ...from, ...when, via };
+  const parts = { component: optionalText(s.component), input: optionalText(s.input), output: optionalText(s.output) };
+  const named = Object.fromEntries(Object.entries(parts).filter(([, v]) => v !== undefined));
+  return { path: s.path.trim(), line: s.line, ...named, action: s.action.trim(), text: s.text.trim(), ...from, ...when, via };
 }
 
 function toVia(v: unknown): FlowVia | undefined {
