@@ -72,7 +72,7 @@ async function askTopics(o: AskOptions, prompt: string, allowEmpty: boolean, che
 export async function groupChanges(o: GroupOptions): Promise<Topic[]> {
   const focused = o.focus !== null || o.names !== null;
   const topics = await askTopics(o, buildPrompt(o.diff, o.focus, o.names), focused, async (t) =>
-    problems(unknownIds(o.diff, t), flowProblem(await missingSteps(o.diff, t), o.diff.repoRoot)),
+    problems(unknownIds(o.diff, t), flowProblem(await missingSteps(o.diff, t), o.diff.repoRoot), unnamedSteps(t)),
   );
 
   const known = new Set(o.diff.files.flatMap(changeIds));
@@ -138,7 +138,7 @@ interface SyncOptions extends AskOptions {
 export async function syncTopics(o: SyncOptions): Promise<Topic[]> {
   const { review, diff, delta } = o;
   const answer = await askTopics(o, buildSyncPrompt(review, diff, delta), true, async (t) =>
-    problems(syncProblem(t, delta.added, review.focus !== null), flowProblem(await missingSteps(diff, t), diff.repoRoot)),
+    problems(syncProblem(t, delta.added, review.focus !== null), flowProblem(await missingSteps(diff, t), diff.repoRoot), unnamedSteps(t)),
   );
   return mergeSync(review, diff, delta, await nameSteps(diff, withoutSteps(answer, await missingSteps(diff, answer))));
 }
@@ -291,6 +291,14 @@ export async function missingSteps(diff: DiffResult, topics: Topic[]): Promise<M
 
 export function flowProblem(bad: Map<FlowStep, string>, root: string): string | null {
   return bad.size ? `These flow steps point to no line of the compared version: ${[...bad.values()].join(", ")}. Paths are relative to ${root}.` : null;
+}
+
+export function unnamedSteps(topics: Topic[]): string | null {
+  const found = topics.flatMap((t) => {
+    const steps = (t.flow ?? []).flatMap((s, i) => (s.component?.trim() ? [] : [i + 1]));
+    return steps.length ? [`"${t.title}" steps ${steps.join(", ")}`] : [];
+  });
+  return found.length ? `These flow steps have no "component": ${found.join("; ")}. Name the part of the system each step runs in, the same name for every step in that part.` : null;
 }
 
 export async function nameSteps(diff: DiffResult, topics: Topic[]): Promise<Topic[]> {

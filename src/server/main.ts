@@ -191,7 +191,6 @@ async function runMcp(): Promise<void> {
                   z.object({
                     component: z
                       .string()
-                      .optional()
                       .describe('The part of the system the step runs in, in a few words, such as "web client", "gateway" or "orders service", the same for every step there.'),
                     action: z.string().describe("What happens there, in a few words, starting with a verb."),
                     path: z.string().describe("The file, as list_changes prints paths."),

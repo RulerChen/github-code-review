@@ -188,6 +188,8 @@ function layout(flow: FlowItem[], parent: number[], current: number | null, onPi
   walk(0);
 
   const indent = measure("00 ", "label");
+  const handoff = (i: number) => parent[i]! >= 0 && keyOf(parent[i]!) !== keyOf(i);
+  const conditionOf = (step: FlowStep) => (step.from ? `↳ ${plain(step.when)}` : `[${plain(step.when)}]`);
   const parts = new Map<string, Part>();
   for (const i of order) {
     const { step } = flow[i]!;
@@ -195,8 +197,8 @@ function layout(flow: FlowItem[], parent: number[], current: number | null, onPi
     const part: Part = parts.get(key) ?? { key, name: componentOf(step), steps: [], rows: [], at: new Map(), w: measure(componentOf(step), "name") + 34, h: HEAD };
     parts.set(key, part);
     part.steps.push(i);
-    if (step.from && step.when && keyOf(step.from - 1) === key) {
-      const lines = wrap(`↳ ${plain(step.when)}`, ROW_W + indent, "label");
+    if (step.when && !handoff(i)) {
+      const lines = wrap(conditionOf(step), ROW_W + indent, "label");
       part.rows.push({ step: null, lines, branch: true });
       part.w = Math.max(part.w, Math.max(...lines.map((line) => measure(line, "label"))) + 22);
       part.h += lines.length * ROW_LINE + 4;
@@ -212,12 +214,11 @@ function layout(flow: FlowItem[], parent: number[], current: number | null, onPi
     part.h += 7;
   }
 
-  const condition = (i: number) => (flow[i]!.step.from && flow[i]!.step.when ? wrap(`↳ ${plain(flow[i]!.step.when)}`, LABEL_W, "label") : []);
   const links = flow.flatMap(({ step }, i) => {
     const p = parent[i]!;
     if (p < 0 || keyOf(p) === keyOf(i)) return [];
     const lines = wrap(viaOf(step), LABEL_W - indent, "label");
-    const when = condition(i);
+    const when = step.when ? wrap(conditionOf(step), LABEL_W, "label") : [];
     const w = Math.ceil(Math.max(indent + Math.max(...lines.map((line) => measure(line, "label"))), ...when.map((line) => measure(line, "label"))) + 12);
     return [{ step: i, from: keyOf(p), to: keyOf(i), source: p, lines, when, w, h: (when.length + lines.length) * LINE + 8 }];
   });

@@ -38415,7 +38415,7 @@ async function groupChanges(o) {
     o,
     buildPrompt(o.diff, o.focus, o.names),
     focused,
-    async (t) => problems(unknownIds(o.diff, t), flowProblem(await missingSteps(o.diff, t), o.diff.repoRoot))
+    async (t) => problems(unknownIds(o.diff, t), flowProblem(await missingSteps(o.diff, t), o.diff.repoRoot), unnamedSteps(t))
   );
   const known = new Set(o.diff.files.flatMap(changeIds));
   const named2 = await nameSteps(o.diff, withoutSteps(topics, await missingSteps(o.diff, topics)));
@@ -38462,7 +38462,7 @@ async function syncTopics(o) {
     o,
     buildSyncPrompt(review, diff, delta),
     true,
-    async (t) => problems(syncProblem(t, delta.added, review.focus !== null), flowProblem(await missingSteps(diff, t), diff.repoRoot))
+    async (t) => problems(syncProblem(t, delta.added, review.focus !== null), flowProblem(await missingSteps(diff, t), diff.repoRoot), unnamedSteps(t))
   );
   return mergeSync(review, diff, delta, await nameSteps(diff, withoutSteps(answer, await missingSteps(diff, answer))));
 }
@@ -38598,6 +38598,13 @@ async function missingSteps(diff, topics) {
 }
 function flowProblem(bad, root) {
   return bad.size ? `These flow steps point to no line of the compared version: ${[...bad.values()].join(", ")}. Paths are relative to ${root}.` : null;
+}
+function unnamedSteps(topics) {
+  const found = topics.flatMap((t) => {
+    const steps = (t.flow ?? []).flatMap((s, i) => s.component?.trim() ? [] : [i + 1]);
+    return steps.length ? [`"${t.title}" steps ${steps.join(", ")}`] : [];
+  });
+  return found.length ? `These flow steps have no "component": ${found.join("; ")}. Name the part of the system each step runs in, the same name for every step in that part.` : null;
 }
 async function nameSteps(diff, topics) {
   const scopes = /* @__PURE__ */ new Map();
@@ -39549,7 +39556,7 @@ async function runMcp() {
             ids: external_exports.array(external_exports.string()).describe("Ids from list_changes of the changes in this topic."),
             flow: external_exports.array(
               external_exports.object({
-                component: external_exports.string().optional().describe('The part of the system the step runs in, in a few words, such as "web client", "gateway" or "orders service", the same for every step there.'),
+                component: external_exports.string().describe('The part of the system the step runs in, in a few words, such as "web client", "gateway" or "orders service", the same for every step there.'),
                 action: external_exports.string().describe("What happens there, in a few words, starting with a verb."),
                 path: external_exports.string().describe("The file, as list_changes prints paths."),
                 line: external_exports.number().int().positive().describe("The line where it happens in the new version of the file."),

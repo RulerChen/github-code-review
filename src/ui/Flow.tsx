@@ -43,6 +43,7 @@ export function Flow({ flow: items, open, onOpen }: { flow: FlowItem[]; open: bo
           <span className="flow-num">{num(i)}</span>
           <span className="flow-line">
             <span className="flow-action">{step.action || scope || basename(step.path)}</span>
+            {step.when && !step.from && <span className="flow-when">[{plain(step.when)}]</span>}
             {step.via?.label && <span className="flow-via">via {plain(step.via.label)}</span>}
             {changed && <span className="flow-changed">changed</span>}
           </span>

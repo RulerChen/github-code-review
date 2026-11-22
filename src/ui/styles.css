@@ -1398,6 +1398,11 @@ body.is-resizing .file {
   font: 11px/18px var(--mono);
 }
 
+.flow-when {
+  color: var(--attention);
+  font: 11px/18px var(--mono);
+}
+
 .flow-via {
   color: var(--fg-muted);
   font: 11px/18px var(--mono);
