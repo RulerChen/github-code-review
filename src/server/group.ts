@@ -1,8 +1,8 @@
 import { readRepoFile } from "../engine/browse.js";
 import { changeIds, editedInto, oldCommitOf } from "../shared/hunks.js";
 import { insideOf } from "../shared/scope.js";
-import type { DiffResult, FlowStep, Review, Topic } from "../shared/types.js";
-import { isRecord, plural } from "../shared/util.js";
+import { type DiffResult, FLOW_VIA_KINDS, type FlowStep, type FlowVia, type Review, type Topic } from "../shared/types.js";
+import { describeStep, isRecord, plural } from "../shared/util.js";
 import { ask } from "./claude.js";
 import { checkTopics, formatChanges, formatFiles } from "./review.js";
 
@@ -20,11 +20,14 @@ interface GroupOptions extends AskOptions {
 
 const SUMMARY_RULES = "Add why in one sentence when you know it. Describe the end result of the changes as listed: no commit hashes, no account of which commit did what, nothing about code these changes leave alone, and no advice to the reviewer.";
 
-const flowRules = (root: string) =>
-  `as steps {"path", "line", "text"} in the order the code runs. Include the steps in code these changes leave alone and in other repositories, so the reviewer can follow the path from where it starts to where it ends, one step per function it passes through. "path" is relative to ${root}, like the paths below. "line" is the line of that function or call in the new version of the file. "text" says in one sentence what happens there. Give [] when the changes do not sit on a path through several functions.`;
+const flowRules = (diff: DiffResult) => {
+  const dirs = diff.repos.filter((r) => r.error === null && r.dir !== "").map((r) => r.dir);
+  const follow = dirs.length > 1 ? `, looking in every repository under ${diff.repoRoot}, with or without changes (${dirs.join(", ")})` : "";
+  return `as steps in the order things happen, so the reviewer can follow what the code does from where it starts to where it ends. Include steps in code these changes leave alone, in other repositories, and on the far side of an API, a queue or topic, a database or any other hand-off, one step per thing the code does that matters for following the change. Follow each request and message to the code that receives it${follow}, and give every service it passes through on the way a step, such as a gateway, a proxy or a worker, even where its code is unchanged. The flow is one path: where it forks, for example a request that also publishes a message, follow one branch, and when the other branch has changes of its own, give it its own topic and flow. Each step is {"action", "path", "line", "text", "via"}. "action" says what happens there in a few words, starting with a verb. "path" is relative to ${diff.repoRoot}, like the paths below, and "line" is the line where it happens in the new version of the file. "text" says in one sentence how, naming the function. "via" is how the flow gets to the next step, as {"kind", "label"}: kind is "call" for a function call in the same process, "return" for going back to the caller, including the response to a request, "request" for a synchronous request to another process such as HTTP or gRPC, "message" for an asynchronous hand-off through a broker, queue, topic or event such as Kafka, RabbitMQ or a webhook, "storage" for data this step writes to a database, cache or file and the next step reads later, not for a plain read, and "other" for anything else. "label" names the hand-off with its mechanism and concrete channel, such as "HTTP GET /orders/{id}", "Kafka topic order-events" or "orders table", and is "" for a plain call. Leave "via" out on the last step. Give [] when the changes do not sit on a path through several steps.`;
+};
 
 const REPLY =
-  'Reply with only a JSON object and no other text: {"topics": [{"title": "...", "summary": "...", "ids": ["..."], "flow": [{"path": "...", "line": 1, "text": "..."}]}]}';
+  'Reply with only a JSON object and no other text: {"topics": [{"title": "...", "summary": "...", "ids": ["..."], "flow": [{"action": "...", "path": "...", "line": 1, "text": "...", "via": {"kind": "call", "label": ""}}]}]}';
 
 async function askTopics(o: AskOptions, prompt: string, allowEmpty: boolean, check: (topics: Topic[]) => Promise<string | null>): Promise<Topic[]> {
   const run = (resume: string | null, fork: boolean, prompt: string) =>
@@ -82,7 +85,7 @@ function buildPrompt(diff: DiffResult, focus: string | null, names: string[] | n
     '- "title": a few words.',
     `- "summary": Markdown on what behaves differently after these changes: name each function or file involved and say what it did before, what it does now, and in which cases. ${SUMMARY_RULES}`,
     '- "ids": the ids of all changes in the topic, exactly as listed below.',
-    `- "flow": the path a call or data takes through the code these changes sit on, ${flowRules(diff.repoRoot)}`,
+    `- "flow": the path a call or data takes through the code these changes sit on, ${flowRules(diff)}`,
     scope,
     "Order the topics the way a reviewer should read them. Write titles, summaries and flow steps in the language the user writes in.",
     REPLY,
@@ -164,7 +167,7 @@ function buildSyncPrompt(review: Review, diff: DiffResult, delta: TopicDelta): s
     const kept = t.ids.filter((id) => now.has(id));
     const gone = t.ids.filter((id) => delta.removed.has(id)).length;
     const changes = `${kept.length ? kept.join(", ") : "no changes left"}${gone ? `; ${plural(gone, "change")} gone since` : ""}`;
-    const flow = t.flow?.length ? ["    Flow:", ...t.flow.map((s, i) => `      ${i + 1}. ${s.path}:${s.line} ${s.text}`)] : [];
+    const flow = t.flow?.length ? ["    Flow:", ...t.flow.map((s, i) => `      ${i + 1}. ${describeStep(s)}`)] : [];
     return [`- ${JSON.stringify(t.title)} (${changes})`, t.summary.replace(/^/gm, "    "), ...flow];
   });
   const scope = review.focus
@@ -190,7 +193,7 @@ function buildSyncPrompt(review: Review, diff: DiffResult, delta: TopicDelta): s
     '- "title": the title exactly as above, or a few words for a new topic.',
     `- "summary": Markdown on what behaves differently after the topic's changes as they are now: name each function or file involved and say what it did before, what it does now, and in which cases. ${SUMMARY_RULES}`,
     '- "ids": the ids of the new and edited changes that belong in the topic. Leave out the ids it already has.',
-    `- "flow": the topic's whole flow as the code is now: the path a call or data takes through the code its changes sit on, ${flowRules(diff.repoRoot)}`,
+    `- "flow": the topic's whole flow as the code is now: the path a call or data takes through the code its changes sit on, ${flowRules(diff)}`,
     `${scope} Leave out the other topics. Write in the language of the summaries above.`,
     REPLY,
   ].join("\n");
@@ -211,7 +214,7 @@ function parseTopics(text: string, allowEmpty: boolean): Topic[] | string {
   if (!Array.isArray(list) || (list.length === 0 && !allowEmpty)) return 'The answer had no "topics" array.';
   const topics = list.map(toTopic);
   if (topics.some((t) => t === null)) {
-    return 'Each topic needs a "title" and a "summary" string, an "ids" array of strings and a "flow" array of {"path", "line", "text"} with a whole-number line.';
+    return 'Each topic needs a "title" and a "summary" string, an "ids" array of strings and a "flow" array of {"action", "path", "line", "text", "via"}, with a whole-number line and a via kind of call, return, request, message, storage or other.';
   }
   return topics as Topic[];
 }
@@ -224,13 +227,23 @@ function toTopic(t: unknown): Topic | null {
   if (flow === undefined) return { title: title.trim(), summary: summary.trim(), ids };
   const steps = Array.isArray(flow) ? flow.map(toStep) : [null];
   if (steps.some((s) => s === null)) return null;
-  return { title: title.trim(), summary: summary.trim(), ids, flow: steps as FlowStep[] };
+  const last = steps.length - 1;
+  return { title: title.trim(), summary: summary.trim(), ids, flow: (steps as FlowStep[]).map((s, i) => (i === last ? { ...s, via: null } : s)) };
 }
 
 function toStep(s: unknown): FlowStep | null {
   if (!isRecord(s) || typeof s.path !== "string" || !s.path.trim() || typeof s.text !== "string") return null;
+  if (typeof s.action !== "string" || !s.action.trim()) return null;
   if (typeof s.line !== "number" || !Number.isInteger(s.line) || s.line < 1) return null;
-  return { path: s.path.trim(), line: s.line, text: s.text.trim() };
+  const via = s.via === undefined || s.via === null ? null : toVia(s.via);
+  if (via === undefined) return null;
+  return { path: s.path.trim(), line: s.line, action: s.action.trim(), text: s.text.trim(), via };
+}
+
+function toVia(v: unknown): FlowVia | undefined {
+  if (!isRecord(v) || typeof v.label !== "string") return undefined;
+  const kind = FLOW_VIA_KINDS.find((k) => k === v.kind);
+  return kind ? { kind, label: v.label.trim() } : undefined;
 }
 
 export async function missingSteps(diff: DiffResult, topics: Topic[]): Promise<Map<FlowStep, string>> {

@@ -1,3 +1,5 @@
+import type { FlowStep } from "./types.js";
+
 export function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
@@ -29,4 +31,9 @@ export const compareText = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+export function describeStep(s: FlowStep): string {
+  const via = s.via ? ` (then ${s.via.kind}${s.via.label ? ` ${s.via.label}` : ""})` : "";
+  return `${s.path}:${s.line} ${s.action ? `${s.action}: ` : ""}${s.text}${via}`;
 }

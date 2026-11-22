@@ -36691,6 +36691,10 @@ var compareText = (a, b) => a < b ? -1 : a > b ? 1 : 0;
 function isRecord(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
+function describeStep(s) {
+  const via = s.via ? ` (then ${s.via.kind}${s.via.label ? ` ${s.via.label}` : ""})` : "";
+  return `${s.path}:${s.line} ${s.action ? `${s.action}: ` : ""}${s.text}${via}`;
+}
 
 // src/shared/comparison.ts
 var rangeOf = (r) => ({ base: r.base, head: r.head, threeDot: r.threeDot });
@@ -37390,6 +37394,9 @@ async function mapLimit(items, limit, fn) {
   await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
   return out;
 }
+
+// src/shared/types.ts
+var FLOW_VIA_KINDS = ["call", "return", "request", "message", "storage", "other"];
 
 // src/server/claude.ts
 import { spawn as spawn2 } from "node:child_process";
@@ -38353,8 +38360,12 @@ function checkTopics(diff, topics) {
 
 // src/server/group.ts
 var SUMMARY_RULES = "Add why in one sentence when you know it. Describe the end result of the changes as listed: no commit hashes, no account of which commit did what, nothing about code these changes leave alone, and no advice to the reviewer.";
-var flowRules = (root) => `as steps {"path", "line", "text"} in the order the code runs. Include the steps in code these changes leave alone and in other repositories, so the reviewer can follow the path from where it starts to where it ends, one step per function it passes through. "path" is relative to ${root}, like the paths below. "line" is the line of that function or call in the new version of the file. "text" says in one sentence what happens there. Give [] when the changes do not sit on a path through several functions.`;
-var REPLY = 'Reply with only a JSON object and no other text: {"topics": [{"title": "...", "summary": "...", "ids": ["..."], "flow": [{"path": "...", "line": 1, "text": "..."}]}]}';
+var flowRules = (diff) => {
+  const dirs = diff.repos.filter((r) => r.error === null && r.dir !== "").map((r) => r.dir);
+  const follow = dirs.length > 1 ? `, looking in every repository under ${diff.repoRoot}, with or without changes (${dirs.join(", ")})` : "";
+  return `as steps in the order things happen, so the reviewer can follow what the code does from where it starts to where it ends. Include steps in code these changes leave alone, in other repositories, and on the far side of an API, a queue or topic, a database or any other hand-off, one step per thing the code does that matters for following the change. Follow each request and message to the code that receives it${follow}, and give every service it passes through on the way a step, such as a gateway, a proxy or a worker, even where its code is unchanged. The flow is one path: where it forks, for example a request that also publishes a message, follow one branch, and when the other branch has changes of its own, give it its own topic and flow. Each step is {"action", "path", "line", "text", "via"}. "action" says what happens there in a few words, starting with a verb. "path" is relative to ${diff.repoRoot}, like the paths below, and "line" is the line where it happens in the new version of the file. "text" says in one sentence how, naming the function. "via" is how the flow gets to the next step, as {"kind", "label"}: kind is "call" for a function call in the same process, "return" for going back to the caller, including the response to a request, "request" for a synchronous request to another process such as HTTP or gRPC, "message" for an asynchronous hand-off through a broker, queue, topic or event such as Kafka, RabbitMQ or a webhook, "storage" for data this step writes to a database, cache or file and the next step reads later, not for a plain read, and "other" for anything else. "label" names the hand-off with its mechanism and concrete channel, such as "HTTP GET /orders/{id}", "Kafka topic order-events" or "orders table", and is "" for a plain call. Leave "via" out on the last step. Give [] when the changes do not sit on a path through several steps.`;
+};
+var REPLY = 'Reply with only a JSON object and no other text: {"topics": [{"title": "...", "summary": "...", "ids": ["..."], "flow": [{"action": "...", "path": "...", "line": 1, "text": "...", "via": {"kind": "call", "label": ""}}]}]}';
 async function askTopics(o, prompt, allowEmpty, check2) {
   const run = (resume, fork, prompt2) => ask({ cwd: o.cwd, resume, fork, prompt: prompt2, onText: () => {
   }, onActivity: o.onActivity });
@@ -38403,7 +38414,7 @@ function buildPrompt(diff, focus, names) {
     '- "title": a few words.',
     `- "summary": Markdown on what behaves differently after these changes: name each function or file involved and say what it did before, what it does now, and in which cases. ${SUMMARY_RULES}`,
     '- "ids": the ids of all changes in the topic, exactly as listed below.',
-    `- "flow": the path a call or data takes through the code these changes sit on, ${flowRules(diff.repoRoot)}`,
+    `- "flow": the path a call or data takes through the code these changes sit on, ${flowRules(diff)}`,
     scope,
     "Order the topics the way a reviewer should read them. Write titles, summaries and flow steps in the language the user writes in.",
     REPLY,
@@ -38470,7 +38481,7 @@ function buildSyncPrompt(review, diff, delta) {
     const kept = t.ids.filter((id) => now2.has(id));
     const gone = t.ids.filter((id) => delta.removed.has(id)).length;
     const changes = `${kept.length ? kept.join(", ") : "no changes left"}${gone ? `; ${plural2(gone, "change")} gone since` : ""}`;
-    const flow = t.flow?.length ? ["    Flow:", ...t.flow.map((s, i) => `      ${i + 1}. ${s.path}:${s.line} ${s.text}`)] : [];
+    const flow = t.flow?.length ? ["    Flow:", ...t.flow.map((s, i) => `      ${i + 1}. ${describeStep(s)}`)] : [];
     return [`- ${JSON.stringify(t.title)} (${changes})`, t.summary.replace(/^/gm, "    "), ...flow];
   });
   const scope = review.focus ? `The topics were made with this focus: ${JSON.stringify(review.focus)}. Put a new change in a topic only when the focus asks for it, and leave the others out.` : "Put every new change in a topic, in a new one when none fits.";
@@ -38491,7 +38502,7 @@ function buildSyncPrompt(review, diff, delta) {
     '- "title": the title exactly as above, or a few words for a new topic.',
     `- "summary": Markdown on what behaves differently after the topic's changes as they are now: name each function or file involved and say what it did before, what it does now, and in which cases. ${SUMMARY_RULES}`,
     '- "ids": the ids of the new and edited changes that belong in the topic. Leave out the ids it already has.',
-    `- "flow": the topic's whole flow as the code is now: the path a call or data takes through the code its changes sit on, ${flowRules(diff.repoRoot)}`,
+    `- "flow": the topic's whole flow as the code is now: the path a call or data takes through the code its changes sit on, ${flowRules(diff)}`,
     `${scope} Leave out the other topics. Write in the language of the summaries above.`,
     REPLY
   ].join("\n");
@@ -38510,7 +38521,7 @@ function parseTopics(text, allowEmpty) {
   if (!Array.isArray(list) || list.length === 0 && !allowEmpty) return 'The answer had no "topics" array.';
   const topics = list.map(toTopic);
   if (topics.some((t) => t === null)) {
-    return 'Each topic needs a "title" and a "summary" string, an "ids" array of strings and a "flow" array of {"path", "line", "text"} with a whole-number line.';
+    return 'Each topic needs a "title" and a "summary" string, an "ids" array of strings and a "flow" array of {"action", "path", "line", "text", "via"}, with a whole-number line and a via kind of call, return, request, message, storage or other.';
   }
   return topics;
 }
@@ -38522,12 +38533,21 @@ function toTopic(t) {
   if (flow === void 0) return { title: title.trim(), summary: summary.trim(), ids };
   const steps = Array.isArray(flow) ? flow.map(toStep) : [null];
   if (steps.some((s) => s === null)) return null;
-  return { title: title.trim(), summary: summary.trim(), ids, flow: steps };
+  const last = steps.length - 1;
+  return { title: title.trim(), summary: summary.trim(), ids, flow: steps.map((s, i) => i === last ? { ...s, via: null } : s) };
 }
 function toStep(s) {
   if (!isRecord(s) || typeof s.path !== "string" || !s.path.trim() || typeof s.text !== "string") return null;
+  if (typeof s.action !== "string" || !s.action.trim()) return null;
   if (typeof s.line !== "number" || !Number.isInteger(s.line) || s.line < 1) return null;
-  return { path: s.path.trim(), line: s.line, text: s.text.trim() };
+  const via = s.via === void 0 || s.via === null ? null : toVia(s.via);
+  if (via === void 0) return null;
+  return { path: s.path.trim(), line: s.line, action: s.action.trim(), text: s.text.trim(), via };
+}
+function toVia(v) {
+  if (!isRecord(v) || typeof v.label !== "string") return void 0;
+  const kind = FLOW_VIA_KINDS.find((k) => k === v.kind);
+  return kind ? { kind, label: v.label.trim() } : void 0;
 }
 async function missingSteps(diff, topics) {
   const counts = /* @__PURE__ */ new Map();
@@ -39480,12 +39500,19 @@ async function runMcp() {
             ids: external_exports.array(external_exports.string()).describe("Ids from list_changes of the changes in this topic."),
             flow: external_exports.array(
               external_exports.object({
+                action: external_exports.string().describe("What happens there, in a few words, starting with a verb."),
                 path: external_exports.string().describe("The file, as list_changes prints paths."),
-                line: external_exports.number().int().positive().describe("The line of the function or call in the new version of the file."),
-                text: external_exports.string().describe("What happens there, in one sentence.")
+                line: external_exports.number().int().positive().describe("The line where it happens in the new version of the file."),
+                text: external_exports.string().describe("How, in one sentence, naming the function."),
+                via: external_exports.object({
+                  kind: external_exports.enum(FLOW_VIA_KINDS),
+                  label: external_exports.string()
+                }).nullish().describe(
+                  'How the flow gets to the next step. kind: call (function call in the same process), return (back to the caller, including the response to a request), request (synchronous request to another process, such as HTTP or gRPC), message (asynchronous through a broker, queue, topic or event, such as Kafka, RabbitMQ or a webhook), storage (written here to a database, cache or file that the next step reads later) or other. label names the mechanism and concrete channel, such as "HTTP GET /orders/{id}" or "Kafka topic order-events", and is empty for a plain call. Leave it out on the last step.'
+                )
               })
             ).optional().describe(
-              "The path a call or data takes through the code this topic's changes sit on, in the order the code runs, one step per function it passes through, from where it starts to where it ends. Include steps in code the changes leave alone and in other repositories. Leave it out when the changes do not sit on a path through several functions."
+              "The steps this topic's changes sit on, in the order things happen, from where it starts to where it ends, one step per thing the code does that matters for following the change. Include steps in code the changes leave alone, in other repositories, and on the far side of an API, a queue or topic, a database or any other hand-off, and do not skip a service the flow passes through on the way, such as a gateway or proxy. Leave it out when the changes do not sit on a path through several steps."
             )
           })
         ).optional().describe(

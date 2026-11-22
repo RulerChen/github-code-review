@@ -1304,20 +1304,14 @@ body.is-resizing .file {
   white-space: nowrap;
 }
 
-.topic-summary {
+.topic-summary,
+.topic-flow {
   margin-bottom: 16px;
   padding: 12px 16px;
   border: 1px solid var(--border);
   border-left: 3px solid var(--accent);
   border-radius: 6px;
   background: var(--bg-subtle);
-}
-
-.topic-flow {
-  margin-bottom: 16px;
-  padding: 12px 16px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
 }
 
 .topic-part-head {
@@ -1342,150 +1336,53 @@ body.is-resizing .file {
   margin-bottom: 6px;
 }
 
-.topic-flow ol {
+.flow {
   margin: 0;
-  padding-left: 28px;
+  padding: 0;
+  list-style: none;
 }
 
-.topic-flow li {
-  padding: 2px 0;
-}
-
-.topic-flow li::marker {
-  color: var(--fg-muted);
-  font: 12px var(--mono);
-}
-
-.flow-diagram {
-  margin: 0 0 12px;
-  padding: 8px 8px 10px;
-  overflow-x: auto;
-  border: 1px solid var(--border-muted);
+.flow-card {
+  padding: 8px 12px 10px;
+  border: 1px solid var(--border);
   border-radius: 6px;
-  background: var(--bg-subtle);
+  background: var(--bg);
 }
 
-.flow-diagram svg {
-  display: block;
+.flow-step.is-current .flow-card {
+  border-color: var(--focal);
+  background: var(--focal-tint);
+}
+
+.flow-head {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  align-items: baseline;
+  column-gap: 8px;
   width: 100%;
-  height: auto;
-  margin: 0 auto;
-}
-
-.flow-diagram text {
-  font-family: var(--sans);
-}
-
-.flow-diagram text.flow-lane,
-.flow-diagram text.flow-num,
-.flow-diagram text.flow-sub {
-  font-family: var(--mono);
-}
-
-.flow-lane {
-  fill: var(--fg-muted);
-  font-size: 10px;
-  font-weight: 500;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-}
-
-.flow-divider {
-  stroke: var(--border);
-  stroke-width: 1;
-}
-
-.flow-arrow path {
-  fill: none;
-  stroke: var(--fg-muted);
-  stroke-width: 1.25;
-}
-
-.flow-arrow path.flow-arrow-head {
-  fill: var(--fg-muted);
-  stroke: none;
-}
-
-.flow-arrow.is-cross path {
-  stroke: var(--accent);
-}
-
-.flow-arrow.is-cross path.flow-arrow-head {
-  fill: var(--accent);
-}
-
-.flow-node {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
   cursor: pointer;
-  outline: none;
-}
-
-.flow-node rect {
-  fill: var(--bg);
-  stroke: var(--fg-muted);
-  stroke-width: 1;
-  stroke-dasharray: 4 3;
-}
-
-.flow-node.is-changed rect {
-  stroke: var(--fg);
-  stroke-width: 1.25;
-  stroke-dasharray: none;
-}
-
-.flow-node:hover rect,
-.flow-node:focus-visible rect {
-  stroke: var(--accent);
-}
-
-.flow-node.is-current rect {
-  fill: var(--focal-tint);
-  stroke: var(--focal);
-  stroke-width: 1.5;
 }
 
 .flow-num {
-  fill: var(--fg-muted);
-  font-size: 10px;
-}
-
-.flow-title {
-  fill: var(--fg);
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.flow-sub {
-  fill: var(--fg-muted);
-  font-size: 10px;
-}
-
-.flow-place {
-  margin-right: 6px;
-  padding: 0 4px;
-  border: 0;
-  border-radius: 4px;
-  background: none;
-  color: var(--accent);
-  font: 12px/20px var(--mono);
-  text-align: left;
-  overflow-wrap: anywhere;
-  cursor: pointer;
-}
-
-.flow-place:hover {
-  text-decoration: underline;
-}
-
-.topic-flow li.is-current .flow-place {
-  background: var(--accent-subtle);
-}
-
-.flow-dir {
   color: var(--fg-muted);
+  font: 11px/20px var(--mono);
+}
+
+.flow-action {
+  color: var(--fg);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 20px;
 }
 
 .flow-changed {
-  margin-right: 6px;
+  justify-self: end;
   padding: 0 6px;
   border-radius: 10px;
   background: var(--add-line);
@@ -1494,9 +1391,89 @@ body.is-resizing .file {
   line-height: 18px;
 }
 
-.flow-text,
-.flow-text > p {
-  display: inline;
+.flow-where {
+  grid-column: 2 / span 2;
+  color: var(--accent);
+  font: 12px/18px var(--mono);
+  overflow-wrap: anywhere;
+}
+
+.flow-head:hover .flow-where,
+.flow-head:focus-visible .flow-where {
+  text-decoration: underline;
+}
+
+.flow-dir,
+.flow-scope {
+  color: var(--fg-muted);
+}
+
+.flow-text {
+  margin: 4px 0 0 32px;
+  font-size: 13px;
+}
+
+.flow-via {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-height: 28px;
+  margin-left: 24px;
+  padding: 4px 0 6px 16px;
+}
+
+.flow-via::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 3px;
+  left: 0;
+  border-left: 1.5px solid var(--fg-muted);
+}
+
+.flow-via::after {
+  content: "";
+  position: absolute;
+  bottom: 2px;
+  left: -3px;
+  width: 6px;
+  height: 6px;
+  border-right: 1.5px solid var(--fg-muted);
+  border-bottom: 1.5px solid var(--fg-muted);
+  transform: rotate(45deg);
+}
+
+.flow-via.is-return::before {
+  border-left-style: dashed;
+}
+
+.flow-via.is-request::before,
+.flow-via.is-request::after,
+.flow-via.is-message::before,
+.flow-via.is-message::after,
+.flow-via.is-storage::before,
+.flow-via.is-storage::after {
+  border-color: var(--accent);
+}
+
+.flow-via.is-message::before {
+  border-left-style: dashed;
+}
+
+.flow-via.is-storage::before {
+  border-left-style: dotted;
+}
+
+.flow-via-label {
+  color: var(--fg-muted);
+  font: 11px/16px var(--mono);
+  overflow-wrap: anywhere;
+}
+
+.flow-via.is-request .flow-via-label,
+.flow-via.is-message .flow-via-label,
+.flow-via.is-storage .flow-via-label {
+  color: var(--accent);
 }
 
 .topic-note {

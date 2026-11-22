@@ -6,7 +6,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { computeDiff, describeFailures, probeDiff, summarize } from "../engine/diff.js";
 import { sameRange, sortOverrides } from "../shared/comparison.js";
-import type { Comparison, DiffResult, Topic } from "../shared/types.js";
+import { type Comparison, type DiffResult, FLOW_VIA_KINDS, type Topic } from "../shared/types.js";
 import { errorMessage, plural } from "../shared/util.js";
 import { stopAll } from "./claude.js";
 import { flowProblem, missingSteps, nameSteps } from "./group.js";
@@ -189,14 +189,24 @@ async function runMcp(): Promise<void> {
               flow: z
                 .array(
                   z.object({
+                    action: z.string().describe("What happens there, in a few words, starting with a verb."),
                     path: z.string().describe("The file, as list_changes prints paths."),
-                    line: z.number().int().positive().describe("The line of the function or call in the new version of the file."),
-                    text: z.string().describe("What happens there, in one sentence."),
+                    line: z.number().int().positive().describe("The line where it happens in the new version of the file."),
+                    text: z.string().describe("How, in one sentence, naming the function."),
+                    via: z
+                      .object({
+                        kind: z.enum(FLOW_VIA_KINDS),
+                        label: z.string(),
+                      })
+                      .nullish()
+                      .describe(
+                        'How the flow gets to the next step. kind: call (function call in the same process), return (back to the caller, including the response to a request), request (synchronous request to another process, such as HTTP or gRPC), message (asynchronous through a broker, queue, topic or event, such as Kafka, RabbitMQ or a webhook), storage (written here to a database, cache or file that the next step reads later) or other. label names the mechanism and concrete channel, such as "HTTP GET /orders/{id}" or "Kafka topic order-events", and is empty for a plain call. Leave it out on the last step.',
+                      ),
                   }),
                 )
                 .optional()
                 .describe(
-                  "The path a call or data takes through the code this topic's changes sit on, in the order the code runs, one step per function it passes through, from where it starts to where it ends. Include steps in code the changes leave alone and in other repositories. Leave it out when the changes do not sit on a path through several functions.",
+                  "The steps this topic's changes sit on, in the order things happen, from where it starts to where it ends, one step per thing the code does that matters for following the change. Include steps in code the changes leave alone, in other repositories, and on the far side of an API, a queue or topic, a database or any other hand-off, and do not skip a service the flow passes through on the way, such as a gateway or proxy. Leave it out when the changes do not sit on a path through several steps.",
                 ),
             }),
           )

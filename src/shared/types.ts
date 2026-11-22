@@ -57,10 +57,19 @@ export interface FileDiff {
   newContent: string | null;
 }
 
+export const FLOW_VIA_KINDS = ["call", "return", "request", "message", "storage", "other"] as const;
+
+export interface FlowVia {
+  kind: (typeof FLOW_VIA_KINDS)[number];
+  label: string;
+}
+
 export interface FlowStep {
   path: string;
   line: number;
+  action?: string;
   text: string;
+  via?: FlowVia | null;
   inside?: string | null;
 }
 
