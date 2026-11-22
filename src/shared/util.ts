@@ -34,6 +34,6 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export function describeStep(s: FlowStep): string {
-  const via = s.via ? ` (then ${s.via.kind}${s.via.label ? ` ${s.via.label}` : ""})` : "";
-  return `${s.path}:${s.line} ${s.action ? `${s.action}: ` : ""}${s.text}${via}`;
+  const how = [s.from ? `from ${s.from}` : "", s.when ? `when ${s.when}` : "", s.via ? `via ${s.via.kind}${s.via.label ? ` ${s.via.label}` : ""}` : ""].filter(Boolean);
+  return `${s.path}:${s.line} ${s.action ? `${s.action}: ` : ""}${s.text}${how.length ? ` (${how.join("; ")})` : ""}`;
 }

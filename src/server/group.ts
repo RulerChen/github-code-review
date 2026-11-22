@@ -23,11 +23,26 @@ const SUMMARY_RULES = "Add why in one sentence when you know it. Describe the en
 const flowRules = (diff: DiffResult) => {
   const dirs = diff.repos.filter((r) => r.error === null && r.dir !== "").map((r) => r.dir);
   const follow = dirs.length > 1 ? `, looking in every repository under ${diff.repoRoot}, with or without changes (${dirs.join(", ")})` : "";
-  return `as steps in the order things happen, so the reviewer can follow what the code does from where it starts to where it ends. Include steps in code these changes leave alone, in other repositories, and on the far side of an API, a queue or topic, a database or any other hand-off, one step per thing the code does that matters for following the change. Follow each request and message to the code that receives it${follow}, and give every service it passes through on the way a step, such as a gateway, a proxy or a worker, even where its code is unchanged. The flow is one path: where it forks, for example a request that also publishes a message, follow one branch, and when the other branch has changes of its own, give it its own topic and flow. Each step is {"action", "path", "line", "text", "via"}. "action" says what happens there in a few words, starting with a verb. "path" is relative to ${diff.repoRoot}, like the paths below, and "line" is the line where it happens in the new version of the file. "text" says in one sentence how, naming the function. "via" is how the flow gets to the next step, as {"kind", "label"}: kind is "call" for a function call in the same process, "return" for going back to the caller, including the response to a request, "request" for a synchronous request to another process such as HTTP or gRPC, "message" for an asynchronous hand-off through a broker, queue, topic or event such as Kafka, RabbitMQ or a webhook, "storage" for data this step writes to a database, cache or file and the next step reads later, not for a plain read, and "other" for anything else. "label" names the hand-off with its mechanism and concrete channel, such as "HTTP GET /orders/{id}", "Kafka topic order-events" or "orders table", and is "" for a plain call. Leave "via" out on the last step. Give [] when the changes do not sit on a path through several steps.`;
+  return [
+    "as steps in the order things happen, so the reviewer can follow what the code does from where it starts to where it ends.",
+    "Include steps in code these changes leave alone, in other repositories, and on the far side of an API, a queue or topic, a database or any other hand-off, one step per thing the code does that matters for following the change.",
+    `Follow each request and message to the code that receives it${follow}, and give every service it passes through on the way a step, such as a gateway, a proxy or a worker, even where its code is unchanged.`,
+    "The flow can branch. List the main path first, from start to end: the way the flow usually goes, such as a request that succeeds. Then list each branch, starting with \"from\": another way a step can go, such as an error, a fallback or an early return, a second hand-off such as a request that also publishes a message, or a second consumer of the same message.",
+    "Give a branch where the changes add or touch it, or where it decides what the caller or the next service gets.",
+    'Each step is {"action", "path", "line", "text", "from", "when", "via"}.',
+    '"action" says what happens there in a few words, starting with a verb.',
+    `"path" is relative to ${diff.repoRoot}, like the paths below, and "line" is the line where it happens in the new version of the file.`,
+    '"text" says in one sentence how, naming the function.',
+    '"from" is the number of the step this one comes from, counting from 1, on the first step of a branch; leave it out when a step follows the one listed just before it.',
+    '"when" says in a few words when the flow goes this way, such as "order not found" or "upstream fails", on a step that is one of several ways on; leave it out otherwise.',
+    '"via" is how the flow gets here from the step it comes from, as {"kind", "label"}: kind is "call" for a function call in the same process, "return" for going back to the caller, including the response to a request, "request" for a synchronous request to another process such as HTTP or gRPC, "message" for an asynchronous hand-off through a broker, queue, topic or event such as Kafka, RabbitMQ or a webhook, "storage" for data the step before writes to a database, cache or file and this step reads later, not for a plain read, and "other" for anything else.',
+    '"label" names the hand-off with its mechanism and concrete channel, such as "HTTP GET /orders/{id}", "HTTP 404" or "Kafka topic order-events", and is "" for a plain call. Leave "via" out on the first step.',
+    "Give [] when the changes do not sit on a path through several steps.",
+  ].join(" ");
 };
 
 const REPLY =
-  'Reply with only a JSON object and no other text: {"topics": [{"title": "...", "summary": "...", "ids": ["..."], "flow": [{"action": "...", "path": "...", "line": 1, "text": "...", "via": {"kind": "call", "label": ""}}]}]}';
+  'Reply with only a JSON object and no other text: {"topics": [{"title": "...", "summary": "...", "ids": ["..."], "flow": [{"action": "...", "path": "...", "line": 1, "text": "..."}, {"action": "...", "path": "...", "line": 1, "text": "...", "via": {"kind": "call", "label": ""}}, {"action": "...", "path": "...", "line": 1, "text": "...", "from": 1, "when": "...", "via": {"kind": "return", "label": "..."}}]}]}';
 
 async function askTopics(o: AskOptions, prompt: string, allowEmpty: boolean, check: (topics: Topic[]) => Promise<string | null>): Promise<Topic[]> {
   const run = (resume: string | null, fork: boolean, prompt: string) =>
@@ -214,7 +229,7 @@ function parseTopics(text: string, allowEmpty: boolean): Topic[] | string {
   if (!Array.isArray(list) || (list.length === 0 && !allowEmpty)) return 'The answer had no "topics" array.';
   const topics = list.map(toTopic);
   if (topics.some((t) => t === null)) {
-    return 'Each topic needs a "title" and a "summary" string, an "ids" array of strings and a "flow" array of {"action", "path", "line", "text", "via"}, with a whole-number line and a via kind of call, return, request, message, storage or other.';
+    return 'Each topic needs a "title" and a "summary" string, an "ids" array of strings and a "flow" array of {"action", "path", "line", "text", "from", "when", "via"}, with a whole-number line, a "from" that names an earlier step, and a via kind of call, return, request, message, storage or other.';
   }
   return topics as Topic[];
 }
@@ -225,19 +240,22 @@ function toTopic(t: unknown): Topic | null {
   if (typeof title !== "string" || !title.trim() || typeof summary !== "string") return null;
   if (!Array.isArray(ids) || !ids.every((id) => typeof id === "string")) return null;
   if (flow === undefined) return { title: title.trim(), summary: summary.trim(), ids };
-  const steps = Array.isArray(flow) ? flow.map(toStep) : [null];
+  const steps = Array.isArray(flow) ? flow.map((s, i) => toStep(s, i)) : [null];
   if (steps.some((s) => s === null)) return null;
-  const last = steps.length - 1;
-  return { title: title.trim(), summary: summary.trim(), ids, flow: (steps as FlowStep[]).map((s, i) => (i === last ? { ...s, via: null } : s)) };
+  return { title: title.trim(), summary: summary.trim(), ids, flow: steps as FlowStep[] };
 }
 
-function toStep(s: unknown): FlowStep | null {
+function toStep(s: unknown, index: number): FlowStep | null {
   if (!isRecord(s) || typeof s.path !== "string" || !s.path.trim() || typeof s.text !== "string") return null;
   if (typeof s.action !== "string" || !s.action.trim()) return null;
   if (typeof s.line !== "number" || !Number.isInteger(s.line) || s.line < 1) return null;
-  const via = s.via === undefined || s.via === null ? null : toVia(s.via);
+  if (s.from !== undefined && s.from !== null && (typeof s.from !== "number" || !Number.isInteger(s.from) || s.from < 1 || s.from > index)) return null;
+  if (s.when !== undefined && s.when !== null && typeof s.when !== "string") return null;
+  const via = s.via === undefined || s.via === null || index === 0 ? null : toVia(s.via);
   if (via === undefined) return null;
-  return { path: s.path.trim(), line: s.line, action: s.action.trim(), text: s.text.trim(), via };
+  const from = typeof s.from === "number" && s.from < index ? { from: s.from } : {};
+  const when = typeof s.when === "string" && s.when.trim() ? { when: s.when.trim() } : {};
+  return { path: s.path.trim(), line: s.line, action: s.action.trim(), text: s.text.trim(), ...from, ...when, via };
 }
 
 function toVia(v: unknown): FlowVia | undefined {
@@ -284,7 +302,26 @@ export async function nameSteps(diff: DiffResult, topics: Topic[]): Promise<Topi
 }
 
 function withoutSteps(topics: Topic[], bad: Map<FlowStep, string>): Topic[] {
-  return topics.map((t) => (t.flow ? { ...t, flow: t.flow.filter((s) => !bad.has(s)) } : t));
+  return topics.map((t) => {
+    const flow = t.flow;
+    if (!flow?.some((s) => bad.has(s))) return t;
+    const parent = flow.map((s, i) => (s.from ? s.from - 1 : i - 1));
+    const kept = flow.map((_, i) => i).filter((i) => !bad.has(flow[i]!));
+    const at = new Map(kept.map((i, n) => [i, n]));
+    const keptParent = (i: number) => {
+      let p = parent[i]!;
+      while (p >= 0 && !at.has(p)) p = parent[p]!;
+      return p;
+    };
+    return {
+      ...t,
+      flow: kept.map((i, n) => {
+        const { from: _, ...step } = flow[i]!;
+        const p = keptParent(i);
+        return p >= 0 && at.get(p)! !== n - 1 ? { ...step, from: at.get(p)! + 1 } : step;
+      }),
+    };
+  });
 }
 
 function problems(...found: (string | null)[]): string | null {

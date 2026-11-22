@@ -69,6 +69,8 @@ export interface FlowStep {
   line: number;
   action?: string;
   text: string;
+  from?: number;
+  when?: string;
   via?: FlowVia | null;
   inside?: string | null;
 }

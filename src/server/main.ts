@@ -193,6 +193,16 @@ async function runMcp(): Promise<void> {
                     path: z.string().describe("The file, as list_changes prints paths."),
                     line: z.number().int().positive().describe("The line where it happens in the new version of the file."),
                     text: z.string().describe("How, in one sentence, naming the function."),
+                    from: z
+                      .number()
+                      .int()
+                      .positive()
+                      .optional()
+                      .describe("On the first step of a branch, the number of the step it comes from, counting from 1. Leave it out when the step follows the one listed just before it."),
+                    when: z
+                      .string()
+                      .optional()
+                      .describe('When the flow goes this way, such as "order not found" or "upstream fails", on a step that is one of several ways on.'),
                     via: z
                       .object({
                         kind: z.enum(FLOW_VIA_KINDS),
@@ -200,13 +210,13 @@ async function runMcp(): Promise<void> {
                       })
                       .nullish()
                       .describe(
-                        'How the flow gets to the next step. kind: call (function call in the same process), return (back to the caller, including the response to a request), request (synchronous request to another process, such as HTTP or gRPC), message (asynchronous through a broker, queue, topic or event, such as Kafka, RabbitMQ or a webhook), storage (written here to a database, cache or file that the next step reads later) or other. label names the mechanism and concrete channel, such as "HTTP GET /orders/{id}" or "Kafka topic order-events", and is empty for a plain call. Leave it out on the last step.',
+                        'How the flow gets here from the step it comes from. kind: call (function call in the same process), return (back to the caller, including the response to a request), request (synchronous request to another process, such as HTTP or gRPC), message (asynchronous through a broker, queue, topic or event, such as Kafka, RabbitMQ or a webhook), storage (written by the step before to a database, cache or file that this step reads later) or other. label names the mechanism and concrete channel, such as "HTTP GET /orders/{id}" or "Kafka topic order-events", and is empty for a plain call. Leave it out on the first step.',
                       ),
                   }),
                 )
                 .optional()
                 .describe(
-                  "The steps this topic's changes sit on, in the order things happen, from where it starts to where it ends, one step per thing the code does that matters for following the change. Include steps in code the changes leave alone, in other repositories, and on the far side of an API, a queue or topic, a database or any other hand-off, and do not skip a service the flow passes through on the way, such as a gateway or proxy. Leave it out when the changes do not sit on a path through several steps.",
+                  "The steps this topic's changes sit on, in the order things happen, from where it starts to where it ends, one step per thing the code does that matters for following the change. Include steps in code the changes leave alone, in other repositories, and on the far side of an API, a queue or topic, a database or any other hand-off, and do not skip a service the flow passes through on the way, such as a gateway or proxy. List the main path first, the way the flow usually goes, such as a request that succeeds, then each branch, such as an error, a fallback, an early return or a second hand-off, where the changes add or touch it or where it decides what the caller gets. Leave it out when the changes do not sit on a path through several steps.",
                 ),
             }),
           )

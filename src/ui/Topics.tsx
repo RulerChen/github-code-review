@@ -183,7 +183,7 @@ export function TopicSection({ topic, viewed, opening, onToggleViewed, onOpenSte
           )}
           {topic.flow.length > 0 && (
             <TopicPart title="Flow" className="topic-flow" open={flowOpen} onToggle={() => setFlowOpen(!flowOpen)}>
-              <Flow flow={topic.flow} onOpen={onOpenStep} />
+              <Flow flow={topic.flow} anchor={topic.anchor} onOpen={onOpenStep} />
             </TopicPart>
           )}
           <ThreadList
