@@ -17,27 +17,58 @@
 
 .flow-node {
   box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
   width: 100%;
   height: 100%;
-  padding: 0 16px;
   border: 1.25px solid var(--border);
   border-radius: 8px;
   background: var(--bg-subtle);
+}
+
+.flow-node:hover {
+  border-color: var(--accent);
+}
+
+.flow-node.is-current {
+  border-color: var(--focal);
+  background: var(--focal-tint);
+}
+
+.flow-node-name {
+  flex: none;
+  height: 37.5px;
+  padding: 0 16px;
+  border: 0;
+  background: none;
   color: var(--fg);
   font: 600 13px var(--sans);
   white-space: nowrap;
   cursor: pointer;
 }
 
-.flow-node:hover,
-.flow-node:focus-visible {
-  border-color: var(--accent);
-  outline: none;
+.flow-node-branch {
+  display: block;
+  padding: 0 12px;
+  border: 0;
+  background: none;
+  color: var(--attention);
+  font: 11px/15px var(--mono);
+  text-align: left;
+  white-space: pre;
+  cursor: pointer;
 }
 
-.flow-node.is-current {
-  border-color: var(--focal);
-  background: var(--focal-tint);
+.flow-node-name:focus-visible,
+.flow-node-branch:hover,
+.flow-node-branch:focus-visible {
+  outline: none;
+  text-decoration: underline;
+}
+
+.flow-node-branch.is-current {
+  color: var(--focal);
+  font-weight: 600;
 }
 
 .flow-canvas .flow-edge-line {
@@ -123,4 +154,22 @@
   width: 3ch;
   color: var(--fg);
   font-weight: 600;
+}
+
+.flow-canvas .flow-edge-line.is-branch {
+  stroke: var(--attention);
+}
+
+.flow-edge-head.is-branch {
+  fill: var(--attention);
+}
+
+.flow-label.is-branch {
+  color: var(--attention);
+}
+
+.flow-label-when {
+  display: block;
+  color: var(--attention);
+  white-space: pre;
 }
