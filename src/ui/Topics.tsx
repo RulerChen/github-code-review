@@ -1,13 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import { changeIds, editedInto, oldCommitOf } from "../shared/hunks";
-import type { Block, DiffRepo, FileDiff, Review, Thread } from "../shared/types";
+import type { Block, DiffRepo, FileDiff, FlowStep, Review, Thread } from "../shared/types";
 import { plural } from "../shared/util";
 import { keepHeaderInPlace } from "./anchor";
+import { addedLines } from "./CodePanel";
 import { type CommentsApi, onShownVersion, ThreadList, useComments } from "./comments";
 import { CollapseButton, CommentButton, ViewedToggle } from "./controls";
 import { hasLine } from "./DiffTable";
 import { baseHunksOf, FileCard } from "./FileCard";
 import { Markdown } from "./Markdown";
+import { basename, dirPrefix } from "./paths";
 
 interface TopicPart {
   file: FileDiff;
@@ -20,6 +22,7 @@ export interface TopicView {
   anchor: string;
   title: string;
   summary: string;
+  flow: { step: FlowStep; changed: boolean }[];
   parts: TopicPart[];
   changeCount: number;
   edited: number;
@@ -54,6 +57,7 @@ export function buildTopics(review: Review, files: FileDiff[], repos: DiffRepo[]
       anchor: `topic-${index}`,
       title: t.title,
       summary: t.summary,
+      flow: (t.flow ?? []).map((step) => ({ step, changed: addedLines(files.find((f) => f.path === step.path)).has(step.line) })),
       parts,
       changeCount: chosen.size,
       edited: edited.length,
@@ -83,9 +87,39 @@ interface SectionProps {
   viewed: boolean;
   opening: { anchor: string } | null;
   onToggleViewed: () => void;
+  onOpenStep: (step: FlowStep) => void;
 }
 
-export function TopicSection({ topic, viewed, opening, onToggleViewed }: SectionProps) {
+function TopicFlow({ flow, onOpen }: { flow: TopicView["flow"]; onOpen: (step: FlowStep) => void }) {
+  const [current, setCurrent] = useState<number | null>(null);
+  return (
+    <div className="topic-flow">
+      <h3 className="topic-flow-title">Flow</h3>
+      <ol>
+        {flow.map(({ step, changed }, i) => (
+          <li key={i} className={current === i ? "is-current" : undefined}>
+            <button
+              type="button"
+              className="flow-place"
+              title="Open this line on the right"
+              onClick={() => {
+                setCurrent(i);
+                onOpen(step);
+              }}
+            >
+              <span className="flow-dir">{dirPrefix(step.path)}</span>
+              {basename(step.path)}:{step.line}
+            </button>
+            {changed && <span className="flow-changed">changed</span>}
+            <Markdown className="flow-text" text={step.text} />
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
+export function TopicSection({ topic, viewed, opening, onToggleViewed, onOpenStep }: SectionProps) {
   const [collapsed, setCollapsed] = useState(viewed);
   useEffect(() => setCollapsed(viewed), [viewed]);
   const [opened, setOpened] = useState(opening);
@@ -146,6 +180,7 @@ export function TopicSection({ topic, viewed, opening, onToggleViewed }: Section
       {!collapsed && (
         <div className="topic-body">
           {topic.summary && <Markdown className="topic-summary" text={topic.summary} />}
+          {topic.flow.length > 0 && <TopicFlow flow={topic.flow} onOpen={onOpenStep} />}
           <ThreadList
             className="topic-threads"
             threads={threads}
@@ -153,7 +188,8 @@ export function TopicSection({ topic, viewed, opening, onToggleViewed }: Section
             placeholder="Comment on this topic"
             onCreate={(body, single) => {
               const anchor = { topic: topic.title, path: null, side: null, start: null, end: null, commit: null };
-              const snippet = [`Files: ${files.join(", ")}`, topic.summary].filter(Boolean).join("\n\n");
+              const flow = topic.flow.map(({ step }, i) => `${i + 1}. ${step.path}:${step.line} ${step.text}`).join("\n");
+              const snippet = [`Files: ${files.join(", ")}`, topic.summary, flow && `Flow:\n${flow}`].filter(Boolean).join("\n\n");
               return create(anchor, snippet, body, single);
             }}
             onClose={() => setCommenting(false)}

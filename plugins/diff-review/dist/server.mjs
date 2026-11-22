@@ -37489,16 +37489,6 @@ function describe3(cwd, tool, input2) {
   return `Using ${tool}`;
 }
 
-// src/server/http.ts
-import { randomBytes as randomBytes2, randomInt, timingSafeEqual } from "node:crypto";
-import { readFile as readFile2 } from "node:fs/promises";
-import { createServer } from "node:http";
-import { isIP } from "node:net";
-import path5 from "node:path";
-import { pipeline } from "node:stream/promises";
-import { promisify } from "node:util";
-import { gzip } from "node:zlib";
-
 // src/engine/browse.ts
 import { createReadStream } from "node:fs";
 import { lstat as lstat2 } from "node:fs/promises";
@@ -38363,7 +38353,8 @@ function checkTopics(diff, topics) {
 
 // src/server/group.ts
 var SUMMARY_RULES = "Add why in one sentence when you know it. Describe the end result of the changes as listed: no commit hashes, no account of which commit did what, nothing about code these changes leave alone, and no advice to the reviewer.";
-var REPLY = 'Reply with only a JSON object and no other text: {"topics": [{"title": "...", "summary": "...", "ids": ["..."]}]}';
+var flowRules = (root) => `as steps {"path", "line", "text"} in the order the code runs. Include the steps in code these changes leave alone and in other repositories, so the reviewer can follow the path from where it starts to where it ends, one step per function it passes through. "path" is relative to ${root}, like the paths below. "line" is the line of that function or call in the new version of the file. "text" says in one sentence what happens there. Give [] when the changes do not sit on a path through several functions.`;
+var REPLY = 'Reply with only a JSON object and no other text: {"topics": [{"title": "...", "summary": "...", "ids": ["..."], "flow": [{"path": "...", "line": 1, "text": "..."}]}]}';
 async function askTopics(o, prompt, allowEmpty, check2) {
   const run = (resume, fork, prompt2) => ask({ cwd: o.cwd, resume, fork, prompt: prompt2, onText: () => {
   }, onActivity: o.onActivity });
@@ -38375,7 +38366,7 @@ async function askTopics(o, prompt, allowEmpty, check2) {
     res = await run(null, false, prompt);
   }
   let topics = parseTopics(res.text, allowEmpty);
-  const problem = typeof topics === "string" ? topics : check2(topics);
+  const problem = typeof topics === "string" ? topics : await check2(topics);
   if (problem && res.sessionId) {
     o.onActivity("Correcting its answer");
     res = await run(res.sessionId, false, `${problem} Reply again with only the corrected JSON object.`);
@@ -38386,9 +38377,14 @@ async function askTopics(o, prompt, allowEmpty, check2) {
 }
 async function groupChanges(o) {
   const focused = o.focus !== null || o.names !== null;
-  const topics = await askTopics(o, buildPrompt(o.diff, o.focus, o.names), focused, (t) => unknownIds(o.diff, t));
+  const topics = await askTopics(
+    o,
+    buildPrompt(o.diff, o.focus, o.names),
+    focused,
+    async (t) => problems(unknownIds(o.diff, t), flowProblem(await missingSteps(o.diff, t), o.diff.repoRoot))
+  );
   const known = new Set(o.diff.files.flatMap(changeIds));
-  const kept = topics.map((t) => ({ ...t, ids: t.ids.filter((id) => known.has(id)) })).filter((t) => t.ids.length > 0);
+  const kept = withoutSteps(topics, await missingSteps(o.diff, topics)).map((t) => ({ ...t, ids: t.ids.filter((id) => known.has(id)) })).filter((t) => t.ids.length > 0);
   if (!kept.length) {
     throw new Error(
       o.names ? "No change belongs to these topics." : focused ? "No change matches the focus." : "Claude's answer put no change of this comparison in a topic."
@@ -38406,8 +38402,9 @@ function buildPrompt(diff, focus, names) {
     '- "title": a few words.',
     `- "summary": Markdown on what behaves differently after these changes: name each function or file involved and say what it did before, what it does now, and in which cases. ${SUMMARY_RULES}`,
     '- "ids": the ids of all changes in the topic, exactly as listed below.',
+    `- "flow": the path a call or data takes through the code these changes sit on, ${flowRules(diff.repoRoot)}`,
     scope,
-    "Order the topics the way a reviewer should read them. Write titles and summaries in the language the user writes in.",
+    "Order the topics the way a reviewer should read them. Write titles, summaries and flow steps in the language the user writes in.",
     REPLY,
     "",
     formatChanges(diff)
@@ -38426,8 +38423,13 @@ function needsClaude(review, delta) {
 }
 async function syncTopics(o) {
   const { review, diff, delta } = o;
-  const answer = await askTopics(o, buildSyncPrompt(review, diff, delta), true, (t) => syncProblem(t, delta.added, review.focus !== null));
-  return mergeSync(review, diff, delta, answer);
+  const answer = await askTopics(
+    o,
+    buildSyncPrompt(review, diff, delta),
+    true,
+    async (t) => problems(syncProblem(t, delta.added, review.focus !== null), flowProblem(await missingSteps(diff, t), diff.repoRoot))
+  );
+  return mergeSync(review, diff, delta, withoutSteps(answer, await missingSteps(diff, answer)));
 }
 function mergeSync(review, diff, delta, answer) {
   const now2 = new Set(diff.files.flatMap(changeIds));
@@ -38435,14 +38437,16 @@ function mergeSync(review, diff, delta, answer) {
   const updates = /* @__PURE__ */ new Map();
   for (const t of answer) {
     const u = updates.get(t.title);
-    updates.set(t.title, { summary: t.summary || u?.summary || "", ids: [...u?.ids ?? [], ...added(t.ids)] });
+    updates.set(t.title, { summary: t.summary || u?.summary || "", ids: [...u?.ids ?? [], ...added(t.ids)], flow: t.flow ?? u?.flow });
   }
   const topics = review.topics.map((t) => {
     const u = updates.get(t.title);
     updates.delete(t.title);
-    return { title: t.title, summary: u?.summary || t.summary, ids: [.../* @__PURE__ */ new Set([...t.ids.filter((id) => now2.has(id)), ...u?.ids ?? []])] };
+    const flow = u?.flow ?? t.flow;
+    const ids = [.../* @__PURE__ */ new Set([...t.ids.filter((id) => now2.has(id)), ...u?.ids ?? []])];
+    return { title: t.title, summary: u?.summary || t.summary, ids, ...flow ? { flow } : {} };
   });
-  for (const [title, u] of updates) topics.push({ title, summary: u.summary, ids: [...new Set(u.ids)] });
+  for (const [title, u] of updates) topics.push({ title, summary: u.summary, ids: [...new Set(u.ids)], ...u.flow ? { flow: u.flow } : {} });
   return topics.filter((t) => t.ids.length > 0);
 }
 function buildSyncPrompt(review, diff, delta) {
@@ -38465,24 +38469,29 @@ function buildSyncPrompt(review, diff, delta) {
     const kept = t.ids.filter((id) => now2.has(id));
     const gone = t.ids.filter((id) => delta.removed.has(id)).length;
     const changes = `${kept.length ? kept.join(", ") : "no changes left"}${gone ? `; ${plural2(gone, "change")} gone since` : ""}`;
-    return [`- ${JSON.stringify(t.title)} (${changes})`, t.summary.replace(/^/gm, "    ")];
+    const flow = t.flow?.length ? ["    Flow:", ...t.flow.map((s, i) => `      ${i + 1}. ${s.path}:${s.line} ${s.text}`)] : [];
+    return [`- ${JSON.stringify(t.title)} (${changes})`, t.summary.replace(/^/gm, "    "), ...flow];
   });
   const scope = review.focus ? `The topics were made with this focus: ${JSON.stringify(review.focus)}. Put a new change in a topic only when the focus asks for it, and leave the others out.` : "Put every new change in a topic, in a new one when none fits.";
+  const touched = new Set(diff.files.filter((f) => changeIds(f).some((id) => delta.added.has(id))).map((f) => f.path));
+  const reflow = review.topics.filter((t) => t.flow?.some((s) => touched.has(s.path))).map((t) => JSON.stringify(t.title));
+  const alsoReflow = reflow.length ? `, and these topics, whose flows pass through files with new or edited changes, with their summaries as above: ${reflow.join(", ")}` : "";
   return [
     "The user is reviewing code changes in a diff viewer, grouped into topics that were made earlier. The code has changed since: some changes are new or were edited, and some are gone. Update the topics to match the code as it is now. You can read files to check details, but do not change anything.",
     "",
-    "The topics, in order, with the ids of the changes they still have and their summaries:",
+    "The topics, in order, with the ids of the changes they still have, their summaries and flows:",
     ...topics,
     "",
     "The new and edited changes. Each starts with its id, and an edited change says which topic's change it replaces:",
     ...delta.added.size ? formatFiles(diff.files, delta.added, labels) : ["", "  None."],
     ...context.size ? ["", "The changes those topics still have, unchanged, for context:", ...formatFiles(diff.files, context)] : [],
     "",
-    "Give each topic that gains or loses changes, and each new topic:",
+    `Give each topic that gains or loses changes, each new topic${alsoReflow}:`,
     '- "title": the title exactly as above, or a few words for a new topic.',
     `- "summary": Markdown on what behaves differently after the topic's changes as they are now: name each function or file involved and say what it did before, what it does now, and in which cases. ${SUMMARY_RULES}`,
     '- "ids": the ids of the new and edited changes that belong in the topic. Leave out the ids it already has.',
-    `${scope} Leave out the topics that neither gain nor lose changes. Write in the language of the summaries above.`,
+    `- "flow": the topic's whole flow as the code is now: the path a call or data takes through the code its changes sit on, ${flowRules(diff.repoRoot)}`,
+    `${scope} Leave out the other topics. Write in the language of the summaries above.`,
     REPLY
   ].join("\n");
 }
@@ -38500,16 +38509,50 @@ function parseTopics(text, allowEmpty) {
   if (!Array.isArray(list) || list.length === 0 && !allowEmpty) return 'The answer had no "topics" array.';
   const topics = list.map(toTopic);
   if (topics.some((t) => t === null)) {
-    return 'Each topic needs a "title" and a "summary" string and an "ids" array of strings.';
+    return 'Each topic needs a "title" and a "summary" string, an "ids" array of strings and a "flow" array of {"path", "line", "text"} with a whole-number line.';
   }
   return topics;
 }
 function toTopic(t) {
   if (!isRecord(t)) return null;
-  const { title, summary, ids } = t;
+  const { title, summary, ids, flow } = t;
   if (typeof title !== "string" || !title.trim() || typeof summary !== "string") return null;
   if (!Array.isArray(ids) || !ids.every((id) => typeof id === "string")) return null;
-  return { title: title.trim(), summary: summary.trim(), ids };
+  if (flow === void 0) return { title: title.trim(), summary: summary.trim(), ids };
+  const steps = Array.isArray(flow) ? flow.map(toStep) : [null];
+  if (steps.some((s) => s === null)) return null;
+  return { title: title.trim(), summary: summary.trim(), ids, flow: steps };
+}
+function toStep(s) {
+  if (!isRecord(s) || typeof s.path !== "string" || !s.path.trim() || typeof s.text !== "string") return null;
+  if (typeof s.line !== "number" || !Number.isInteger(s.line) || s.line < 1) return null;
+  return { path: s.path.trim(), line: s.line, text: s.text.trim() };
+}
+async function missingSteps(diff, topics) {
+  const counts = /* @__PURE__ */ new Map();
+  const lineCount = (p) => {
+    if (!counts.has(p)) {
+      const count = readRepoFile(diff, p).then((f) => f === null ? null : f.text === null ? Infinity : f.text.replace(/\n$/, "").split("\n").length);
+      counts.set(p, count.catch(() => null));
+    }
+    return counts.get(p);
+  };
+  const bad = /* @__PURE__ */ new Map();
+  for (const s of topics.flatMap((t) => t.flow ?? [])) {
+    const count = await lineCount(s.path);
+    if (count === null) bad.set(s, `${s.path}:${s.line} (no such file)`);
+    else if (s.line > count) bad.set(s, `${s.path}:${s.line} (the file has ${count} lines)`);
+  }
+  return bad;
+}
+function flowProblem(bad, root) {
+  return bad.size ? `These flow steps point to no line of the compared version: ${[...bad.values()].join(", ")}. Paths are relative to ${root}.` : null;
+}
+function withoutSteps(topics, bad) {
+  return topics.map((t) => t.flow ? { ...t, flow: t.flow.filter((s) => !bad.has(s)) } : t);
+}
+function problems(...found) {
+  return found.filter(Boolean).join(" ") || null;
 }
 function parseJson(text) {
   const fenced = /```(?:json)?[ \t]*\n([\s\S]*?)\n[ \t]*```/.exec(text)?.[1];
@@ -38527,6 +38570,16 @@ function unknownIds(diff, topics) {
   const { unknown: unknown2 } = checkTopics(diff, topics);
   return unknown2.length ? `These ids are not in the list of changes: ${unknown2.join(", ")}.` : null;
 }
+
+// src/server/http.ts
+import { randomBytes as randomBytes2, randomInt, timingSafeEqual } from "node:crypto";
+import { readFile as readFile2 } from "node:fs/promises";
+import { createServer } from "node:http";
+import { isIP } from "node:net";
+import path5 from "node:path";
+import { pipeline } from "node:stream/promises";
+import { promisify } from "node:util";
+import { gzip } from "node:zlib";
 
 // src/server/store.ts
 import { createHash as createHash2 } from "node:crypto";
@@ -38880,7 +38933,7 @@ var ReviewServer = class {
     const same = isFor(view.repo, compare);
     if (replaces !== null) this.removeReview(view.repo, replaces);
     const createdAt = (/* @__PURE__ */ new Date()).toISOString();
-    const stored = topics.map(({ title, summary, ids }) => ({ title, summary, ids }));
+    const stored = topics.map(({ title, summary, ids, flow }) => ({ title, summary, ids, ...flow?.length ? { flow } : {} }));
     this.reviews.push({ repo: view.repo, compare, focus, topics: stored, changes: changesOf(diff), createdAt, view: view.id });
     const failed = this.groupings.findIndex((g) => same(g) && g.error !== null);
     if (failed >= 0) this.groupings.splice(failed, 1);
@@ -39320,6 +39373,8 @@ async function openViewer(repo, compare, focus, topics, session) {
     if (unknown2.length) {
       throw new Error(`Unknown change ids: ${unknown2.join(", ")}. Call list_changes again and use the ids it prints.`);
     }
+    const badFlow = flowProblem(await missingSteps(diff, topics), diff.repoRoot);
+    if (badFlow) throw new Error(`${badFlow} Fix them and call open_diff_viewer again.`);
     if (unassigned.length) {
       note = `
 ${unassigned.length} change(s) are in no topic, so they appear only in the Files tab: ${unassigned.join(", ")}`;
@@ -39405,9 +39460,18 @@ async function runMcp() {
           external_exports.object({
             title: external_exports.string().describe("A few words naming the topic."),
             summary: external_exports.string().describe(
-              "Markdown on what behaves differently after this topic's changes: each function or file involved, what it did before and what it does now, and why in one sentence. No commit hashes, no account of which commit did what, and no advice to the reviewer."
+              "Markdown on what behaves differently after this topic's changes: each function or file involved, what it did before and what it does now, and why in one sentence. No commit hashes, no account of which commit did what, no advice to the reviewer, and nothing about code the changes leave alone, which belongs in flow."
             ),
-            ids: external_exports.array(external_exports.string()).describe("Ids from list_changes of the changes in this topic.")
+            ids: external_exports.array(external_exports.string()).describe("Ids from list_changes of the changes in this topic."),
+            flow: external_exports.array(
+              external_exports.object({
+                path: external_exports.string().describe("The file, as list_changes prints paths."),
+                line: external_exports.number().int().positive().describe("The line of the function or call in the new version of the file."),
+                text: external_exports.string().describe("What happens there, in one sentence.")
+              })
+            ).optional().describe(
+              "The path a call or data takes through the code this topic's changes sit on, in the order the code runs, one step per function it passes through, from where it starts to where it ends. Include steps in code the changes leave alone and in other repositories. Leave it out when the changes do not sit on a path through several functions."
+            )
           })
         ).optional().describe(
           "The topics the user asked for, in the order the reviewer should read them. The Topics tab shows only these, and changes in no topic stay in the Files tab."

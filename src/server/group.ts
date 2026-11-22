@@ -1,5 +1,6 @@
+import { readRepoFile } from "../engine/browse.js";
 import { changeIds, editedInto, oldCommitOf } from "../shared/hunks.js";
-import type { DiffResult, Review, Topic } from "../shared/types.js";
+import type { DiffResult, FlowStep, Review, Topic } from "../shared/types.js";
 import { isRecord, plural } from "../shared/util.js";
 import { ask } from "./claude.js";
 import { checkTopics, formatChanges, formatFiles } from "./review.js";
@@ -18,9 +19,13 @@ interface GroupOptions extends AskOptions {
 
 const SUMMARY_RULES = "Add why in one sentence when you know it. Describe the end result of the changes as listed: no commit hashes, no account of which commit did what, nothing about code these changes leave alone, and no advice to the reviewer.";
 
-const REPLY = 'Reply with only a JSON object and no other text: {"topics": [{"title": "...", "summary": "...", "ids": ["..."]}]}';
+const flowRules = (root: string) =>
+  `as steps {"path", "line", "text"} in the order the code runs. Include the steps in code these changes leave alone and in other repositories, so the reviewer can follow the path from where it starts to where it ends, one step per function it passes through. "path" is relative to ${root}, like the paths below. "line" is the line of that function or call in the new version of the file. "text" says in one sentence what happens there. Give [] when the changes do not sit on a path through several functions.`;
 
-async function askTopics(o: AskOptions, prompt: string, allowEmpty: boolean, check: (topics: Topic[]) => string | null): Promise<Topic[]> {
+const REPLY =
+  'Reply with only a JSON object and no other text: {"topics": [{"title": "...", "summary": "...", "ids": ["..."], "flow": [{"path": "...", "line": 1, "text": "..."}]}]}';
+
+async function askTopics(o: AskOptions, prompt: string, allowEmpty: boolean, check: (topics: Topic[]) => Promise<string | null>): Promise<Topic[]> {
   const run = (resume: string | null, fork: boolean, prompt: string) =>
     ask({ cwd: o.cwd, resume, fork, prompt, onText: () => {}, onActivity: o.onActivity });
 
@@ -33,7 +38,7 @@ async function askTopics(o: AskOptions, prompt: string, allowEmpty: boolean, che
   }
 
   let topics = parseTopics(res.text, allowEmpty);
-  const problem = typeof topics === "string" ? topics : check(topics);
+  const problem = typeof topics === "string" ? topics : await check(topics);
   if (problem && res.sessionId) {
     o.onActivity("Correcting its answer");
     res = await run(res.sessionId, false, `${problem} Reply again with only the corrected JSON object.`);
@@ -45,10 +50,14 @@ async function askTopics(o: AskOptions, prompt: string, allowEmpty: boolean, che
 
 export async function groupChanges(o: GroupOptions): Promise<Topic[]> {
   const focused = o.focus !== null || o.names !== null;
-  const topics = await askTopics(o, buildPrompt(o.diff, o.focus, o.names), focused, (t) => unknownIds(o.diff, t));
+  const topics = await askTopics(o, buildPrompt(o.diff, o.focus, o.names), focused, async (t) =>
+    problems(unknownIds(o.diff, t), flowProblem(await missingSteps(o.diff, t), o.diff.repoRoot)),
+  );
 
   const known = new Set(o.diff.files.flatMap(changeIds));
-  const kept = topics.map((t) => ({ ...t, ids: t.ids.filter((id) => known.has(id)) })).filter((t) => t.ids.length > 0);
+  const kept = withoutSteps(topics, await missingSteps(o.diff, topics))
+    .map((t) => ({ ...t, ids: t.ids.filter((id) => known.has(id)) }))
+    .filter((t) => t.ids.length > 0);
   if (!kept.length) {
     throw new Error(
       o.names ? "No change belongs to these topics." : focused ? "No change matches the focus." : "Claude's answer put no change of this comparison in a topic.",
@@ -71,8 +80,9 @@ function buildPrompt(diff: DiffResult, focus: string | null, names: string[] | n
     '- "title": a few words.',
     `- "summary": Markdown on what behaves differently after these changes: name each function or file involved and say what it did before, what it does now, and in which cases. ${SUMMARY_RULES}`,
     '- "ids": the ids of all changes in the topic, exactly as listed below.',
+    `- "flow": the path a call or data takes through the code these changes sit on, ${flowRules(diff.repoRoot)}`,
     scope,
-    "Order the topics the way a reviewer should read them. Write titles and summaries in the language the user writes in.",
+    "Order the topics the way a reviewer should read them. Write titles, summaries and flow steps in the language the user writes in.",
     REPLY,
     "",
     formatChanges(diff),
@@ -105,25 +115,29 @@ interface SyncOptions extends AskOptions {
 
 export async function syncTopics(o: SyncOptions): Promise<Topic[]> {
   const { review, diff, delta } = o;
-  const answer = await askTopics(o, buildSyncPrompt(review, diff, delta), true, (t) => syncProblem(t, delta.added, review.focus !== null));
-  return mergeSync(review, diff, delta, answer);
+  const answer = await askTopics(o, buildSyncPrompt(review, diff, delta), true, async (t) =>
+    problems(syncProblem(t, delta.added, review.focus !== null), flowProblem(await missingSteps(diff, t), diff.repoRoot)),
+  );
+  return mergeSync(review, diff, delta, withoutSteps(answer, await missingSteps(diff, answer)));
 }
 
 export function mergeSync(review: Review, diff: DiffResult, delta: TopicDelta, answer: Topic[]): Topic[] {
   const now = new Set(diff.files.flatMap(changeIds));
   const added = (ids: string[]) => ids.filter((id) => delta.added.has(id));
-  const updates = new Map<string, { summary: string; ids: string[] }>();
+  const updates = new Map<string, { summary: string; ids: string[]; flow?: FlowStep[] }>();
   for (const t of answer) {
     const u = updates.get(t.title);
-    updates.set(t.title, { summary: t.summary || u?.summary || "", ids: [...(u?.ids ?? []), ...added(t.ids)] });
+    updates.set(t.title, { summary: t.summary || u?.summary || "", ids: [...(u?.ids ?? []), ...added(t.ids)], flow: t.flow ?? u?.flow });
   }
 
   const topics: Topic[] = review.topics.map((t) => {
     const u = updates.get(t.title);
     updates.delete(t.title);
-    return { title: t.title, summary: u?.summary || t.summary, ids: [...new Set([...t.ids.filter((id) => now.has(id)), ...(u?.ids ?? [])])] };
+    const flow = u?.flow ?? t.flow;
+    const ids = [...new Set([...t.ids.filter((id) => now.has(id)), ...(u?.ids ?? [])])];
+    return { title: t.title, summary: u?.summary || t.summary, ids, ...(flow ? { flow } : {}) };
   });
-  for (const [title, u] of updates) topics.push({ title, summary: u.summary, ids: [...new Set(u.ids)] });
+  for (const [title, u] of updates) topics.push({ title, summary: u.summary, ids: [...new Set(u.ids)], ...(u.flow ? { flow: u.flow } : {}) });
   return topics.filter((t) => t.ids.length > 0);
 }
 
@@ -148,27 +162,34 @@ function buildSyncPrompt(review: Review, diff: DiffResult, delta: TopicDelta): s
     const kept = t.ids.filter((id) => now.has(id));
     const gone = t.ids.filter((id) => delta.removed.has(id)).length;
     const changes = `${kept.length ? kept.join(", ") : "no changes left"}${gone ? `; ${plural(gone, "change")} gone since` : ""}`;
-    return [`- ${JSON.stringify(t.title)} (${changes})`, t.summary.replace(/^/gm, "    ")];
+    const flow = t.flow?.length ? ["    Flow:", ...t.flow.map((s, i) => `      ${i + 1}. ${s.path}:${s.line} ${s.text}`)] : [];
+    return [`- ${JSON.stringify(t.title)} (${changes})`, t.summary.replace(/^/gm, "    "), ...flow];
   });
   const scope = review.focus
     ? `The topics were made with this focus: ${JSON.stringify(review.focus)}. Put a new change in a topic only when the focus asks for it, and leave the others out.`
     : "Put every new change in a topic, in a new one when none fits.";
+  const touched = new Set(diff.files.filter((f) => changeIds(f).some((id) => delta.added.has(id))).map((f) => f.path));
+  const reflow = review.topics.filter((t) => t.flow?.some((s) => touched.has(s.path))).map((t) => JSON.stringify(t.title));
+  const alsoReflow = reflow.length
+    ? `, and these topics, whose flows pass through files with new or edited changes, with their summaries as above: ${reflow.join(", ")}`
+    : "";
 
   return [
     "The user is reviewing code changes in a diff viewer, grouped into topics that were made earlier. The code has changed since: some changes are new or were edited, and some are gone. Update the topics to match the code as it is now. You can read files to check details, but do not change anything.",
     "",
-    "The topics, in order, with the ids of the changes they still have and their summaries:",
+    "The topics, in order, with the ids of the changes they still have, their summaries and flows:",
     ...topics,
     "",
     "The new and edited changes. Each starts with its id, and an edited change says which topic's change it replaces:",
     ...(delta.added.size ? formatFiles(diff.files, delta.added, labels) : ["", "  None."]),
     ...(context.size ? ["", "The changes those topics still have, unchanged, for context:", ...formatFiles(diff.files, context)] : []),
     "",
-    "Give each topic that gains or loses changes, and each new topic:",
+    `Give each topic that gains or loses changes, each new topic${alsoReflow}:`,
     '- "title": the title exactly as above, or a few words for a new topic.',
     `- "summary": Markdown on what behaves differently after the topic's changes as they are now: name each function or file involved and say what it did before, what it does now, and in which cases. ${SUMMARY_RULES}`,
     '- "ids": the ids of the new and edited changes that belong in the topic. Leave out the ids it already has.',
-    `${scope} Leave out the topics that neither gain nor lose changes. Write in the language of the summaries above.`,
+    `- "flow": the topic's whole flow as the code is now: the path a call or data takes through the code its changes sit on, ${flowRules(diff.repoRoot)}`,
+    `${scope} Leave out the other topics. Write in the language of the summaries above.`,
     REPLY,
   ].join("\n");
 }
@@ -188,17 +209,56 @@ function parseTopics(text: string, allowEmpty: boolean): Topic[] | string {
   if (!Array.isArray(list) || (list.length === 0 && !allowEmpty)) return 'The answer had no "topics" array.';
   const topics = list.map(toTopic);
   if (topics.some((t) => t === null)) {
-    return 'Each topic needs a "title" and a "summary" string and an "ids" array of strings.';
+    return 'Each topic needs a "title" and a "summary" string, an "ids" array of strings and a "flow" array of {"path", "line", "text"} with a whole-number line.';
   }
   return topics as Topic[];
 }
 
 function toTopic(t: unknown): Topic | null {
   if (!isRecord(t)) return null;
-  const { title, summary, ids } = t;
+  const { title, summary, ids, flow } = t;
   if (typeof title !== "string" || !title.trim() || typeof summary !== "string") return null;
   if (!Array.isArray(ids) || !ids.every((id) => typeof id === "string")) return null;
-  return { title: title.trim(), summary: summary.trim(), ids };
+  if (flow === undefined) return { title: title.trim(), summary: summary.trim(), ids };
+  const steps = Array.isArray(flow) ? flow.map(toStep) : [null];
+  if (steps.some((s) => s === null)) return null;
+  return { title: title.trim(), summary: summary.trim(), ids, flow: steps as FlowStep[] };
+}
+
+function toStep(s: unknown): FlowStep | null {
+  if (!isRecord(s) || typeof s.path !== "string" || !s.path.trim() || typeof s.text !== "string") return null;
+  if (typeof s.line !== "number" || !Number.isInteger(s.line) || s.line < 1) return null;
+  return { path: s.path.trim(), line: s.line, text: s.text.trim() };
+}
+
+export async function missingSteps(diff: DiffResult, topics: Topic[]): Promise<Map<FlowStep, string>> {
+  const counts = new Map<string, Promise<number | null>>();
+  const lineCount = (p: string) => {
+    if (!counts.has(p)) {
+      const count = readRepoFile(diff, p).then((f) => (f === null ? null : f.text === null ? Infinity : f.text.replace(/\n$/, "").split("\n").length));
+      counts.set(p, count.catch(() => null));
+    }
+    return counts.get(p)!;
+  };
+  const bad = new Map<FlowStep, string>();
+  for (const s of topics.flatMap((t) => t.flow ?? [])) {
+    const count = await lineCount(s.path);
+    if (count === null) bad.set(s, `${s.path}:${s.line} (no such file)`);
+    else if (s.line > count) bad.set(s, `${s.path}:${s.line} (the file has ${count} lines)`);
+  }
+  return bad;
+}
+
+export function flowProblem(bad: Map<FlowStep, string>, root: string): string | null {
+  return bad.size ? `These flow steps point to no line of the compared version: ${[...bad.values()].join(", ")}. Paths are relative to ${root}.` : null;
+}
+
+function withoutSteps(topics: Topic[], bad: Map<FlowStep, string>): Topic[] {
+  return topics.map((t) => (t.flow ? { ...t, flow: t.flow.filter((s) => !bad.has(s)) } : t));
+}
+
+function problems(...found: (string | null)[]): string | null {
+  return found.filter(Boolean).join(" ") || null;
 }
 
 function parseJson(text: string): unknown {

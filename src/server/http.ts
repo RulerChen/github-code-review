@@ -218,7 +218,7 @@ export class ReviewServer {
     if (replaces !== null) this.removeReview(view.repo, replaces);
 
     const createdAt = new Date().toISOString();
-    const stored = topics.map(({ title, summary, ids }) => ({ title, summary, ids }));
+    const stored = topics.map(({ title, summary, ids, flow }) => ({ title, summary, ids, ...(flow?.length ? { flow } : {}) }));
     this.reviews.push({ repo: view.repo, compare, focus, topics: stored, changes: changesOf(diff), createdAt, view: view.id });
 
     const failed = this.groupings.findIndex((g) => same(g) && g.error !== null);

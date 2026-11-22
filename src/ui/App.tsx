@@ -971,6 +971,7 @@ export function App({ viewId }: Props) {
                             viewed={isTopicViewed(t)}
                             opening={opening}
                             onToggleViewed={() => toggleTopicViewed(t)}
+                            onOpenStep={(step) => openCode(step.path, step.line)}
                           />
                         ))}
                       </div>

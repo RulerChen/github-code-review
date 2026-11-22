@@ -9,6 +9,7 @@ import { sameRange, sortOverrides } from "../shared/comparison.js";
 import type { Comparison, DiffResult, Topic } from "../shared/types.js";
 import { errorMessage, plural } from "../shared/util.js";
 import { stopAll } from "./claude.js";
+import { flowProblem, missingSteps } from "./group.js";
 import { ReviewServer } from "./http.js";
 import { checkTopics, formatChanges, formatReviewComments } from "./review.js";
 
@@ -53,6 +54,8 @@ async function openViewer(repo: string, compare: Comparison, focus?: string, top
     if (unknown.length) {
       throw new Error(`Unknown change ids: ${unknown.join(", ")}. Call list_changes again and use the ids it prints.`);
     }
+    const badFlow = flowProblem(await missingSteps(diff, topics), diff.repoRoot);
+    if (badFlow) throw new Error(`${badFlow} Fix them and call open_diff_viewer again.`);
     if (unassigned.length) {
       note = `\n${unassigned.length} change(s) are in no topic, so they appear only in the Files tab: ${unassigned.join(", ")}`;
     }
@@ -180,9 +183,21 @@ async function runMcp(): Promise<void> {
               summary: z
                 .string()
                 .describe(
-                  "Markdown on what behaves differently after this topic's changes: each function or file involved, what it did before and what it does now, and why in one sentence. No commit hashes, no account of which commit did what, and no advice to the reviewer.",
+                  "Markdown on what behaves differently after this topic's changes: each function or file involved, what it did before and what it does now, and why in one sentence. No commit hashes, no account of which commit did what, no advice to the reviewer, and nothing about code the changes leave alone, which belongs in flow.",
                 ),
               ids: z.array(z.string()).describe("Ids from list_changes of the changes in this topic."),
+              flow: z
+                .array(
+                  z.object({
+                    path: z.string().describe("The file, as list_changes prints paths."),
+                    line: z.number().int().positive().describe("The line of the function or call in the new version of the file."),
+                    text: z.string().describe("What happens there, in one sentence."),
+                  }),
+                )
+                .optional()
+                .describe(
+                  "The path a call or data takes through the code this topic's changes sit on, in the order the code runs, one step per function it passes through, from where it starts to where it ends. Include steps in code the changes leave alone and in other repositories. Leave it out when the changes do not sit on a path through several functions.",
+                ),
             }),
           )
           .optional()

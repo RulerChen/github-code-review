@@ -57,10 +57,17 @@ export interface FileDiff {
   newContent: string | null;
 }
 
+export interface FlowStep {
+  path: string;
+  line: number;
+  text: string;
+}
+
 export interface Topic {
   title: string;
   summary: string;
   ids: string[];
+  flow?: FlowStep[];
 }
 
 export interface BaseRange {
