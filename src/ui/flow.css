@@ -21,25 +21,21 @@
   flex-direction: column;
   width: 100%;
   height: 100%;
-  border: 1.25px solid var(--border);
+  border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--bg-subtle);
 }
 
-.flow-node:hover {
-  border-color: var(--accent);
-}
-
 .flow-node.is-current {
   border-color: var(--focal);
-  background: var(--focal-tint);
 }
 
 .flow-node-name {
   flex: none;
-  height: 37.5px;
-  padding: 0 16px;
+  height: 32px;
+  padding: 0 12px;
   border: 0;
+  border-bottom: 1px solid var(--border-muted);
   background: none;
   color: var(--fg);
   font: 600 13px var(--sans);
@@ -47,28 +43,53 @@
   cursor: pointer;
 }
 
-.flow-node-branch {
-  display: block;
-  padding: 0 12px;
+.flow-node-row,
+.flow-node-when {
+  display: flex;
+  padding: 2px 10px;
+  line-height: 16px;
+  white-space: pre;
+}
+
+.flow-node-row {
   border: 0;
   background: none;
-  color: var(--attention);
-  font: 11px/15px var(--mono);
+  color: var(--fg);
+  font: 12px var(--sans);
   text-align: left;
-  white-space: pre;
   cursor: pointer;
 }
 
-.flow-node-name:focus-visible,
-.flow-node-branch:hover,
-.flow-node-branch:focus-visible {
-  outline: none;
-  text-decoration: underline;
+.flow-node-row:hover {
+  background: var(--bg);
 }
 
-.flow-node-branch.is-current {
-  color: var(--focal);
-  font-weight: 600;
+.flow-node-row.is-current {
+  background: var(--focal-tint);
+  box-shadow: inset 2px 0 0 var(--focal);
+}
+
+.flow-node-row.is-branch,
+.flow-node-when {
+  color: var(--attention);
+}
+
+.flow-node-when {
+  font: 11px/16px var(--mono);
+}
+
+.flow-node-num {
+  flex: none;
+  width: 3ch;
+  color: var(--fg-muted);
+  font: 11px/16px var(--mono);
+}
+
+.flow-node-name:hover,
+.flow-node-name:focus-visible,
+.flow-node-row:focus-visible {
+  outline: none;
+  text-decoration: underline;
 }
 
 .flow-canvas .flow-edge-line {
