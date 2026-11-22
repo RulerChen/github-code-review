@@ -1,31 +1,24 @@
-import { type KeyboardEvent, useState } from "react";
+import dagre from "@dagrejs/dagre";
+import { BaseEdge, type Edge, EdgeLabelRenderer, type EdgeProps, Handle, type Node, type NodeProps, Position, ReactFlow } from "@xyflow/react";
+import "@xyflow/react/dist/base.css";
+import { useState } from "react";
 import type { FlowStep } from "../shared/types";
+import "./flow.css";
 import { basename, dirPrefix } from "./paths";
 
 export interface FlowItem {
   step: FlowStep;
   changed: boolean;
-  repo: string;
 }
 
-const NODE_W = 184;
-const NODE_H = 64;
-const ROW = 128;
-const PAD = 28;
-const BEND = 8;
-const PAIR = 9;
-const LINE = 14;
-const CHAR = 6.9;
-const WRAP = 23;
+const NODE_H = 40;
+const LABEL_W = 200;
+const LINE = 15;
 
 const num = (i: number) => String(i + 1).padStart(2, "0");
 
 function scopeName(inside: string | null | undefined): string | null {
   return inside ? inside.split(" › ").slice(-2).join(".") : null;
-}
-
-function clip(text: string, max: number): string {
-  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
 }
 
 function incoming(flow: FlowItem[]): FlowItem[] {
@@ -37,279 +30,270 @@ const plain = (text: string | undefined) => (text ?? "").replace(/`/g, "");
 
 const componentOf = (step: FlowStep) => step.component?.trim() || step.path.split("/")[0]!;
 
-function labelOf(step: FlowStep): string {
-  const via = step.via?.label || step.via?.kind || "call";
-  return `${step.when ? `[${step.when}] ` : ""}${via}`;
+const viaOf = (step: FlowStep) => plain(step.via?.label) || step.via?.kind || "call";
+
+let canvas: CanvasRenderingContext2D | undefined;
+
+function measure(text: string, kind: "label" | "name"): number {
+  canvas ??= document.createElement("canvas").getContext("2d")!;
+  const css = getComputedStyle(document.documentElement);
+  canvas.font = kind === "label" ? `11px ${css.getPropertyValue("--mono")}` : `600 13px ${css.getPropertyValue("--sans")}`;
+  return canvas.measureText(text).width;
 }
 
-function wrap(text: string): string[] {
+const WIDE = "⺀-꓏가-힣豈-﫿＀-￯";
+const PARTS = new RegExp(`[${WIDE}]|[^ /?&${WIDE}]+[ /?&]*|[ /?&]+`, "g");
+
+function wrap(text: string, width: number): string[] {
   const lines: string[] = [];
   let line = "";
-  for (const part of text.match(/[^ /?&]*[ /?&]*/g) ?? []) {
-    if (line && (line + part).trimEnd().length > WRAP) {
+  for (const part of text.match(PARTS) ?? []) {
+    if (line && measure((line + part).trimEnd(), "label") > width) {
       lines.push(line.trimEnd());
       line = "";
     }
-    line += part;
-    while (line.trimEnd().length > WRAP) {
-      lines.push(line.slice(0, WRAP));
-      line = line.slice(WRAP);
+    line = line ? line + part : part.trimStart();
+    while (measure(line.trimEnd(), "label") > width) {
+      let cut = line.length - 1;
+      while (cut > 1 && measure(line.slice(0, cut), "label") > width) cut--;
+      lines.push(line.slice(0, cut));
+      line = line.slice(cut);
     }
   }
   if (line.trim()) lines.push(line.trimEnd());
   return lines;
 }
 
-interface GraphNode {
+function headAt(x: number, y: number, dir: number): string {
+  return `M${x - 7 * dir} ${y - 4}L${x} ${y}L${x - 7 * dir} ${y + 4}Z`;
+}
+
+function curve(x0: number, y0: number, x1: number, y1: number): string {
+  const d = (x1 - x0) / 2;
+  return `C${x0 + d} ${y0} ${x1 - d} ${y1} ${x1} ${y1}`;
+}
+
+type ComponentData = { name: string; first: number; actions: string; current: boolean; onPick: (i: number) => void };
+
+type HandoffData = {
+  d: string;
+  head: string;
+  kind: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  labels: { step: number; lines: string[]; title: string }[];
+  current: number | null;
+  onPick: (i: number) => void;
+};
+
+type ComponentNode = Node<ComponentData, "component">;
+type HandoffEdge = Edge<HandoffData, "handoff">;
+
+function ComponentBox({ data }: NodeProps<ComponentNode>) {
+  return (
+    <>
+      <Handle type="target" position={Position.Left} isConnectable={false} className="flow-handle" />
+      <button type="button" className={`flow-node${data.current ? " is-current" : ""}`} title={data.actions} onClick={() => data.onPick(data.first)}>
+        {data.name}
+      </button>
+      <Handle type="source" position={Position.Right} isConnectable={false} className="flow-handle" />
+    </>
+  );
+}
+
+function Handoff({ data }: EdgeProps<HandoffEdge>) {
+  if (!data) return null;
+  return (
+    <>
+      <BaseEdge path={data.d} className={`flow-edge-line is-${data.kind}`} />
+      <path className={`flow-edge-head is-${data.kind}`} d={data.head} />
+      <EdgeLabelRenderer>
+        <div
+          className={`flow-label is-${data.kind} nodrag nopan`}
+          style={{ transform: `translate(${data.x - data.w / 2}px, ${data.y - data.h / 2}px)`, width: data.w, height: data.h }}
+        >
+          {data.labels.map(({ step, lines, title }) => (
+            <button key={step} type="button" className={`flow-label-step${data.current === step ? " is-current" : ""}`} title={title} onClick={() => data.onPick(step)}>
+              {lines.map((line, k) => (
+                <span key={k} className="flow-label-line">
+                  <span className="flow-label-num">{k === 0 ? num(step) : ""}</span>
+                  {line}
+                </span>
+              ))}
+            </button>
+          ))}
+        </div>
+      </EdgeLabelRenderer>
+    </>
+  );
+}
+
+const nodeTypes = { component: ComponentBox };
+const edgeTypes = { handoff: Handoff };
+
+interface Part {
   key: string;
   name: string;
-  repo: string;
   steps: number[];
-  changed: boolean;
-  layer: number;
-  row: number;
-  x: number;
+  w: number;
+}
+
+interface Link {
+  from: Part;
+  to: Part;
+  steps: number[];
+  lines: string[][];
+}
+
+interface End {
+  key: string;
+  side: number;
+  toward: number;
   y: number;
 }
 
-interface GraphEdge {
-  from: GraphNode;
-  to: GraphNode;
-  steps: number[];
-  lines: string[][];
-  lane: number;
-}
-
-function layout(flow: FlowItem[], parent: number[]) {
-  const nodes = new Map<string, GraphNode>();
+function layout(flow: FlowItem[], parent: number[], current: number | null, onPick: (i: number) => void) {
+  const parts = new Map<string, Part>();
   const keyOf = (i: number) => componentOf(flow[i]!.step).toLowerCase();
-  flow.forEach(({ step, changed, repo }, i) => {
+  flow.forEach(({ step }, i) => {
     const key = keyOf(i);
-    const node = nodes.get(key) ?? { key, name: componentOf(step), repo, steps: [], changed: false, layer: -1, row: 0, x: 0, y: 0 };
-    node.steps.push(i);
-    node.changed ||= changed;
-    nodes.set(key, node);
+    const part = parts.get(key) ?? { key, name: componentOf(step), steps: [], w: Math.max(96, measure(componentOf(step), "name") + 34) };
+    part.steps.push(i);
+    parts.set(key, part);
   });
 
-  const edges: GraphEdge[] = [];
-  flow.forEach((_, i) => {
+  const indent = measure("00 ", "label");
+  const links: Link[] = [];
+  flow.forEach(({ step }, i) => {
     const p = parent[i]!;
     if (p < 0 || keyOf(p) === keyOf(i)) return;
-    const from = nodes.get(keyOf(p))!;
-    const to = nodes.get(keyOf(i))!;
-    const edge = edges.find((e) => e.from === from && e.to === to);
-    if (edge) edge.steps.push(i);
-    else edges.push({ from, to, steps: [i], lines: [], lane: 0 });
+    const from = parts.get(keyOf(p))!;
+    const to = parts.get(keyOf(i))!;
+    const lines = wrap(viaOf(step), LABEL_W - indent);
+    const link = links.find((l) => l.from === from && l.to === to);
+    if (link) {
+      link.steps.push(i);
+      link.lines.push(lines);
+    } else links.push({ from, to, steps: [i], lines: [lines] });
   });
-  for (const e of edges) e.lines = e.steps.map((i) => wrap(labelOf(flow[i]!.step)));
-
-  const list = [...nodes.values()];
-  list[0]!.layer = 0;
-  for (const e of edges) {
-    if (e.from.layer < 0) e.from.layer = 0;
-    if (e.to.layer < 0) e.to.layer = e.from.layer + 1;
-  }
-  for (const n of list) if (n.layer < 0) n.layer = Math.max(...list.map((m) => m.layer)) + 1;
-
-  const layers: GraphNode[][] = [];
-  for (const n of list) {
-    (layers[n.layer] ??= []).push(n);
-    n.row = layers[n.layer]!.length - 1;
-  }
-  const rows = Math.max(...layers.map((l) => l?.length ?? 0));
-
-  const widthOf = (e: GraphEdge) => (3 + Math.max(...e.lines.flat().map((l) => l.length))) * CHAR;
-  const gaps = layers.map((_, k) => {
-    const between = edges.filter((e) => Math.min(e.from.layer, e.to.layer) === k && Math.max(e.from.layer, e.to.layer) === k + 1);
-    return Math.max(96, ...between.map((e) => widthOf(e) + 32));
+  const boxOf = (l: Link) => ({
+    w: Math.ceil(indent + Math.max(...l.lines.flat().map((line) => measure(line, "label"))) + 12),
+    h: l.lines.flat().length * LINE + 8,
   });
 
-  const rise = (e: GraphEdge) => (e.lines.flat().length - 1) * LINE + 17;
-  const span = (e: GraphEdge) => e.to.layer - e.from.layer;
-  const lanes = (far: GraphEdge[]) => {
-    let off = 0;
-    for (const e of far) {
-      e.lane = off + 18;
-      off = e.lane + rise(e) + 4;
-    }
-    return off;
-  };
-  const edge = NODE_H / 2 - PAIR;
-  const top = PAD + Math.max(0, lanes(edges.filter((e) => span(e) > 1)), ...edges.filter((e) => span(e) === 1).map((e) => rise(e) - edge));
-  const bottom = PAD + Math.max(0, lanes(edges.filter((e) => span(e) < -1)), ...edges.filter((e) => span(e) === -1).map((e) => rise(e) - edge));
-  const inner = (rows - 1) * ROW + NODE_H;
-  for (const e of edges) if (Math.abs(span(e)) > 1) e.lane = span(e) > 0 ? top - e.lane : top + inner + e.lane;
+  const g = new dagre.graphlib.Graph();
+  g.setGraph({ rankdir: "LR", nodesep: 28, ranksep: 80, edgesep: 14, marginx: 16, marginy: 16 });
+  g.setDefaultEdgeLabel(() => ({}));
+  for (const part of parts.values()) g.setNode(part.key, { width: part.w, height: NODE_H });
+  for (const l of links) {
+    const { w, h } = boxOf(l);
+    g.setEdge(l.from.key, l.to.key, { width: w, height: h, labelpos: "c" });
+  }
+  dagre.layout(g);
 
-  let x = PAD;
-  layers.forEach((layer, k) => {
-    for (const n of layer ?? []) {
-      n.x = x;
-      n.y = top + ((rows - layer.length) / 2 + n.row) * ROW;
-    }
-    x += NODE_W + gaps[k]!;
+  const at = (key: string) => g.node(key) as { x: number; y: number; width: number };
+  const ends: End[] = [];
+  const routes = links.map((l) => {
+    const points: { x: number; y: number }[] = g.edge(l.from.key, l.to.key).points ?? [];
+    const a = at(l.from.key);
+    const b = at(l.to.key);
+    const dir = Math.sign(b.x - a.x) || 1;
+    const src = { key: l.from.key, side: dir, toward: points[1]?.y ?? b.y, y: a.y };
+    const dst = { key: l.to.key, side: -dir, toward: points.at(-2)?.y ?? a.y, y: b.y };
+    ends.push(src, dst);
+    return { l, points, a, b, dir, src, dst };
   });
-  const width = x - gaps.at(-1)! + PAD;
-  return { nodes: list, edges, width, height: top + inner + bottom };
-}
-
-interface Route {
-  d: string;
-  head: string;
-  labelX: number;
-  labelY: number;
-  anchor: "start" | "end";
-  place: "above" | "below" | "beside";
-}
-
-function headAt(x: number, y: number, dir: "left" | "right" | "up" | "down"): string {
-  if (dir === "right") return `M${x - 7} ${y - 4}L${x} ${y}L${x - 7} ${y + 4}Z`;
-  if (dir === "left") return `M${x + 7} ${y - 4}L${x} ${y}L${x + 7} ${y + 4}Z`;
-  if (dir === "down") return `M${x - 4} ${y - 7}L${x} ${y}L${x + 4} ${y - 7}Z`;
-  return `M${x - 4} ${y + 7}L${x} ${y}L${x + 4} ${y + 7}Z`;
-}
-
-function route(e: GraphEdge, paired: boolean): Route {
-  const { from: a, to: b } = e;
-  const cy = (n: GraphNode) => n.y + NODE_H / 2;
-  const cx = (n: GraphNode) => n.x + NODE_W / 2;
-  const right = b.layer > a.layer;
-  const off = paired ? (right ? -PAIR : PAIR) : 0;
-
-  if (b.layer === a.layer) {
-    const down = b.y > a.y;
-    const x0 = cx(a) + (paired ? off : 0);
-    const y0 = down ? a.y + NODE_H : a.y;
-    const y1 = down ? b.y : b.y + NODE_H;
-    return { d: `M${x0} ${y0}V${y1}`, head: headAt(x0, y1, down ? "down" : "up"), labelX: x0 + 8, labelY: (y0 + y1) / 2, anchor: "start", place: "beside" };
-  }
-
-  const near = Math.abs(b.layer - a.layer) === 1;
-  if (near) {
-    const sx = right ? a.x + NODE_W : a.x;
-    const sy = cy(a) + off;
-    const labelX = sx + (right ? 10 : -10);
-    const anchor = right ? "start" : "end";
-    const place = right ? "above" : "below";
-    if (Math.abs(cy(b) - cy(a)) < 1) {
-      const ex = right ? b.x : b.x + NODE_W;
-      return { d: `M${sx} ${sy}H${ex}`, head: headAt(ex, sy, right ? "right" : "left"), labelX, labelY: sy, anchor, place };
+  for (const part of parts.values()) {
+    for (const side of [1, -1]) {
+      const mine = ends.filter((t) => t.key === part.key && t.side === side).sort((p, q) => p.toward - q.toward);
+      const gap = mine.length > 1 ? Math.min(12, (NODE_H - 12) / (mine.length - 1)) : 0;
+      mine.forEach((t, i) => (t.y = at(part.key).y + (i - (mine.length - 1) / 2) * gap));
     }
-    const tx = cx(b);
-    const up = cy(b) < cy(a);
-    const ey = up ? b.y + NODE_H : b.y;
-    const turn = right ? -BEND : BEND;
-    const d = `M${sx} ${sy}H${tx + turn}Q${tx} ${sy} ${tx} ${sy + (up ? -BEND : BEND)}V${ey}`;
-    return { d, head: headAt(tx, ey, up ? "up" : "down"), labelX, labelY: sy, anchor, place };
   }
 
-  const above = right;
-  const y = e.lane;
-  const x0 = cx(a) + off;
-  const x1 = cx(b) + off;
-  const y0 = above ? a.y : a.y + NODE_H;
-  const y1 = above ? b.y : b.y + NODE_H;
-  return {
-    d: `M${x0} ${y0}V${y}H${x1}V${y1}`,
-    head: headAt(x1, y1, above ? "down" : "up"),
-    labelX: x0 + (right ? 8 : -8),
-    labelY: y,
-    anchor: right ? "start" : "end",
-    place: above ? "above" : "below",
-  };
-}
+  const nodes: ComponentNode[] = [...parts.values()].map((part) => {
+    const p = at(part.key);
+    return {
+      id: part.key,
+      type: "component",
+      position: { x: p.x - part.w / 2, y: p.y - NODE_H / 2 },
+      width: part.w,
+      height: NODE_H,
+      data: {
+        name: part.name,
+        first: part.steps[0]!,
+        actions: part.steps.map((i) => `${num(i)} ${flow[i]!.step.action ?? ""}`).join("\n"),
+        current: current !== null && keyOf(current) === part.key,
+        onPick,
+      },
+    };
+  });
 
-function press(run: () => void) {
-  return (e: KeyboardEvent) => {
-    if (e.key !== "Enter" && e.key !== " ") return;
-    e.preventDefault();
-    run();
-  };
+  const edges: HandoffEdge[] = routes.map(({ l, points, a, b, dir, src, dst }) => {
+    const x0 = a.x + (dir * a.width) / 2;
+    const x1 = b.x - (dir * b.width) / 2;
+    const label = g.edge(l.from.key, l.to.key);
+    const half = (dir * boxOf(l).w) / 2;
+    const inner = points.slice(1, -1).flatMap((p) => (p.x === label.x && p.y === label.y ? [{ x: p.x - half, y: p.y }, { x: p.x + half, y: p.y }] : [p]));
+    let d = `M${x0} ${src.y}`;
+    let px = x0;
+    let py = src.y;
+    for (const p of [...inner, { x: x1, y: dst.y }]) {
+      d += curve(px, py, p.x, p.y);
+      px = p.x;
+      py = p.y;
+    }
+    return {
+      id: `${l.from.key}→${l.to.key}`,
+      source: l.from.key,
+      target: l.to.key,
+      type: "handoff",
+      data: {
+        d,
+        head: headAt(x1, dst.y, dir),
+        kind: flow[l.steps[0]!]!.step.via?.kind ?? "call",
+        x: label.x ?? 0,
+        y: label.y ?? 0,
+        ...boxOf(l),
+        labels: l.steps.map((i, n) => ({ step: i, lines: l.lines[n]!, title: `${flow[i]!.step.action ?? ""}\n${flow[i]!.step.path}:${flow[i]!.step.line}` })),
+        current,
+        onPick,
+      },
+    };
+  });
+
+  const { width = 0, height = 0 } = g.graph();
+  return { nodes, edges, width: Math.ceil(width), height: Math.ceil(height) };
 }
 
 function Graph({ flow, parent, current, onPick }: { flow: FlowItem[]; parent: number[]; current: number | null; onPick: (i: number) => void }) {
-  const { nodes, edges, width, height } = layout(flow, parent);
-  const pairs = new Set(edges.map((e) => `${e.from.key}\u0000${e.to.key}`));
-  const currentNode = current === null ? null : componentOf(flow[current]!.step).toLowerCase();
-
+  const { nodes, edges, width, height } = layout(flow, parent, current, onPick);
   return (
     <div className="flow-graph">
-      <svg viewBox={`0 0 ${width} ${height}`} style={{ maxWidth: width, minWidth: Math.min(width, width * 0.75) }} role="group" aria-label="Flow graph">
-        {edges.map((e) => {
-          const paired = pairs.has(`${e.to.key}\u0000${e.from.key}`);
-          const r = route(e, paired);
-          const kind = flow[e.steps[0]!]!.step.via?.kind ?? "call";
-          const total = e.lines.flat().length;
-          const yAt = (g: number) =>
-            r.place === "below" ? r.labelY + 14 + g * LINE : r.place === "above" ? r.labelY - 6 - (total - 1 - g) * LINE : r.labelY + 4 + (g - (total - 1) / 2) * LINE;
-          let g = 0;
-          return (
-            <g key={`${e.from.key}-${e.to.key}`} className={`flow-edge is-${kind}`}>
-              <path className="flow-edge-line" d={r.d} />
-              <path className="flow-edge-head" d={r.head} />
-              {e.steps.map((i, n) => {
-                const step = flow[i]!.step;
-                return (
-                  <text
-                    key={i}
-                    className={`flow-edge-label${current === i ? " is-current" : ""}`}
-                    textAnchor={r.anchor}
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => onPick(i)}
-                    onKeyDown={press(() => onPick(i))}
-                  >
-                    <title>{`${step.action ?? ""}\n${step.path}:${step.line}`}</title>
-                    {e.lines[n]!.map((line, k) => (
-                      <tspan key={k} x={r.labelX + (k && r.anchor === "start" ? 3 * CHAR : 0)} y={yAt(g++)}>
-                        {k === 0 && <tspan className="flow-edge-num">{num(i)} </tspan>}
-                        {line}
-                      </tspan>
-                    ))}
-                  </text>
-                );
-              })}
-            </g>
-          );
-        })}
-        {nodes.map((n) => {
-          const files = [...new Set(n.steps.map((i) => basename(flow[i]!.step.path)))];
-          const sub = clip(files.slice(0, 2).join(" · ") + (files.length > 2 ? ` +${files.length - 2}` : ""), 28);
-          const first = n.steps[0]!;
-          return (
-            <g
-              key={n.key}
-              className={`flow-node${n.changed ? " is-changed" : ""}${currentNode === n.key ? " is-current" : ""}`}
-              role="button"
-              tabIndex={0}
-              aria-label={`${n.name}, step ${num(first)}`}
-              onClick={() => onPick(first)}
-              onKeyDown={press(() => onPick(first))}
-            >
-              <title>{n.steps.map((i) => `${num(i)} ${flow[i]!.step.action ?? ""}`).join("\n")}</title>
-              <rect x={n.x} y={n.y} width={NODE_W} height={NODE_H} rx={8} />
-              {n.repo && (
-                <g>
-                  <rect className="flow-node-tag" x={n.x + 10} y={n.y + 8} width={Math.min(80, n.repo.length * 6 + 12)} height={15} rx={3} />
-                  <text className="flow-node-tagtext" x={n.x + 16} y={n.y + 19}>
-                    {clip(n.repo, 11)}
-                  </text>
-                </g>
-              )}
-              {n.changed && (
-                <text className="flow-node-changed" x={n.x + NODE_W - 10} y={n.y + 19} textAnchor="end">
-                  changed
-                </text>
-              )}
-              <text className="flow-node-name" x={n.x + NODE_W / 2} y={n.y + 40} textAnchor="middle">
-                {clip(n.name, 22)}
-              </text>
-              <text className="flow-node-sub" x={n.x + NODE_W / 2} y={n.y + 55} textAnchor="middle">
-                {sub}
-              </text>
-            </g>
-          );
-        })}
-      </svg>
+      <div className="flow-canvas" style={{ width, height: height + 16 }}>
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          nodeTypes={nodeTypes}
+          edgeTypes={edgeTypes}
+          defaultViewport={{ x: 0, y: 0, zoom: 1 }}
+          minZoom={1}
+          maxZoom={1}
+          nodesDraggable={false}
+          nodesConnectable={false}
+          nodesFocusable={false}
+          edgesFocusable={false}
+          elementsSelectable={false}
+          panOnDrag={false}
+          panOnScroll={false}
+          zoomOnScroll={false}
+          zoomOnPinch={false}
+          zoomOnDoubleClick={false}
+          preventScrolling={false}
+        />
+      </div>
     </div>
   );
 }
@@ -338,6 +322,7 @@ export function Flow({ flow: items, onOpen }: { flow: FlowItem[]; onOpen: (step:
                   <span className="flow-action">{step.action || scope || basename(step.path)}</span>
                   {step.from && <span className="flow-from">from {num(step.from - 1)}</span>}
                   {step.when && <span className="flow-when">[{step.when}]</span>}
+                  {step.via?.label && <span className="flow-via">via {plain(step.via.label)}</span>}
                   {changed && <span className="flow-changed">changed</span>}
                 </span>
                 <span className="flow-where">

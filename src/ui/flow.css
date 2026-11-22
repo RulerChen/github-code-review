@@ -1,0 +1,134 @@
+.flow-graph {
+  margin: 0 0 12px;
+  padding: 4px;
+  overflow-x: auto;
+  border: 1px solid var(--border-muted);
+  border-radius: 6px;
+  background: var(--bg);
+}
+
+.flow-canvas {
+  margin: 0 auto;
+}
+
+.flow-canvas .flow-handle {
+  visibility: hidden;
+}
+
+.flow-node {
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  padding: 0 16px;
+  border: 1.25px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-subtle);
+  color: var(--fg);
+  font: 600 13px var(--sans);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.flow-node:hover,
+.flow-node:focus-visible {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.flow-node.is-current {
+  border-color: var(--focal);
+  background: var(--focal-tint);
+}
+
+.flow-canvas .flow-edge-line {
+  fill: none;
+  stroke: var(--fg-muted);
+  stroke-width: 1.5;
+}
+
+.flow-canvas .flow-edge-line.is-return {
+  stroke-dasharray: 5 4;
+}
+
+.flow-canvas .flow-edge-line.is-request,
+.flow-canvas .flow-edge-line.is-message,
+.flow-canvas .flow-edge-line.is-storage {
+  stroke: var(--accent);
+}
+
+.flow-canvas .flow-edge-line.is-message {
+  stroke-dasharray: 6 4;
+}
+
+.flow-canvas .flow-edge-line.is-storage {
+  stroke-dasharray: 2 3;
+}
+
+.flow-edge-head {
+  fill: var(--fg-muted);
+}
+
+.flow-edge-head.is-request,
+.flow-edge-head.is-message,
+.flow-edge-head.is-storage {
+  fill: var(--accent);
+}
+
+.flow-label {
+  position: absolute;
+  box-sizing: border-box;
+  padding: 4px 6px;
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--fg-muted);
+  font: 11px/15px var(--mono);
+  pointer-events: all;
+}
+
+.flow-label.is-request,
+.flow-label.is-message,
+.flow-label.is-storage {
+  color: var(--accent);
+}
+
+.flow-label-step {
+  display: block;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  white-space: pre;
+  cursor: pointer;
+}
+
+.flow-label-step:hover,
+.flow-label-step:focus-visible {
+  outline: none;
+  text-decoration: underline;
+}
+
+.flow-label-step.is-current {
+  color: var(--focal);
+  font-weight: 600;
+}
+
+.flow-label-line {
+  display: block;
+}
+
+.flow-label-num {
+  display: inline-block;
+  width: 3ch;
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.flow-canvas .react-flow {
+  --xy-attribution-background-color: transparent;
+}
+
+.flow-canvas .react-flow__attribution a {
+  color: var(--fg-muted);
+}

@@ -1336,150 +1336,6 @@ body.is-resizing .file {
   margin-bottom: 6px;
 }
 
-.flow-graph {
-  margin: 0 0 12px;
-  padding: 4px;
-  overflow-x: auto;
-  border: 1px solid var(--border-muted);
-  border-radius: 6px;
-  background: var(--bg);
-}
-
-.flow-graph svg {
-  display: block;
-  width: 100%;
-  height: auto;
-  margin: 0 auto;
-}
-
-.flow-graph text {
-  font-family: var(--sans);
-}
-
-.flow-graph text.flow-edge-label,
-.flow-graph text.flow-node-sub,
-.flow-graph text.flow-node-tagtext,
-.flow-graph text.flow-node-changed {
-  font-family: var(--mono);
-}
-
-.flow-edge-line {
-  fill: none;
-  stroke: var(--fg-muted);
-  stroke-width: 1.5;
-}
-
-.flow-edge-head {
-  fill: var(--fg-muted);
-}
-
-.flow-edge.is-return .flow-edge-line {
-  stroke-dasharray: 5 4;
-}
-
-.flow-edge.is-request .flow-edge-line,
-.flow-edge.is-message .flow-edge-line,
-.flow-edge.is-storage .flow-edge-line {
-  stroke: var(--accent);
-}
-
-.flow-edge.is-request .flow-edge-head,
-.flow-edge.is-message .flow-edge-head,
-.flow-edge.is-storage .flow-edge-head {
-  fill: var(--accent);
-}
-
-.flow-edge.is-message .flow-edge-line {
-  stroke-dasharray: 6 4;
-}
-
-.flow-edge.is-storage .flow-edge-line {
-  stroke-dasharray: 2 3;
-}
-
-.flow-edge-label {
-  fill: var(--fg-muted);
-  font-size: 11px;
-  letter-spacing: 0.02em;
-  cursor: pointer;
-  outline: none;
-}
-
-.flow-edge.is-request .flow-edge-label,
-.flow-edge.is-message .flow-edge-label,
-.flow-edge.is-storage .flow-edge-label {
-  fill: var(--accent);
-}
-
-.flow-edge-label:hover,
-.flow-edge-label:focus-visible {
-  text-decoration: underline;
-}
-
-.flow-edge-label.is-current {
-  fill: var(--focal);
-  font-weight: 600;
-}
-
-.flow-node {
-  cursor: pointer;
-  outline: none;
-}
-
-.flow-node > rect {
-  fill: var(--bg-subtle);
-  stroke: var(--border);
-  stroke-width: 1.25;
-}
-
-.flow-node.is-changed > rect {
-  fill: var(--bg);
-  stroke: var(--fg);
-}
-
-.flow-node:hover > rect,
-.flow-node:focus-visible > rect {
-  stroke: var(--accent);
-}
-
-.flow-node.is-current > rect {
-  fill: var(--focal-tint);
-  stroke: var(--focal);
-  stroke-width: 1.5;
-}
-
-.flow-node-name {
-  fill: var(--fg);
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.flow-node-sub {
-  fill: var(--fg-muted);
-  font-size: 10px;
-}
-
-.flow-node-tag {
-  fill: none;
-  stroke: var(--border);
-}
-
-.flow-node-tagtext {
-  fill: var(--fg-muted);
-  font-size: 9px;
-  letter-spacing: 0.06em;
-}
-
-.flow-node-changed {
-  fill: var(--success);
-  font-size: 9px;
-}
-
-.flow-edge-num {
-  fill: var(--fg);
-  font-weight: 600;
-}
-
 .flow-steps {
   margin: 0;
   padding: 0;
@@ -1541,6 +1397,11 @@ body.is-resizing .file {
 
 .flow-when {
   color: var(--attention);
+}
+
+.flow-via {
+  color: var(--fg-muted);
+  font: 11px/18px var(--mono);
 }
 
 .flow-changed {

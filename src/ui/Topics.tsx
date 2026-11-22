@@ -59,11 +59,7 @@ export function buildTopics(review: Review, files: FileDiff[], repos: DiffRepo[]
       anchor: `topic-${index}`,
       title: t.title,
       summary: t.summary,
-      flow: steps.map((step) => ({
-        step,
-        changed: addedLines(files.find((f) => f.path === step.path)).has(step.line),
-        repo: repos.find((r) => r.dir !== "" && step.path.startsWith(`${r.dir}/`))?.dir ?? "",
-      })),
+      flow: steps.map((step) => ({ step, changed: addedLines(files.find((f) => f.path === step.path)).has(step.line) })),
       parts,
       changeCount: chosen.size,
       edited: edited.length,
