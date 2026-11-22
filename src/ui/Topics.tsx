@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { changeIds, editedInto, oldCommitOf } from "../shared/hunks";
 import type { Block, DiffRepo, FileDiff, FlowStep, Review, Thread } from "../shared/types";
 import { plural } from "../shared/util";
@@ -8,6 +8,7 @@ import { type CommentsApi, onShownVersion, ThreadList, useComments } from "./com
 import { CollapseButton, CommentButton, ViewedToggle } from "./controls";
 import { hasLine } from "./DiffTable";
 import { baseHunksOf, FileCard } from "./FileCard";
+import { ChevronIcon } from "./icons";
 import { Markdown } from "./Markdown";
 import { basename, dirPrefix } from "./paths";
 
@@ -90,32 +91,51 @@ interface SectionProps {
   onOpenStep: (step: FlowStep) => void;
 }
 
+interface PartProps {
+  title: string;
+  className: string;
+  open: boolean;
+  onToggle: () => void;
+  children: ReactNode;
+}
+
+function TopicPart({ title, className, open, onToggle, children }: PartProps) {
+  return (
+    <div className={className}>
+      <button type="button" className="topic-part-head" aria-expanded={open} onClick={onToggle}>
+        <span className="topic-part-toggle">
+          <ChevronIcon />
+        </span>
+        {title}
+      </button>
+      <div hidden={!open}>{children}</div>
+    </div>
+  );
+}
+
 function TopicFlow({ flow, onOpen }: { flow: TopicView["flow"]; onOpen: (step: FlowStep) => void }) {
   const [current, setCurrent] = useState<number | null>(null);
   return (
-    <div className="topic-flow">
-      <h3 className="topic-flow-title">Flow</h3>
-      <ol>
-        {flow.map(({ step, changed }, i) => (
-          <li key={i} className={current === i ? "is-current" : undefined}>
-            <button
-              type="button"
-              className="flow-place"
-              title="Open this line on the right"
-              onClick={() => {
-                setCurrent(i);
-                onOpen(step);
-              }}
-            >
-              <span className="flow-dir">{dirPrefix(step.path)}</span>
-              {basename(step.path)}:{step.line}
-            </button>
-            {changed && <span className="flow-changed">changed</span>}
-            <Markdown className="flow-text" text={step.text} />
-          </li>
-        ))}
-      </ol>
-    </div>
+    <ol>
+      {flow.map(({ step, changed }, i) => (
+        <li key={i} className={current === i ? "is-current" : undefined}>
+          <button
+            type="button"
+            className="flow-place"
+            title="Open this line on the right"
+            onClick={() => {
+              setCurrent(i);
+              onOpen(step);
+            }}
+          >
+            <span className="flow-dir">{dirPrefix(step.path)}</span>
+            {basename(step.path)}:{step.line}
+          </button>
+          {changed && <span className="flow-changed">changed</span>}
+          <Markdown className="flow-text" text={step.text} />
+        </li>
+      ))}
+    </ol>
   );
 }
 
@@ -133,6 +153,8 @@ export function TopicSection({ topic, viewed, opening, onToggleViewed, onOpenSte
     if (thread && topicShows(topic, thread, versions)) setCollapsed(false);
   }, [revealSeq]);
   const [commenting, setCommenting] = useState(false);
+  const [summaryOpen, setSummaryOpen] = useState(true);
+  const [flowOpen, setFlowOpen] = useState(true);
   const threads = threadsForTopic(topic.title);
 
   const header = useRef<HTMLElement>(null);
@@ -179,8 +201,16 @@ export function TopicSection({ topic, viewed, opening, onToggleViewed, onOpenSte
 
       {!collapsed && (
         <div className="topic-body">
-          {topic.summary && <Markdown className="topic-summary" text={topic.summary} />}
-          {topic.flow.length > 0 && <TopicFlow flow={topic.flow} onOpen={onOpenStep} />}
+          {topic.summary && (
+            <TopicPart title="Summary" className="topic-summary" open={summaryOpen} onToggle={() => setSummaryOpen(!summaryOpen)}>
+              <Markdown text={topic.summary} />
+            </TopicPart>
+          )}
+          {topic.flow.length > 0 && (
+            <TopicPart title="Flow" className="topic-flow" open={flowOpen} onToggle={() => setFlowOpen(!flowOpen)}>
+              <TopicFlow flow={topic.flow} onOpen={onOpenStep} />
+            </TopicPart>
+          )}
           <ThreadList
             className="topic-threads"
             threads={threads}

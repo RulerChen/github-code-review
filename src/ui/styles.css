@@ -572,7 +572,8 @@ body.is-resizing .file {
   white-space: nowrap;
 }
 
-.search-toggle {
+.search-toggle,
+.topic-part-toggle {
   display: grid;
   flex: none;
   place-items: center;
@@ -581,14 +582,16 @@ body.is-resizing .file {
   color: var(--fg-muted);
 }
 
-.search-toggle svg {
+.search-toggle svg,
+.topic-part-toggle svg {
   width: 12px;
   height: 12px;
   fill: currentColor;
   transition: transform 0.15s ease-out;
 }
 
-[aria-expanded="false"] > .search-toggle svg {
+[aria-expanded="false"] > .search-toggle svg,
+[aria-expanded="false"] > .topic-part-toggle svg {
   transform: rotate(-90deg);
 }
 
@@ -1313,11 +1316,26 @@ body.is-resizing .file {
   border-radius: 6px;
 }
 
-.topic-flow-title {
-  margin: 0 0 6px;
+.topic-part-head {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
   color: var(--fg-muted);
-  font-size: 12px;
-  font-weight: 600;
+  font: 600 12px/20px var(--sans);
+  text-align: left;
+  cursor: pointer;
+}
+
+.topic-part-head:hover {
+  color: var(--fg);
+}
+
+.topic-part-head[aria-expanded="true"] {
+  margin-bottom: 6px;
 }
 
 .topic-flow ol {
