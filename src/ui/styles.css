@@ -229,6 +229,14 @@ body.is-resizing * {
   user-select: none;
 }
 
+.file {
+  contain-intrinsic-size: auto none;
+}
+
+body.is-resizing .file {
+  content-visibility: auto;
+}
+
 .sidebar {
   position: sticky;
   top: var(--topbar-h);
