@@ -272,7 +272,7 @@ function Graph({ flow, parent, current, onPick }: { flow: FlowItem[]; parent: nu
   const { nodes, edges, width, height } = layout(flow, parent, current, onPick);
   return (
     <div className="flow-graph">
-      <div className="flow-canvas" style={{ width, height: height + 16 }}>
+      <div className="flow-canvas" style={{ width, height }}>
         <ReactFlow
           nodes={nodes}
           edges={edges}
@@ -292,6 +292,7 @@ function Graph({ flow, parent, current, onPick }: { flow: FlowItem[]; parent: nu
           zoomOnPinch={false}
           zoomOnDoubleClick={false}
           preventScrolling={false}
+          proOptions={{ hideAttribution: true }}
         />
       </div>
     </div>

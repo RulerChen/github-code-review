@@ -124,11 +124,3 @@
   color: var(--fg);
   font-weight: 600;
 }
-
-.flow-canvas .react-flow {
-  --xy-attribution-background-color: transparent;
-}
-
-.flow-canvas .react-flow__attribution a {
-  color: var(--fg-muted);
-}
