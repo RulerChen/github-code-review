@@ -6,10 +6,9 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { computeDiff, describeFailures, probeDiff, summarize } from "../engine/diff.js";
 import { sameRange, sortOverrides } from "../shared/comparison.js";
-import { type Comparison, type DiffResult, FLOW_VIA_KINDS, type Topic } from "../shared/types.js";
+import type { Comparison, DiffResult, Topic } from "../shared/types.js";
 import { errorMessage, plural } from "../shared/util.js";
 import { stopAll } from "./claude.js";
-import { flowProblem, missingSteps, nameSteps } from "./group.js";
 import { ReviewServer } from "./http.js";
 import { checkTopics, formatChanges, formatReviewComments } from "./review.js";
 
@@ -54,12 +53,10 @@ async function openViewer(repo: string, compare: Comparison, focus?: string, top
     if (unknown.length) {
       throw new Error(`Unknown change ids: ${unknown.join(", ")}. Call list_changes again and use the ids it prints.`);
     }
-    const badFlow = flowProblem(await missingSteps(diff, topics), diff.repoRoot);
-    if (badFlow) throw new Error(`${badFlow} Fix them and call open_diff_viewer again.`);
     if (unassigned.length) {
       note = `\n${unassigned.length} change(s) are in no topic, so they appear only in the Files tab: ${unassigned.join(", ")}`;
     }
-    grouped = { focus: focus?.trim() || null, topics: await nameSteps(diff, topics), diff };
+    grouped = { focus: focus?.trim() || null, topics, diff };
   }
 
   const server = await getServer();
@@ -183,46 +180,9 @@ async function runMcp(): Promise<void> {
               summary: z
                 .string()
                 .describe(
-                  "Markdown on what behaves differently after this topic's changes: each function or file involved, what it did before and what it does now, and why in one sentence. No commit hashes, no account of which commit did what, no advice to the reviewer, and nothing about code the changes leave alone, which belongs in flow.",
+                  "Markdown on what behaves differently after this topic's changes: each function or file involved, what it did before and what it does now, and why in one sentence. No commit hashes, no account of which commit did what, and no advice to the reviewer.",
                 ),
               ids: z.array(z.string()).describe("Ids from list_changes of the changes in this topic."),
-              flow: z
-                .array(
-                  z.object({
-                    component: z
-                      .string()
-                      .describe('The part of the system the step runs in, in a few words, such as "web client", "gateway" or "orders service", the same for every step there.'),
-                    action: z.string().describe("What happens there, in a few words, starting with a verb."),
-                    path: z.string().describe("The file, as list_changes prints paths."),
-                    line: z.number().int().positive().describe("The line where it happens in the new version of the file."),
-                    text: z.string().describe("How, in one sentence, naming the function."),
-                    input: z.string().optional().describe('What data the step takes in, in a few words, such as "order id, region".'),
-                    output: z.string().optional().describe('What data the step hands on, in a few words, such as "Order with converted total".'),
-                    from: z
-                      .number()
-                      .int()
-                      .positive()
-                      .optional()
-                      .describe("On the first step of a branch, the number of the step it comes from, counting from 1. Leave it out when the step follows the one listed just before it."),
-                    when: z
-                      .string()
-                      .optional()
-                      .describe('When the flow goes this way, such as "order not found" or "upstream fails", on a step that is one of several ways on.'),
-                    via: z
-                      .object({
-                        kind: z.enum(FLOW_VIA_KINDS),
-                        label: z.string(),
-                      })
-                      .nullish()
-                      .describe(
-                        'How the flow gets here from the step it comes from. kind: call (function call in the same process), return (back to the caller, including the response to a request), request (synchronous request to another process, such as HTTP or gRPC), message (asynchronous through a broker, queue, topic or event, such as Kafka, RabbitMQ or a webhook), storage (written by the step before to a database, cache or file that this step reads later) or other. label names the mechanism and concrete channel, such as "HTTP GET /orders/{id}" or "Kafka topic order-events", and is empty for a plain call. Leave it out on the first step.',
-                      ),
-                  }),
-                )
-                .optional()
-                .describe(
-                  "The steps this topic's changes sit on, in the order things happen, from where it starts to where it ends, one step per thing the code does that matters for following the change. Include steps in code the changes leave alone, in other repositories, and on the far side of an API, a queue or topic, a database or any other hand-off, and do not skip a service the flow passes through on the way, such as a gateway or proxy. List the main path first, the way the flow usually goes, such as a request that succeeds, then each branch, such as an error, a fallback, an early return or a second hand-off, where the changes add or touch it or where it decides what the caller gets. Leave it out when the changes do not sit on a path through several steps.",
-                ),
             }),
           )
           .optional()

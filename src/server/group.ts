@@ -1,8 +1,6 @@
-import { readRepoFile } from "../engine/browse.js";
 import { changeIds, editedInto, oldCommitOf } from "../shared/hunks.js";
-import { insideOf } from "../shared/scope.js";
-import { type DiffResult, FLOW_VIA_KINDS, type FlowStep, type FlowVia, type Review, type Topic } from "../shared/types.js";
-import { describeStep, isRecord, plural } from "../shared/util.js";
+import type { DiffResult, Review, Topic } from "../shared/types.js";
+import { isRecord, plural } from "../shared/util.js";
 import { ask } from "./claude.js";
 import { checkTopics, formatChanges, formatFiles } from "./review.js";
 
@@ -20,33 +18,9 @@ interface GroupOptions extends AskOptions {
 
 const SUMMARY_RULES = "Add why in one sentence when you know it. Describe the end result of the changes as listed: no commit hashes, no account of which commit did what, nothing about code these changes leave alone, and no advice to the reviewer.";
 
-const flowRules = (diff: DiffResult) => {
-  const dirs = diff.repos.filter((r) => r.error === null && r.dir !== "").map((r) => r.dir);
-  const follow = dirs.length > 1 ? `, looking in every repository under ${diff.repoRoot}, with or without changes (${dirs.join(", ")})` : "";
-  return [
-    "as steps in the order things happen, so the reviewer can follow what the code does from where it starts to where it ends.",
-    "Include steps in code these changes leave alone, in other repositories, and on the far side of an API, a queue or topic, a database or any other hand-off, one step per thing the code does that matters for following the change.",
-    `Follow each request and message to the code that receives it${follow}, and give every service it passes through on the way a step, such as a gateway, a proxy or a worker, even where its code is unchanged.`,
-    "The flow can branch. List the main path first, from start to end: the way the flow usually goes, such as a request that succeeds. Then list each branch, starting with \"from\": another way a step can go, such as an error, a fallback or an early return, a second hand-off such as a request that also publishes a message, or a second consumer of the same message.",
-    "Give a branch where the changes add or touch it, or where it decides what the caller or the next service gets.",
-    'Each step is {"component", "action", "path", "line", "text", "input", "output", "from", "when", "via"}.',
-    '"component" names the part of the system the step runs in, in a few words, such as "web client", "gateway" or "orders service": a process, a service or a clearly separate layer such as a UI, a server or a worker. Use the same name for every step in that part.',
-    '"action" says what happens there in a few words, starting with a verb.',
-    `"path" is relative to ${diff.repoRoot}, like the paths below, and "line" is the line where it happens in the new version of the file.`,
-    '"text" says in one sentence how, naming the function.',
-    '"input" and "output" say in a few words what data the step takes in and what it hands on, such as "order id, region" and "Order with converted total".',
-    '"from" is the number of the step this one comes from, counting from 1, on the first step of a branch; leave it out when a step follows the one listed just before it.',
-    '"when" says in a few words when the flow goes this way, such as "order not found" or "upstream fails", on a step that is one of several ways on; leave it out otherwise.',
-    '"via" is how the flow gets here from the step it comes from, as {"kind", "label"}: kind is "call" for a function call in the same process, "return" for going back to the caller, including the response to a request, "request" for a synchronous request to another process such as HTTP or gRPC, "message" for an asynchronous hand-off through a broker, queue, topic or event such as Kafka, RabbitMQ or a webhook, "storage" for data the step before writes to a database, cache or file and this step reads later, not for a plain read, and "other" for anything else.',
-    '"label" names the hand-off with its mechanism and concrete channel, such as "HTTP GET /orders/{id}", "HTTP 404" or "Kafka topic order-events", and is "" for a plain call. Leave "via" out on the first step.',
-    "Give [] when the changes do not sit on a path through several steps.",
-  ].join(" ");
-};
+const REPLY = 'Reply with only a JSON object and no other text: {"topics": [{"title": "...", "summary": "...", "ids": ["..."]}]}';
 
-const REPLY =
-  'Reply with only a JSON object and no other text: {"topics": [{"title": "...", "summary": "...", "ids": ["..."], "flow": [{"component": "...", "action": "...", "path": "...", "line": 1, "text": "...", "input": "...", "output": "..."}, {"component": "...", "action": "...", "path": "...", "line": 1, "text": "...", "input": "...", "output": "...", "via": {"kind": "request", "label": "..."}}, {"component": "...", "action": "...", "path": "...", "line": 1, "text": "...", "input": "...", "output": "...", "from": 1, "when": "...", "via": {"kind": "return", "label": "..."}}]}]}';
-
-async function askTopics(o: AskOptions, prompt: string, allowEmpty: boolean, check: (topics: Topic[]) => Promise<string | null>): Promise<Topic[]> {
+async function askTopics(o: AskOptions, prompt: string, allowEmpty: boolean, check: (topics: Topic[]) => string | null): Promise<Topic[]> {
   const run = (resume: string | null, fork: boolean, prompt: string) =>
     ask({ cwd: o.cwd, resume, fork, prompt, onText: () => {}, onActivity: o.onActivity });
 
@@ -59,7 +33,7 @@ async function askTopics(o: AskOptions, prompt: string, allowEmpty: boolean, che
   }
 
   let topics = parseTopics(res.text, allowEmpty);
-  const problem = typeof topics === "string" ? topics : await check(topics);
+  const problem = typeof topics === "string" ? topics : check(topics);
   if (problem && res.sessionId) {
     o.onActivity("Correcting its answer");
     res = await run(res.sessionId, false, `${problem} Reply again with only the corrected JSON object.`);
@@ -71,15 +45,10 @@ async function askTopics(o: AskOptions, prompt: string, allowEmpty: boolean, che
 
 export async function groupChanges(o: GroupOptions): Promise<Topic[]> {
   const focused = o.focus !== null || o.names !== null;
-  const topics = await askTopics(o, buildPrompt(o.diff, o.focus, o.names), focused, async (t) =>
-    problems(unknownIds(o.diff, t), flowProblem(await missingSteps(o.diff, t), o.diff.repoRoot), unnamedSteps(t)),
-  );
+  const topics = await askTopics(o, buildPrompt(o.diff, o.focus, o.names), focused, (t) => unknownIds(o.diff, t));
 
   const known = new Set(o.diff.files.flatMap(changeIds));
-  const named = await nameSteps(o.diff, withoutSteps(topics, await missingSteps(o.diff, topics)));
-  const kept = named
-    .map((t) => ({ ...t, ids: t.ids.filter((id) => known.has(id)) }))
-    .filter((t) => t.ids.length > 0);
+  const kept = topics.map((t) => ({ ...t, ids: t.ids.filter((id) => known.has(id)) })).filter((t) => t.ids.length > 0);
   if (!kept.length) {
     throw new Error(
       o.names ? "No change belongs to these topics." : focused ? "No change matches the focus." : "Claude's answer put no change of this comparison in a topic.",
@@ -102,9 +71,8 @@ function buildPrompt(diff: DiffResult, focus: string | null, names: string[] | n
     '- "title": a few words.',
     `- "summary": Markdown on what behaves differently after these changes: name each function or file involved and say what it did before, what it does now, and in which cases. ${SUMMARY_RULES}`,
     '- "ids": the ids of all changes in the topic, exactly as listed below.',
-    `- "flow": the path a call or data takes through the code these changes sit on, ${flowRules(diff)}`,
     scope,
-    "Order the topics the way a reviewer should read them. Write titles, summaries and flow steps in the language the user writes in.",
+    "Order the topics the way a reviewer should read them. Write titles and summaries in the language the user writes in.",
     REPLY,
     "",
     formatChanges(diff),
@@ -137,29 +105,25 @@ interface SyncOptions extends AskOptions {
 
 export async function syncTopics(o: SyncOptions): Promise<Topic[]> {
   const { review, diff, delta } = o;
-  const answer = await askTopics(o, buildSyncPrompt(review, diff, delta), true, async (t) =>
-    problems(syncProblem(t, delta.added, review.focus !== null), flowProblem(await missingSteps(diff, t), diff.repoRoot), unnamedSteps(t)),
-  );
-  return mergeSync(review, diff, delta, await nameSteps(diff, withoutSteps(answer, await missingSteps(diff, answer))));
+  const answer = await askTopics(o, buildSyncPrompt(review, diff, delta), true, (t) => syncProblem(t, delta.added, review.focus !== null));
+  return mergeSync(review, diff, delta, answer);
 }
 
 export function mergeSync(review: Review, diff: DiffResult, delta: TopicDelta, answer: Topic[]): Topic[] {
   const now = new Set(diff.files.flatMap(changeIds));
   const added = (ids: string[]) => ids.filter((id) => delta.added.has(id));
-  const updates = new Map<string, { summary: string; ids: string[]; flow?: FlowStep[] }>();
+  const updates = new Map<string, { summary: string; ids: string[] }>();
   for (const t of answer) {
     const u = updates.get(t.title);
-    updates.set(t.title, { summary: t.summary || u?.summary || "", ids: [...(u?.ids ?? []), ...added(t.ids)], flow: t.flow ?? u?.flow });
+    updates.set(t.title, { summary: t.summary || u?.summary || "", ids: [...(u?.ids ?? []), ...added(t.ids)] });
   }
 
   const topics: Topic[] = review.topics.map((t) => {
     const u = updates.get(t.title);
     updates.delete(t.title);
-    const flow = u?.flow ?? t.flow;
-    const ids = [...new Set([...t.ids.filter((id) => now.has(id)), ...(u?.ids ?? [])])];
-    return { title: t.title, summary: u?.summary || t.summary, ids, ...(flow ? { flow } : {}) };
+    return { title: t.title, summary: u?.summary || t.summary, ids: [...new Set([...t.ids.filter((id) => now.has(id)), ...(u?.ids ?? [])])] };
   });
-  for (const [title, u] of updates) topics.push({ title, summary: u.summary, ids: [...new Set(u.ids)], ...(u.flow ? { flow: u.flow } : {}) });
+  for (const [title, u] of updates) topics.push({ title, summary: u.summary, ids: [...new Set(u.ids)] });
   return topics.filter((t) => t.ids.length > 0);
 }
 
@@ -184,34 +148,27 @@ function buildSyncPrompt(review: Review, diff: DiffResult, delta: TopicDelta): s
     const kept = t.ids.filter((id) => now.has(id));
     const gone = t.ids.filter((id) => delta.removed.has(id)).length;
     const changes = `${kept.length ? kept.join(", ") : "no changes left"}${gone ? `; ${plural(gone, "change")} gone since` : ""}`;
-    const flow = t.flow?.length ? ["    Flow:", ...t.flow.map((s, i) => `      ${i + 1}. ${describeStep(s)}`)] : [];
-    return [`- ${JSON.stringify(t.title)} (${changes})`, t.summary.replace(/^/gm, "    "), ...flow];
+    return [`- ${JSON.stringify(t.title)} (${changes})`, t.summary.replace(/^/gm, "    ")];
   });
   const scope = review.focus
     ? `The topics were made with this focus: ${JSON.stringify(review.focus)}. Put a new change in a topic only when the focus asks for it, and leave the others out.`
     : "Put every new change in a topic, in a new one when none fits.";
-  const touched = new Set(diff.files.filter((f) => changeIds(f).some((id) => delta.added.has(id))).map((f) => f.path));
-  const reflow = review.topics.filter((t) => t.flow?.some((s) => touched.has(s.path))).map((t) => JSON.stringify(t.title));
-  const alsoReflow = reflow.length
-    ? `, and these topics, whose flows pass through files with new or edited changes, with their summaries as above: ${reflow.join(", ")}`
-    : "";
 
   return [
     "The user is reviewing code changes in a diff viewer, grouped into topics that were made earlier. The code has changed since: some changes are new or were edited, and some are gone. Update the topics to match the code as it is now. You can read files to check details, but do not change anything.",
     "",
-    "The topics, in order, with the ids of the changes they still have, their summaries and flows:",
+    "The topics, in order, with the ids of the changes they still have and their summaries:",
     ...topics,
     "",
     "The new and edited changes. Each starts with its id, and an edited change says which topic's change it replaces:",
     ...(delta.added.size ? formatFiles(diff.files, delta.added, labels) : ["", "  None."]),
     ...(context.size ? ["", "The changes those topics still have, unchanged, for context:", ...formatFiles(diff.files, context)] : []),
     "",
-    `Give each topic that gains or loses changes, each new topic${alsoReflow}:`,
+    "Give each topic that gains or loses changes, and each new topic:",
     '- "title": the title exactly as above, or a few words for a new topic.',
     `- "summary": Markdown on what behaves differently after the topic's changes as they are now: name each function or file involved and say what it did before, what it does now, and in which cases. ${SUMMARY_RULES}`,
     '- "ids": the ids of the new and edited changes that belong in the topic. Leave out the ids it already has.',
-    `- "flow": the topic's whole flow as the code is now: the path a call or data takes through the code its changes sit on, ${flowRules(diff)}`,
-    `${scope} Leave out the other topics. Write in the language of the summaries above.`,
+    `${scope} Leave out the topics that neither gain nor lose changes. Write in the language of the summaries above.`,
     REPLY,
   ].join("\n");
 }
@@ -231,116 +188,17 @@ function parseTopics(text: string, allowEmpty: boolean): Topic[] | string {
   if (!Array.isArray(list) || (list.length === 0 && !allowEmpty)) return 'The answer had no "topics" array.';
   const topics = list.map(toTopic);
   if (topics.some((t) => t === null)) {
-    return 'Each topic needs a "title" and a "summary" string, an "ids" array of strings and a "flow" array of {"action", "path", "line", "text", "from", "when", "via"}, with a whole-number line, a "from" that names an earlier step, and a via kind of call, return, request, message, storage or other.';
+    return 'Each topic needs a "title" and a "summary" string and an "ids" array of strings.';
   }
   return topics as Topic[];
 }
 
 function toTopic(t: unknown): Topic | null {
   if (!isRecord(t)) return null;
-  const { title, summary, ids, flow } = t;
+  const { title, summary, ids } = t;
   if (typeof title !== "string" || !title.trim() || typeof summary !== "string") return null;
   if (!Array.isArray(ids) || !ids.every((id) => typeof id === "string")) return null;
-  if (flow === undefined) return { title: title.trim(), summary: summary.trim(), ids };
-  const steps = Array.isArray(flow) ? flow.map((s, i) => toStep(s, i)) : [null];
-  if (steps.some((s) => s === null)) return null;
-  return { title: title.trim(), summary: summary.trim(), ids, flow: steps as FlowStep[] };
-}
-
-const optionalText = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : undefined);
-
-function toStep(s: unknown, index: number): FlowStep | null {
-  if (!isRecord(s) || typeof s.path !== "string" || !s.path.trim() || typeof s.text !== "string") return null;
-  if ([s.component, s.input, s.output].some((v) => v !== undefined && v !== null && typeof v !== "string")) return null;
-  if (typeof s.action !== "string" || !s.action.trim()) return null;
-  if (typeof s.line !== "number" || !Number.isInteger(s.line) || s.line < 1) return null;
-  if (s.from !== undefined && s.from !== null && (typeof s.from !== "number" || !Number.isInteger(s.from) || s.from < 1 || s.from > index)) return null;
-  if (s.when !== undefined && s.when !== null && typeof s.when !== "string") return null;
-  const via = s.via === undefined || s.via === null || index === 0 ? null : toVia(s.via);
-  if (via === undefined) return null;
-  const from = typeof s.from === "number" && s.from < index ? { from: s.from } : {};
-  const when = typeof s.when === "string" && s.when.trim() ? { when: s.when.trim() } : {};
-  const parts = { component: optionalText(s.component), input: optionalText(s.input), output: optionalText(s.output) };
-  const named = Object.fromEntries(Object.entries(parts).filter(([, v]) => v !== undefined));
-  return { path: s.path.trim(), line: s.line, ...named, action: s.action.trim(), text: s.text.trim(), ...from, ...when, via };
-}
-
-function toVia(v: unknown): FlowVia | undefined {
-  if (!isRecord(v) || typeof v.label !== "string") return undefined;
-  const kind = FLOW_VIA_KINDS.find((k) => k === v.kind);
-  return kind ? { kind, label: v.label.trim() } : undefined;
-}
-
-export async function missingSteps(diff: DiffResult, topics: Topic[]): Promise<Map<FlowStep, string>> {
-  const counts = new Map<string, Promise<number | null>>();
-  const lineCount = (p: string) => {
-    if (!counts.has(p)) {
-      const count = readRepoFile(diff, p).then((f) => (f === null ? null : f.text === null ? Infinity : f.text.replace(/\n$/, "").split("\n").length));
-      counts.set(p, count.catch(() => null));
-    }
-    return counts.get(p)!;
-  };
-  const bad = new Map<FlowStep, string>();
-  for (const s of topics.flatMap((t) => t.flow ?? [])) {
-    const count = await lineCount(s.path);
-    if (count === null) bad.set(s, `${s.path}:${s.line} (no such file)`);
-    else if (s.line > count) bad.set(s, `${s.path}:${s.line} (the file has ${count} lines)`);
-  }
-  return bad;
-}
-
-export function flowProblem(bad: Map<FlowStep, string>, root: string): string | null {
-  return bad.size ? `These flow steps point to no line of the compared version: ${[...bad.values()].join(", ")}. Paths are relative to ${root}.` : null;
-}
-
-export function unnamedSteps(topics: Topic[]): string | null {
-  const found = topics.flatMap((t) => {
-    const steps = (t.flow ?? []).flatMap((s, i) => (s.component?.trim() ? [] : [i + 1]));
-    return steps.length ? [`"${t.title}" steps ${steps.join(", ")}`] : [];
-  });
-  return found.length ? `These flow steps have no "component": ${found.join("; ")}. Name the part of the system each step runs in, the same name for every step in that part.` : null;
-}
-
-export async function nameSteps(diff: DiffResult, topics: Topic[]): Promise<Topic[]> {
-  const scopes = new Map<string, Promise<((no: number) => string | null) | null>>();
-  const scopeOf = (p: string) => {
-    if (!scopes.has(p)) scopes.set(p, readRepoFile(diff, p).then((f) => (f?.text ? insideOf(f.text, p) : null), () => null));
-    return scopes.get(p)!;
-  };
-  const name = async (s: FlowStep): Promise<FlowStep> => {
-    const inside = await scopeOf(s.path);
-    const here = inside?.(s.line) ?? null;
-    const next = inside?.(s.line + 1) ?? null;
-    return { ...s, inside: next && (here === null || next.startsWith(`${here} \u203a `)) ? next : here };
-  };
-  return Promise.all(topics.map(async (t) => (t.flow ? { ...t, flow: await Promise.all(t.flow.map(name)) } : t)));
-}
-
-function withoutSteps(topics: Topic[], bad: Map<FlowStep, string>): Topic[] {
-  return topics.map((t) => {
-    const flow = t.flow;
-    if (!flow?.some((s) => bad.has(s))) return t;
-    const parent = flow.map((s, i) => (s.from ? s.from - 1 : i - 1));
-    const kept = flow.map((_, i) => i).filter((i) => !bad.has(flow[i]!));
-    const at = new Map(kept.map((i, n) => [i, n]));
-    const keptParent = (i: number) => {
-      let p = parent[i]!;
-      while (p >= 0 && !at.has(p)) p = parent[p]!;
-      return p;
-    };
-    return {
-      ...t,
-      flow: kept.map((i, n) => {
-        const { from: _, ...step } = flow[i]!;
-        const p = keptParent(i);
-        return p >= 0 && at.get(p)! !== n - 1 ? { ...step, from: at.get(p)! + 1 } : step;
-      }),
-    };
-  });
-}
-
-function problems(...found: (string | null)[]): string | null {
-  return found.filter(Boolean).join(" ") || null;
+  return { title: title.trim(), summary: summary.trim(), ids };
 }
 
 function parseJson(text: string): unknown {

@@ -1,5 +1,3 @@
-import type { FlowStep } from "./types.js";
-
 export function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
@@ -31,15 +29,4 @@ export const compareText = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-export function describeStep(s: FlowStep): string {
-  const how = [
-    s.input ? `in: ${s.input}` : "",
-    s.output ? `out: ${s.output}` : "",
-    s.from ? `from ${s.from}` : "",
-    s.when ? `when ${s.when}` : "",
-    s.via ? `via ${s.via.kind}${s.via.label ? ` ${s.via.label}` : ""}` : "",
-  ].filter(Boolean);
-  return `${s.path}:${s.line} ${s.component ? `[${s.component}] ` : ""}${s.action ? `${s.action}: ` : ""}${s.text}${how.length ? ` (${how.join("; ")})` : ""}`;
 }

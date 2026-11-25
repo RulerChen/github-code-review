@@ -1,14 +1,12 @@
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { changeIds, editedInto, oldCommitOf } from "../shared/hunks";
-import type { Block, DiffRepo, FileDiff, FlowStep, Review, Thread } from "../shared/types";
-import { describeStep, plural } from "../shared/util";
+import type { Block, DiffRepo, FileDiff, Review, Thread } from "../shared/types";
+import { plural } from "../shared/util";
 import { keepHeaderInPlace } from "./anchor";
-import { addedLines } from "./CodePanel";
 import { type CommentsApi, onShownVersion, ThreadList, useComments } from "./comments";
 import { CollapseButton, CommentButton, ViewedToggle } from "./controls";
 import { hasLine } from "./DiffTable";
 import { baseHunksOf, FileCard } from "./FileCard";
-import { Flow, type FlowItem } from "./Flow";
 import { ChevronIcon } from "./icons";
 import { Markdown } from "./Markdown";
 
@@ -23,7 +21,6 @@ export interface TopicView {
   anchor: string;
   title: string;
   summary: string;
-  flow: FlowItem[];
   parts: TopicPart[];
   changeCount: number;
   edited: number;
@@ -53,13 +50,11 @@ export function buildTopics(review: Review, files: FileDiff[], repos: DiffRepo[]
       seen.add(f.path);
     });
 
-    const steps = t.flow ?? [];
     return {
       key: `topic:${t.title}`,
       anchor: `topic-${index}`,
       title: t.title,
       summary: t.summary,
-      flow: steps.map((step) => ({ step, changed: addedLines(files.find((f) => f.path === step.path)).has(step.line) })),
       parts,
       changeCount: chosen.size,
       edited: edited.length,
@@ -89,32 +84,9 @@ interface SectionProps {
   viewed: boolean;
   opening: { anchor: string } | null;
   onToggleViewed: () => void;
-  onOpenStep: (step: FlowStep) => void;
 }
 
-interface PartProps {
-  title: string;
-  className: string;
-  open: boolean;
-  onToggle: () => void;
-  children: ReactNode;
-}
-
-function TopicPart({ title, className, open, onToggle, children }: PartProps) {
-  return (
-    <div className={className}>
-      <button type="button" className="topic-part-head" aria-expanded={open} onClick={onToggle}>
-        <span className="topic-part-toggle">
-          <ChevronIcon />
-        </span>
-        {title}
-      </button>
-      <div hidden={!open}>{children}</div>
-    </div>
-  );
-}
-
-export function TopicSection({ topic, viewed, opening, onToggleViewed, onOpenStep }: SectionProps) {
+export function TopicSection({ topic, viewed, opening, onToggleViewed }: SectionProps) {
   const [collapsed, setCollapsed] = useState(viewed);
   useEffect(() => setCollapsed(viewed), [viewed]);
   const [opened, setOpened] = useState(opening);
@@ -129,7 +101,6 @@ export function TopicSection({ topic, viewed, opening, onToggleViewed, onOpenSte
   }, [revealSeq]);
   const [commenting, setCommenting] = useState(false);
   const [summaryOpen, setSummaryOpen] = useState(false);
-  const [flowOpen, setFlowOpen] = useState(false);
   const threads = threadsForTopic(topic.title);
 
   const header = useRef<HTMLElement>(null);
@@ -177,14 +148,17 @@ export function TopicSection({ topic, viewed, opening, onToggleViewed, onOpenSte
       {!collapsed && (
         <div className="topic-body">
           {topic.summary && (
-            <TopicPart title="Summary" className="topic-summary" open={summaryOpen} onToggle={() => setSummaryOpen(!summaryOpen)}>
-              <Markdown text={topic.summary} />
-            </TopicPart>
-          )}
-          {topic.flow.length > 0 && (
-            <TopicPart title="Flow" className="topic-flow" open={flowOpen} onToggle={() => setFlowOpen(!flowOpen)}>
-              <Flow flow={topic.flow} open={flowOpen} onOpen={onOpenStep} />
-            </TopicPart>
+            <div className="topic-summary">
+              <button type="button" className="topic-part-head" aria-expanded={summaryOpen} onClick={() => setSummaryOpen(!summaryOpen)}>
+                <span className="topic-part-toggle">
+                  <ChevronIcon />
+                </span>
+                Summary
+              </button>
+              <div hidden={!summaryOpen}>
+                <Markdown text={topic.summary} />
+              </div>
+            </div>
           )}
           <ThreadList
             className="topic-threads"
@@ -193,8 +167,7 @@ export function TopicSection({ topic, viewed, opening, onToggleViewed, onOpenSte
             placeholder="Comment on this topic"
             onCreate={(body, single) => {
               const anchor = { topic: topic.title, path: null, side: null, start: null, end: null, commit: null };
-              const flow = topic.flow.map(({ step }, i) => `${i + 1}. ${describeStep(step)}`).join("\n");
-              const snippet = [`Files: ${files.join(", ")}`, topic.summary, flow && `Flow:\n${flow}`].filter(Boolean).join("\n\n");
+              const snippet = [`Files: ${files.join(", ")}`, topic.summary].filter(Boolean).join("\n\n");
               return create(anchor, snippet, body, single);
             }}
             onClose={() => setCommenting(false)}
