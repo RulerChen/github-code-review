@@ -1,5 +1,6 @@
 import { createReadStream } from "node:fs";
 import { lstat } from "node:fs/promises";
+import { availableParallelism } from "node:os";
 import path from "node:path";
 import type { Readable } from "node:stream";
 import { plainOf, wordPattern, wordRegExp } from "../shared/search.js";
@@ -7,9 +8,10 @@ import type { DiffRepo, DiffResult, RepoFile, RepoHit } from "../shared/types.js
 import { compareText } from "../shared/util.js";
 import { ABSENT, classify, type Content, MAX_CONTENT_BYTES, mapLimit, readWorkTree, REPO_LIMIT } from "./diff.js";
 import { git, gitLines, gitStream } from "./git.js";
-import { GENERIC, insideOf, LANGUAGES, languageOf, rolesOf, type Scoped, scopeOf } from "../shared/scope.js";
+import { fromPosix, GENERIC, insideOf, type Language, LANGUAGES, languageOf, rolesOf, type Scoped, scopeOf } from "../shared/scope.js";
 
 const MAX_HIT_CHARS = 400;
+const GREP_LIMIT = availableParallelism();
 const LEAD_CHARS = 100;
 const NOT_GENERATED = ":(exclude,attr:linguist-generated=true)";
 const IDENTIFIER = /^[\p{L}_$][\p{L}\p{N}_$]{0,199}$/u;
@@ -93,17 +95,41 @@ async function readBlobAt(root: string, rev: string, rest: string): Promise<Cont
   return classify(await git(root, ["cat-file", "blob", blob.oid]));
 }
 
-export async function grepRepo(diff: DiffResult, query: string, whole: boolean, matchCase: boolean, signal: AbortSignal): Promise<Found> {
+export async function grepRepo(diff: DiffResult, query: string, whole: boolean, matchCase: boolean, signal: AbortSignal, withDefs = true): Promise<Searched> {
   const found = wordRegExp(query, whole, matchCase);
   const pattern = wordPattern(query, whole, matchCase);
   const same = matchCase ? pattern : pattern.toLowerCase();
-  const match = [...plainOf(query, matchCase).filter((p) => p !== same).flatMap((p) => ["-e", p, "--and"]), "-e", pattern];
+  const defining = withDefs && isIdentifier(query) ? definer(query, matchCase) : null;
+  const plain = plainOf(query, matchCase).filter((p) => defining || p !== same);
+  const either = defining ? ["(", "-e", pattern, ...defining.patterns.flatMap((p) => ["-e", p]), ")"] : ["-e", pattern];
   const changed = new Set(diff.files.map((f) => f.path));
   const busy = searchable(diff).filter((r) => r.dir !== "" && diff.files.some((f) => f.path.startsWith(`${r.dir}/`)));
   const far = (p: string) => (changed.has(p) ? 0 : busy.length === 0 || busy.some((r) => p.startsWith(`${r.dir}/`)) ? 1 : 2);
-  const lines = await grepLines(diff, searchable(diff), ["-E", ...ignoreCase(matchCase), ...match], ["."], signal, (text) => found?.exec(text)?.index ?? -1, far);
-  if (!signal.aborted) await describe(diff, lines.hits, found);
-  return lines;
+  const hits: RepoHit[] = [];
+  const defs: RepoHit[] = [];
+  const match = ["-E", ...ignoreCase(matchCase), ...plain.flatMap((p) => ["-e", p, "--and"]), ...either];
+  await grepLines(diff, searchable(diff), match, ["."], signal, (filePath, no, text) => {
+    const at = found?.exec(text)?.index ?? -1;
+    const defined = defining?.test(filePath, text) ?? false;
+    if (at >= 0 || !defined) hits.push(hitOf(filePath, no, text, at));
+    if (defined) defs.push(hitOf(filePath, no, text, defining!.at(text)));
+  });
+  hits.sort(byPlace(far));
+  defs.sort(byPlace((p) => (changed.has(p) ? 0 : 1)));
+  if (!signal.aborted) await describe(diff, hits, found);
+  return { hits, defs };
+}
+
+function definer(name: string, matchCase: boolean) {
+  const spelled = wordPattern(name, false, matchCase);
+  const word = wordRegExp(name, true, matchCase);
+  const sources = (l: Language) => [...l.patterns(spelled), ...l.values(spelled)];
+  const tests = new Map([...LANGUAGES, GENERIC].map((l) => [l, sources(l).map((s) => new RegExp(fromPosix(s), matchCase ? "" : "i"))]));
+  return {
+    patterns: [...new Set([...LANGUAGES, GENERIC].flatMap(sources))],
+    test: (filePath: string, text: string) => tests.get(languageOf(filePath))!.some((r) => r.test(text)),
+    at: (text: string) => word?.exec(text)?.index ?? -1,
+  };
 }
 
 async function describe(diff: DiffResult, hits: RepoHit[], found: RegExp | null): Promise<void> {
@@ -167,6 +193,10 @@ async function readTexts(diff: DiffResult, paths: string[]): Promise<Map<string,
 }
 
 type Found = { hits: RepoHit[] };
+type Searched = Found & { defs: RepoHit[] };
+
+const byPlace = (far: (filePath: string) => number) => (a: RepoHit, b: RepoHit) =>
+  far(a.path) - far(b.path) || compareText(a.path, b.path) || a.no - b.no;
 
 const searchable = (diff: DiffResult) => diff.repos.filter((r) => r.error === null);
 
@@ -210,11 +240,13 @@ export async function findDefinitions(diff: DiffResult, name: string, from: stri
   const own = repoOf(diff, from)?.repo;
   const all = searchable(diff);
   const lookUp = (patterns: string[]) =>
-    nearestFirst(own ? [[own], all.filter((r) => r !== own)] : [all], (repos) =>
-      grepLines(diff, repos, defines([escaped], patterns), pathspecs, signal, (line) => line.indexOf(name)),
-    );
+    nearestFirst(own ? [[own], all.filter((r) => r !== own)] : [all], async (repos) => {
+      const hits: RepoHit[] = [];
+      await grepLines(diff, repos, defines([escaped], patterns), pathspecs, signal, (filePath, no, text) => void hits.push(hitOf(filePath, no, text, text.indexOf(name))));
+      return { hits: hits.sort(byPlace(() => 0)) };
+    });
   const fields = async (): Promise<Found> => {
-    const lines = await grepRepo(diff, name, true, true, signal);
+    const lines = await grepRepo(diff, name, true, true, signal, false);
     return { hits: lines.hits.filter((h) => h.role === "field") };
   };
   const methods = () => lookUp(language.patterns(escaped));
@@ -260,37 +292,21 @@ function inModule(hits: RepoHit[], module: string, from: string): RepoHit[] {
   return [];
 }
 
-export async function findDefinitionsAnywhere(diff: DiffResult, name: string, matchCase: boolean, signal: AbortSignal): Promise<Found> {
-  const spelled = wordPattern(name, false, matchCase);
-  const word = wordRegExp(name, true, matchCase);
-  const plain = plainOf(name, matchCase);
-  const changed = new Set(diff.files.map((f) => f.path));
-  const far = (p: string) => (changed.has(p) ? 0 : 1);
-  const find = (patterns: string[], pathspecs: string[]) =>
-    grepLines(diff, searchable(diff), [...ignoreCase(matchCase), ...defines(plain, patterns)], pathspecs, signal, (text) => word?.exec(text)?.index ?? -1, far);
-  const found = await Promise.all([
-    ...LANGUAGES.map((l) => find([...l.patterns(spelled), ...l.values(spelled)], l.exts.map((e) => `*.${e}`))),
-    find(GENERIC.patterns(spelled), [".", ...LANGUAGES.flatMap((l) => l.exts).map((e) => `:(exclude)*.${e}`)]),
-  ]);
-  return { hits: found.flatMap((f) => f.hits).sort((a, b) => far(a.path) - far(b.path) || compareText(a.path, b.path) || a.no - b.no) };
-}
-
 async function grepLines(
   diff: DiffResult,
   repos: DiffRepo[],
   match: string[],
   pathspecs: string[],
   signal: AbortSignal,
-  atOf: (text: string) => number,
-  far: (filePath: string) => number = () => 0,
-): Promise<Found> {
-  const parts = await mapLimit(repos, REPO_LIMIT, async (repo) => {
+  onLine: (filePath: string, no: number, text: string) => void,
+): Promise<void> {
+  await mapLimit(repos, GREP_LIMIT, async (repo) => {
     const prefix = repo.dir ? `${repo.dir}/` : "";
     const rev = repo.headCommit;
     const strip = rev ? `${rev}:` : "";
-    const where = rev ? [rev] : ["--untracked"];
+    const added = diff.files.some((f) => f.status === "added" && f.path.startsWith(prefix));
+    const where = rev ? [rev] : added ? ["--untracked"] : [];
     const args = ["grep", "--no-color", "-n", "-z", "-I", ...match, ...where, "--", ...pathspecs, NOT_GENERATED];
-    const hits: RepoHit[] = [];
     await gitLines(
       path.join(diff.repoRoot, repo.dir),
       args,
@@ -299,17 +315,13 @@ async function grepLines(
         const b = line.indexOf("\0", a + 1);
         if (a < 0 || b < 0) return true;
         const file = line.slice(0, a);
-        const text = line.slice(b + 1);
-        hits.push(hitOf(prefix + (file.startsWith(strip) ? file.slice(strip.length) : file), Number(line.slice(a + 1, b)), text, atOf(text)));
+        onLine(prefix + (file.startsWith(strip) ? file.slice(strip.length) : file), Number(line.slice(a + 1, b)), line.slice(b + 1));
         return true;
       },
       [0, 1],
       signal,
     );
-    return hits;
   });
-
-  return { hits: parts.flat().sort((a, b) => far(a.path) - far(b.path) || compareText(a.path, b.path) || a.no - b.no) };
 }
 
 function hitOf(filePath: string, no: number, text: string, at: number): RepoHit {

@@ -6,8 +6,8 @@ import type {
   Grouping,
   RefList,
   RepoFile,
-  RepoHits,
   Review,
+  SearchHits,
   Thread,
   ThreadAnchor,
   ThreadContext,
@@ -105,12 +105,21 @@ export async function fetchTree(viewId: string, compare: Comparison | null, vers
   return (await request<{ paths: string[] }>(`${viewUrl(viewId, "tree")}?${params}`, (b) => Array.isArray(b.paths))).paths;
 }
 
-export function searchRepo(viewId: string, compare: Comparison | null, query: string, whole: boolean, matchCase: boolean, signal: AbortSignal): Promise<RepoHits> {
+export function searchRepo(
+  viewId: string,
+  compare: Comparison | null,
+  version: string,
+  query: string,
+  whole: boolean,
+  matchCase: boolean,
+  signal: AbortSignal,
+): Promise<SearchHits> {
   const params = new URLSearchParams(compare ? comparisonQuery(compare) : "");
+  params.set("version", version);
   params.set("q", query);
   if (!whole) params.set("word", "0");
   if (!matchCase) params.set("case", "0");
-  return request<RepoHits>(`${viewUrl(viewId, "grep")}?${params}`, (b) => Array.isArray(b.hits), "GET", undefined, signal);
+  return request<SearchHits>(`${viewUrl(viewId, "grep")}?${params}`, (b) => Array.isArray(b.hits) && Array.isArray(b.defs), "GET", undefined, signal);
 }
 
 export interface ClickedAt {
@@ -120,8 +129,9 @@ export interface ClickedAt {
   panel: boolean;
 }
 
-export function fetchDefinitions(viewId: string, compare: Comparison | null, name: string, from: ClickedAt): Promise<Definitions> {
+export function fetchDefinitions(viewId: string, compare: Comparison | null, version: string, name: string, from: ClickedAt): Promise<Definitions> {
   const params = new URLSearchParams(compare ? comparisonQuery(compare) : "");
+  params.set("version", version);
   params.set("name", name);
   params.set("path", from.path);
   if (from.line !== null) {
@@ -129,13 +139,6 @@ export function fetchDefinitions(viewId: string, compare: Comparison | null, nam
     params.set("col", String(from.col));
   }
   return request<Definitions>(`${viewUrl(viewId, "defs")}?${params}`, (b) => Array.isArray(b.hits));
-}
-
-export function searchDefinitions(viewId: string, compare: Comparison | null, name: string, matchCase: boolean, signal: AbortSignal): Promise<RepoHits> {
-  const params = new URLSearchParams(compare ? comparisonQuery(compare) : "");
-  params.set("name", name);
-  if (!matchCase) params.set("case", "0");
-  return request<RepoHits>(`${viewUrl(viewId, "defs")}?${params}`, (b) => Array.isArray(b.hits), "GET", undefined, signal);
 }
 
 export async function fetchVersion(viewId: string, compare: Comparison | null): Promise<string> {

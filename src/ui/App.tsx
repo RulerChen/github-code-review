@@ -2,7 +2,7 @@ import { type ReactNode, useCallback, useDeferredValue, useEffect, useLayoutEffe
 import { contextOf } from "../shared/comments";
 import { comparisonFromQuery, comparisonQuery, isFor, repoFailures, sameComparison } from "../shared/comparison";
 import { changeIds, splitLines } from "../shared/hunks";
-import type { CommitInfo, Comparison, DiffResult, FileDiff, Grouping, RepoHits, Review, SessionStatus, Thread, ThreadAnchor, ViewData } from "../shared/types";
+import type { CommitInfo, Comparison, DiffResult, FileDiff, Grouping, Review, SearchHits, SessionStatus, Thread, ThreadAnchor, ViewData } from "../shared/types";
 import { errorMessage } from "../shared/util";
 import { followActiveFile } from "./active";
 import { scrollToTop, startAnchoring } from "./anchor";
@@ -23,7 +23,6 @@ import {
   groupTopics,
   rawFileUrl,
   replyToThread,
-  searchDefinitions,
   searchRepo,
   submitReview,
   type TopicRequest,
@@ -85,7 +84,7 @@ const commitComparison = (c: CommitInfo): Comparison => ({ base: c.parents[0]!, 
 
 interface RepoSearch {
   query: string;
-  result: RepoHits | null;
+  result: SearchHits | null;
   error: string | null;
 }
 
@@ -109,7 +108,6 @@ export function App({ viewId }: Props) {
   const [wholeWord, setWholeWord] = useState(true);
   const [matchCase, setMatchCase] = useState(true);
   const [repoSearch, setRepoSearch] = useState<RepoSearch | null>(null);
-  const [defined, setDefined] = useState<{ key: string; result: RepoHits } | null>(null);
   const [code, setCode] = useState<Peek[]>(savedCode);
   const [codeFile, setCodeFile] = useState<Peek | null>(null);
   const codeNow = useRef(code);
@@ -290,14 +288,14 @@ export function App({ viewId }: Props) {
         setLookup((l) => (l && seq === lookupSeq.current ? update(l) : l));
       const fail = (e: unknown) => current((l) => ({ ...l, error: errorMessage(e) }));
       const findLines = () =>
-        searchRepo(viewId, requested.current, text, true, true, new AbortController().signal).then(
+        searchRepo(viewId, requested.current, version.current ?? "", text, true, true, new AbortController().signal).then(
           (r) => current((l) => ({ ...l, hits: rankDefinitions(r.hits, from.path), lines: true })),
           fail,
         );
 
       setLookup({ name: text, from, byName: false, x, y, hits: null, lines: false, error: null });
       if (!isName(text)) return void findLines();
-      fetchDefinitions(viewId, requested.current, text, from).then((r) => {
+      fetchDefinitions(viewId, requested.current, version.current ?? "", text, from).then((r) => {
         if (seq !== lookupSeq.current) return;
         if (r.declared) {
           closeLookup();
@@ -525,7 +523,7 @@ export function App({ viewId }: Props) {
     if (!repoQuery || !viewId || loadedVersion === null) return;
     const aborted = new AbortController();
     const timer = window.setTimeout(() => {
-      searchRepo(viewId, requested.current, repoQuery, wholeWord, matchCase, aborted.signal).then(
+      searchRepo(viewId, requested.current, loadedVersion, repoQuery, wholeWord, matchCase, aborted.signal).then(
         (result) => setRepoSearch({ query: repoKey, result, error: null }),
         (e: unknown) => !aborted.signal.aborted && setRepoSearch({ query: repoKey, result: null, error: errorMessage(e) }),
       );
@@ -540,36 +538,20 @@ export function App({ viewId }: Props) {
   const repoStale = repoSearch?.query === repoKey && repoSearch.result !== null && repoSearch.result.version !== loadedVersion;
 
   const searchedName = isName(searched.trim()) ? searched.trim() : "";
-  const definedKey = `${matchCase}\0${searchedName}`;
-  useEffect(() => {
-    if (!searchedName || !viewId || loadedVersion === null) return;
-    const aborted = new AbortController();
-    const timer = window.setTimeout(() => {
-      searchDefinitions(viewId, requested.current, searchedName, matchCase, aborted.signal).then(
-        (result) => setDefined({ key: definedKey, result }),
-        () => {},
-      );
-    }, REPO_SEARCH_MS);
-    return () => {
-      clearTimeout(timer);
-      aborted.abort();
-    };
-  }, [definedKey, viewId, loadedVersion]);
 
   const repoFiles = diff?.files;
   const definitions = useMemo(() => {
-    const result = searchedName && defined?.key === definedKey && defined.result.version === loadedVersion ? defined.result : null;
-    const fields = (repoResult?.hits ?? []).filter((f) => f.role === "field" && !result?.hits.some((h) => h.path === f.path && h.no === f.no));
-    const hits = [...(result?.hits ?? []), ...fields];
+    const defs = searchedName ? (repoResult?.defs ?? []) : [];
+    const fields = (repoResult?.hits ?? []).filter((f) => f.role === "field" && !defs.some((h) => h.path === f.path && h.no === f.no));
+    const hits = [...defs, ...fields];
     return hits.length ? definitionsFound(hits, repoFiles ?? [], searched.trim(), matchCase) : null;
-  }, [defined, searched, searchedName, definedKey, loadedVersion, repoFiles, repoResult, matchCase]);
+  }, [searched, searchedName, repoFiles, repoResult, matchCase]);
   const changesFound = useMemo(() => searchChanges(shown.map((e) => e.file), searched, wholeWord, matchCase), [shown, searched, wholeWord, matchCase]);
   const sections = useMemo(
     () => searchSections(changesFound, repoResult, repoFiles ?? [], repoQuery, wholeWord, matchCase, definitions),
     [changesFound, repoResult, repoFiles, repoQuery, wholeWord, matchCase, definitions],
   );
-  const definedSettled = defined?.key === definedKey && defined.result.version === loadedVersion;
-  const foldReferences = definitions !== null || (searchedName !== "" && !repoError && !(definedSettled && repoResult));
+  const foldReferences = definitions !== null || (searchedName !== "" && !repoError && !repoResult);
   let searchNote: string | null = null;
   if (repoError) searchNote = `Could not search the repository: ${repoError}`;
   else if (repoStale) searchNote = "The files changed. Load the new changes to search the repository.";

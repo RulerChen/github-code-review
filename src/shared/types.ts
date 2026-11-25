@@ -181,6 +181,10 @@ export interface RepoHits {
   hits: RepoHit[];
 }
 
+export interface SearchHits extends RepoHits {
+  defs: RepoHit[];
+}
+
 export interface Definitions extends RepoHits {
   declared: boolean;
   member: boolean;

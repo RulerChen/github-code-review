@@ -219,7 +219,7 @@ export function languageOf(filePath: string): Language {
   return LANGUAGES.find((l) => l.exts.includes(ext)) ?? GENERIC;
 }
 
-const fromPosix = (pattern: string) => pattern.replaceAll("[:space:]", "\\s").replaceAll("[:alnum:]", "A-Za-z0-9");
+export const fromPosix = (pattern: string) => pattern.replaceAll("[:space:]", "\\s").replaceAll("[:alnum:]", "A-Za-z0-9");
 
 const finder = (sources: string[]) => {
   const all = sources.map((s) => new RegExp(s, "d"));

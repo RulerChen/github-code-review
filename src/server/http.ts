@@ -6,7 +6,7 @@ import path from "node:path";
 import { pipeline } from "node:stream/promises";
 import { promisify } from "node:util";
 import { gzip } from "node:zlib";
-import { findDefinitions, findDefinitionsAnywhere, grepRepo, isIdentifier, listRepoFiles, openRepoFile, readRepoFile } from "../engine/browse.js";
+import { findDefinitions, grepRepo, isIdentifier, listRepoFiles, openRepoFile, readRepoFile } from "../engine/browse.js";
 import { computeDiff, listRefs, probeDiff } from "../engine/diff.js";
 import { comparisonFromQuery, comparisonQuery, isFor } from "../shared/comparison.js";
 import type { Comparison, DiffResult, FileDiff, Grouping, Review, Thread, ThreadAnchor, ThreadContext, Topic, ViewData } from "../shared/types.js";
@@ -180,15 +180,20 @@ export class ReviewServer {
   }
 
   keepDiff(repo: string, compare: Comparison, loaded: LoadedDiff): void {
-    const key = `${repo}\0${comparisonQuery(compare)}`;
+    const key = diffKey(repo, compare);
     const lineChars = (f: FileDiff) => (f.diffTooLarge ? sum(f.blocks, (b) => sum(b.del, (l) => l.length) + sum(b.add, (l) => l.length)) : 0);
     const chars = sum(loaded.diff.files, (f) => (f.oldContent?.length ?? 0) + (f.newContent?.length ?? 0) + lineChars(f));
     this.diffs = [{ ...loaded, key, chars }, ...this.diffs.filter((d) => d.key !== key)].slice(0, MAX_CACHED_DIFFS);
     while (this.diffs.length && sum(this.diffs, (d) => d.chars) > MAX_CACHED_CHARS) this.diffs.pop();
   }
 
+  private async diffAt(repo: string, compare: Comparison, version: string | null): Promise<LoadedDiff> {
+    const key = diffKey(repo, compare);
+    return this.diffs.find((d) => d.key === key && d.version === version) ?? this.loadDiff(repo, compare);
+  }
+
   private async loadDiff(repo: string, compare: Comparison): Promise<LoadedDiff> {
-    const key = `${repo}\0${comparisonQuery(compare)}`;
+    const key = diffKey(repo, compare);
     const probe = await probeDiff(repo, compare);
     const cached = this.diffs.find((d) => d.key === key && d.version === probe.version);
     if (cached) return cached;
@@ -406,18 +411,17 @@ export class ReviewServer {
       case "GET grep": {
         const q = (query.get("q") ?? "").trim();
         if (!isText(q, MAX_QUERY, true) || /[\0\n\r]/.test(q)) return sendJson(res, 400, { error: "Invalid search" });
-        const { version, diff } = await this.loadDiff(view.repo, compare);
+        const { version, diff } = await this.diffAt(view.repo, compare, query.get("version"));
         return sendFound(res, version, (signal) => grepRepo(diff, q, query.get("word") !== "0", query.get("case") !== "0", signal));
       }
       case "GET defs": {
         const name = query.get("name") ?? "";
         const from = query.get("path");
-        if (!isIdentifier(name) || (from?.length ?? 0) > MAX_PATH) return sendJson(res, 400, { error: "Invalid name" });
+        if (!isIdentifier(name) || from === null || from.length > MAX_PATH) return sendJson(res, 400, { error: "Invalid name" });
         const line = Number(query.get("line"));
         const col = Number(query.get("col"));
         const click = Number.isInteger(line) && line > 0 && Number.isInteger(col) && col >= 0 ? { line, col } : null;
-        const { version, diff } = await this.loadDiff(view.repo, compare);
-        if (from === null) return sendFound(res, version, (signal) => findDefinitionsAnywhere(diff, name, query.get("case") !== "0", signal));
+        const { version, diff } = await this.diffAt(view.repo, compare, query.get("version"));
         return sendFound(res, version, (signal) => findDefinitions(diff, name, from, click, signal));
       }
       case "GET version":
@@ -631,6 +635,8 @@ function isComparison(c: unknown): c is Comparison {
 function isRange(r: unknown): r is Record<string, unknown> {
   return isRecord(r) && isText(r.base, MAX_REF, true) && (r.head === null || isText(r.head, MAX_REF, true)) && typeof r.threeDot === "boolean";
 }
+
+const diffKey = (repo: string, compare: Comparison) => `${repo}\0${comparisonQuery(compare)}`;
 
 async function sendFound(res: ServerResponse, version: string, find: (signal: AbortSignal) => Promise<object>): Promise<void> {
   const gone = new AbortController();
