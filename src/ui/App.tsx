@@ -818,7 +818,7 @@ export function App({ viewId }: Props) {
                   />
                   <KeyboardButton onClick={() => setHelp(true)} />
                   <ThemeToggle />
-                  <ClaudeStatus state={claude} since={status?.workingSince ?? null} />
+                  <ClaudeStatus state={claude} />
                 </header>
 
                 {error && <div className="banner">{error.message}</div>}

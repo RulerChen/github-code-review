@@ -1995,31 +1995,12 @@ body.is-resizing .file {
   scroll-margin-top: calc(44px + 8px);
 }
 
-.review-menu {
-  position: relative;
-}
-
-.review-menu > .button {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  min-width: 104px;
-}
-
-.review-popover {
-  position: absolute;
-  top: calc(100% + 4px);
-  right: 0;
-  z-index: 30;
-  width: 420px;
-  max-width: calc(100vw - 32px);
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: var(--bg);
-  box-shadow: var(--overlay-shadow);
-  transform-origin: top right;
+.status-light {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 28px;
+  height: 28px;
 }
 
 .status-dot {
@@ -2053,36 +2034,6 @@ body.is-resizing .file {
   .is-working > .status-dot {
     animation: none;
   }
-}
-
-.status-popover {
-  width: 360px;
-}
-
-.review-sent {
-  margin: 0;
-  padding: 12px;
-}
-
-.review-sent p {
-  margin: 0;
-}
-
-.review-sent p + p {
-  margin-top: 8px;
-}
-
-.review-ask {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.review-ask code {
-  padding: 3px 8px;
-  border: 1px solid var(--border-muted);
-  border-radius: 6px;
-  background: var(--bg-subtle);
 }
 
 .comment-error {
@@ -2484,16 +2435,14 @@ body.is-resizing .file {
   position: fixed;
 }
 
-.picker-menu,
-.review-popover {
+.picker-menu {
   transition:
     opacity 150ms var(--ease-out),
     transform 150ms var(--ease-out);
 }
 
 @starting-style {
-  .picker-menu,
-  .review-popover {
+  .picker-menu {
     opacity: 0;
     transform: scale(0.96);
   }
@@ -2515,8 +2464,7 @@ body.is-resizing .file {
 
 @media (prefers-reduced-motion: reduce) {
   @starting-style {
-    .picker-menu,
-    .review-popover {
+    .picker-menu {
       transform: none;
     }
   }
