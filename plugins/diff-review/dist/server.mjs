@@ -39471,7 +39471,8 @@ async function runMcp() {
 
 ${text}
 
-When you have addressed it, reply on each thread with reply_to_review. Then wait for the next review by running this in the background: ${server.waitCommand(view)}`
+When you have addressed it, reply on each thread with reply_to_review, and run this wait command in the background in the same message as your last other tool call: ${server.waitCommand(view)}
+Then your whole reply is this URL, alone, with no other text: ${server.url(view)}`
         ];
       });
       if (!all.length) {
