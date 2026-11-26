@@ -336,6 +336,14 @@ export function ThreadList({ className, threads, commenting, placeholder, onCrea
   );
 }
 
+const arrivals = new Set<string>();
+
+export function noteArrivals(before: Thread | undefined, after: Thread): void {
+  if (!before) return;
+  const seen = new Set(before.comments.map((c) => c.id));
+  for (const c of after.comments) if (c.author === "claude" && !seen.has(c.id)) arrivals.add(c.id);
+}
+
 function flash(el: HTMLElement): void {
   el.classList.remove("is-flash");
   void el.offsetWidth;
@@ -497,9 +505,14 @@ interface CommentViewProps {
 
 const CommentView = memo(function CommentView({ thread, comment: c, first, notRead, answering, editing, setEditing }: CommentViewProps) {
   const { edit } = useCommentActions();
+  const [arrived, setArrived] = useState(() => arrivals.has(c.id));
+  useEffect(() => void arrivals.delete(c.id), [c.id]);
 
   return (
-    <div className={`comment comment-${c.author}${first ? " is-first" : ""}`}>
+    <div
+      className={`comment comment-${c.author}${first ? " is-first" : ""}${arrived ? " is-arrived" : ""}`}
+      onAnimationEnd={(e) => e.animationName === "comment-mark" && setArrived(false)}
+    >
       {!first && (
         <div className="comment-head">
           <span className="comment-author">{authorName(c)}</span>

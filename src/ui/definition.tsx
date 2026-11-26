@@ -82,8 +82,11 @@ export function DefinitionMenu({ lookup, onPick, onSearch, onClose }: Props) {
     const m = ref.current;
     if (!m) return;
     const below = lookup.y + 12;
-    m.style.left = `${Math.max(16, Math.min(lookup.x, innerWidth - 16 - m.offsetWidth))}px`;
-    m.style.top = `${below + m.offsetHeight <= innerHeight - 16 ? below : Math.max(16, lookup.y - 12 - m.offsetHeight)}px`;
+    const left = Math.max(16, Math.min(lookup.x, innerWidth - 16 - m.offsetWidth));
+    const fits = below + m.offsetHeight <= innerHeight - 16;
+    m.style.left = `${left}px`;
+    m.style.top = `${fits ? below : Math.max(16, lookup.y - 12 - m.offsetHeight)}px`;
+    m.style.transformOrigin = `${lookup.x - left}px ${fits ? "0" : "100%"}`;
   });
 
   const { name, hits, lines, error } = lookup;

@@ -125,6 +125,7 @@ button {
   display: flex;
   gap: 8px;
   color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 
@@ -176,6 +177,24 @@ button {
   border-radius: 6px;
   background: var(--del-line);
   box-shadow: 0 8px 24px rgb(1 4 9 / 0.15);
+  transition:
+    opacity 150ms var(--ease-out),
+    transform 150ms var(--ease-out);
+}
+
+@starting-style {
+  .banner {
+    opacity: 0;
+    transform: translate(-50%, -4px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  @starting-style {
+    .banner {
+      transform: translateX(-50%);
+    }
+  }
 }
 
 .layout {
@@ -455,7 +474,7 @@ body.is-resizing .file {
   width: 12px;
   height: 12px;
   fill: currentColor;
-  transition: transform 0.15s ease-out;
+  transition: transform 150ms var(--ease-out);
 }
 
 [aria-expanded="false"] > .tree-dir .tree-toggle svg {
@@ -587,7 +606,7 @@ body.is-resizing .file {
   width: 12px;
   height: 12px;
   fill: currentColor;
-  transition: transform 0.15s ease-out;
+  transition: transform 150ms var(--ease-out);
 }
 
 [aria-expanded="false"] > .search-toggle svg,
@@ -730,6 +749,29 @@ body.is-resizing .file {
   fill: currentColor;
 }
 
+.icon-button.is-copied svg {
+  transition:
+    opacity 150ms var(--ease-out),
+    transform 150ms var(--ease-out),
+    filter 150ms var(--ease-out);
+}
+
+@starting-style {
+  .icon-button.is-copied svg {
+    opacity: 0;
+    transform: scale(0.8);
+    filter: blur(2px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  @starting-style {
+    .icon-button.is-copied svg {
+      transform: none;
+    }
+  }
+}
+
 .refresh-button {
   display: none;
   gap: 6px;
@@ -795,7 +837,7 @@ body.is-resizing .file {
 }
 
 .chevron svg {
-  transition: transform 0.15s ease-out;
+  transition: transform 150ms var(--ease-out);
 }
 
 .chevron[aria-expanded="false"] svg {
@@ -1620,6 +1662,37 @@ body.is-resizing .file {
   border-top: 1px solid var(--border-muted);
 }
 
+.comment.is-arrived {
+  position: relative;
+  animation: comment-in 200ms var(--ease-out);
+}
+
+.comment.is-arrived::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 2px;
+  background: var(--accent);
+  opacity: 0;
+  pointer-events: none;
+  animation: comment-mark 1200ms ease 600ms backwards;
+}
+
+@keyframes comment-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+@keyframes comment-mark {
+  from {
+    opacity: 1;
+  }
+}
+
 .comment.is-first {
   padding-top: 0;
 }
@@ -1711,6 +1784,7 @@ body.is-resizing .file {
   color: var(--primary-fg);
   font-size: 11px;
   font-weight: 600;
+  font-variant-numeric: tabular-nums;
   line-height: 18px;
 }
 
@@ -1810,6 +1884,21 @@ body.is-resizing .file {
   font-size: 11px;
   font-weight: 500;
   line-height: 18px;
+}
+
+.answering-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.answering-label::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: status-pulse 1.6s var(--ease-in-out) infinite;
 }
 
 .thread-outdated {
@@ -2225,14 +2314,20 @@ body.is-resizing .file {
 @media (prefers-reduced-motion: reduce) {
   .chevron svg,
   .tree-toggle svg,
+  .search-toggle svg,
+  .topic-part-toggle svg,
   .thread-fold svg,
   .thread.is-moving > .thread-body,
   .thread.is-moving .thread-body-inner,
   .segmented-indicator[data-ready] {
     transition: none;
   }
-  .thread-preview {
+  .thread-preview,
+  .answering-label::before {
     animation: none;
+  }
+  .comment.is-arrived {
+    animation-name: view-in;
   }
   .loading-bar.is-active::before {
     width: 100%;
@@ -2583,6 +2678,7 @@ body.is-resizing .file {
   border-radius: 2em;
   background: var(--border-muted);
   font-size: 12px;
+  font-variant-numeric: tabular-nums;
   font-weight: 500;
   line-height: 18px;
   text-align: center;

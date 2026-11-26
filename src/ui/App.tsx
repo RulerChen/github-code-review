@@ -29,7 +29,7 @@ import {
 } from "./api";
 import { CodePanel, type Peek } from "./CodePanel";
 import { type DefinitionLookup, DefinitionMenu, type FindDefinition, FindDefinitionContext, isName, rankDefinitions } from "./definition";
-import { type CommentActions, CommentActionsContext, type CommentsApi, CommentsContext, onShownVersion } from "./comments";
+import { type CommentActions, CommentActionsContext, type CommentsApi, CommentsContext, noteArrivals, onShownVersion } from "./comments";
 import { CommitBar, CommitList, CompareControls, refLabel, RepoComparisons } from "./Compare";
 import { ConversationsButton, ConversationsPanel, type Place, useConversations } from "./Conversations";
 import { hasLine } from "./DiffTable";
@@ -355,7 +355,12 @@ export function App({ viewId }: Props) {
     const events = new EventSource(viewUrl(viewId, "events"));
     const on = <T,>(name: string, fn: (data: T) => void) =>
       events.addEventListener(name, (e) => fn(JSON.parse((e as MessageEvent<string>).data) as T));
-    on<Thread>("thread", (thread) => setThreads((prev) => mergeThreads(prev, [thread])));
+    on<Thread>("thread", (thread) =>
+      setThreads((prev) => {
+        noteArrivals(prev.find((t) => t.id === thread.id), thread);
+        return mergeThreads(prev, [thread]);
+      }),
+    );
     on<SessionStatus>("status", setStatus);
     events.addEventListener("open", () => setConnected(true));
     events.addEventListener("error", () => setConnected(false));
