@@ -81,16 +81,15 @@ export function ClaudeStatus({ state, since }: { state: Claude; since: string | 
   const label = LABELS[state];
 
   return (
-    <div className="review-menu status-menu" ref={ref}>
-      <button className={`button status-button is-${state}`} aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+    <div className="review-menu" ref={ref}>
+      <button
+        className={`icon-button is-${state}`}
+        aria-label={label}
+        title={label}
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+      >
         <span className="status-dot" aria-hidden="true" />
-        <span className="status-label">
-          {(Object.keys(LABELS) as Claude[]).map((s) => (
-            <span key={s} className={s === state ? undefined : "is-hidden"}>
-              {LABELS[s]}
-            </span>
-          ))}
-        </span>
       </button>
       {open && (
         <div className="review-popover status-popover" role="dialog" aria-label={label}>

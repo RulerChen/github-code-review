@@ -2027,7 +2027,7 @@ body.is-resizing .file {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: var(--bar-neutral);
+  background: var(--fg-muted);
 }
 
 .is-waiting > .status-dot {
@@ -2053,31 +2053,6 @@ body.is-resizing .file {
   .is-working > .status-dot {
     animation: none;
   }
-}
-
-.status-menu > .status-button {
-  min-width: 0;
-  color: var(--fg-muted);
-  font-weight: 400;
-  white-space: nowrap;
-}
-
-.status-label {
-  display: inline-grid;
-  text-align: left;
-}
-
-.status-label > * {
-  grid-area: 1 / 1;
-}
-
-.status-label > .is-hidden {
-  visibility: hidden;
-}
-
-.status-menu > .status-button.is-gone {
-  border-color: var(--danger);
-  color: var(--danger);
 }
 
 .status-popover {
