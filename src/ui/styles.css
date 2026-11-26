@@ -1815,7 +1815,8 @@ body.is-resizing .file {
   line-height: 18px;
 }
 
-.outdated-label {
+.outdated-label,
+.answering-label {
   flex: none;
   padding: 0 7px;
   border: 1px solid var(--border);

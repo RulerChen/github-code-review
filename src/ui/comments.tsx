@@ -24,6 +24,7 @@ export interface CommentsApi {
   isFolded: (threadId: string, byDefault: boolean) => boolean;
   setFolded: (threadId: string, folded: boolean, byDefault: boolean) => void;
   read: number;
+  active: boolean;
   revealSeq: number;
   peekReveal: () => Thread | null;
   takeReveal: (threadId: string) => boolean;
@@ -45,6 +46,14 @@ function NotRead() {
   return (
     <span className="unread-label" title="Claude hasn't read this comment yet.">
       Not read yet
+    </span>
+  );
+}
+
+function Answering() {
+  return (
+    <span className="answering-label" title="Claude has read this comment and is answering it.">
+      Answering
     </span>
   );
 }
@@ -340,8 +349,10 @@ function flash(el: HTMLElement): void {
 }
 
 export function ThreadView({ thread, withVersion = false }: { thread: Thread; withVersion?: boolean }) {
-  const { reply, unread, markRead, revealSeq, peekReveal, takeReveal, isFolded, setFolded, read } = useComments();
+  const { reply, unread, markRead, revealSeq, peekReveal, takeReveal, isFolded, setFolded, read, active } = useComments();
   const notRead = unreadBy(read);
+  const last = thread.comments.at(-1);
+  const answering = (c: ThreadComment | undefined) => active && c !== undefined && c === last && c.author === "user" && c.review !== null && c.review <= read;
   const [replying, setReplying] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
   const [moving, setMoving] = useState(false);
@@ -404,6 +415,7 @@ export function ThreadView({ thread, withVersion = false }: { thread: Thread; wi
         <span className={`comment-author comment-author-${first.author}`}>{authorName(first)}</span>
         {gone && <span className="outdated-label">Outdated</span>}
         {(folded ? thread.comments.some(notRead) : notRead(first)) && <NotRead />}
+        {answering(folded ? last : first) && <Answering />}
         {folded ? (
           <>
             <span className="thread-preview">{preview(first.body)}</span>
@@ -422,7 +434,16 @@ export function ThreadView({ thread, withVersion = false }: { thread: Thread; wi
         <div className="thread-body-inner">
           {gone && <OutdatedLines snippet={thread.snippet} />}
           {thread.comments.map((c, i) => (
-            <CommentView key={c.id} thread={thread} comment={c} first={i === 0} notRead={notRead(c)} editing={editing === c.id} setEditing={setEditing} />
+            <CommentView
+              key={c.id}
+              thread={thread}
+              comment={c}
+              first={i === 0}
+              notRead={notRead(c)}
+              answering={answering(c)}
+              editing={editing === c.id}
+              setEditing={setEditing}
+            />
           ))}
           <div className="thread-foot">
             {replying ? (
@@ -469,11 +490,12 @@ interface CommentViewProps {
   comment: ThreadComment;
   first: boolean;
   notRead: boolean;
+  answering: boolean;
   editing: boolean;
   setEditing: (commentId: string | null) => void;
 }
 
-const CommentView = memo(function CommentView({ thread, comment: c, first, notRead, editing, setEditing }: CommentViewProps) {
+const CommentView = memo(function CommentView({ thread, comment: c, first, notRead, answering, editing, setEditing }: CommentViewProps) {
   const { edit } = useCommentActions();
 
   return (
@@ -482,6 +504,7 @@ const CommentView = memo(function CommentView({ thread, comment: c, first, notRe
         <div className="comment-head">
           <span className="comment-author">{authorName(c)}</span>
           {notRead && <NotRead />}
+          {answering && <Answering />}
           {c.editedAt && <span className="comment-edited">edited</span>}
           {c.author === "user" && !editing && <CommentTools thread={thread} comment={c} onEdit={() => setEditing(c.id)} />}
         </div>

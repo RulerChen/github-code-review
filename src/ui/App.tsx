@@ -432,7 +432,8 @@ export function App({ viewId }: Props) {
   const live = useMemo(() => threads.filter((t) => t.comments.length > 0).map(placed), [threads, placed]);
 
   const pathThreads = useRef(new Map<string, Thread[]>());
-  const comments = useMemo<Pick<CommentsApi, keyof CommentActions | "threadsFor" | "threadsForTopic" | "read">>(() => {
+  const active = ["waiting", "working"].includes(claudeState(status, connected));
+  const comments = useMemo<Pick<CommentsApi, keyof CommentActions | "threadsFor" | "threadsForTopic" | "read" | "active">>(() => {
     const byPath = new Map<string, Thread[]>();
     const byTopic = new Map<string, Thread[]>();
     const add = (map: Map<string, Thread[]>, key: string, t: Thread) => {
@@ -457,8 +458,9 @@ export function App({ viewId }: Props) {
       threadsFor: (path) => byPath.get(path) ?? NO_THREADS,
       threadsForTopic: (title) => byTopic.get(title) ?? NO_THREADS,
       read: status?.read ?? 0,
+      active,
     };
-  }, [live, actions, current, status?.read]);
+  }, [live, actions, current, status?.read, active]);
 
   const review = useMemo(() => {
     if (!diff) return null;
