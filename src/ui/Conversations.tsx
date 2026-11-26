@@ -30,7 +30,6 @@ export interface Conversations {
   open: boolean;
   setOpen: (open: SetStateAction<boolean>) => void;
   reveal: (thread: Thread) => void;
-  nextUnread: () => void;
   markAllRead: () => void;
 }
 
@@ -136,13 +135,6 @@ export function useConversations({ repoRoot, threads, place, show }: Options): C
     setRevealSeq((s) => s + 1);
   };
 
-  const at = ordered.findIndex((t) => t.id === current);
-  const nextUnread = () => {
-    for (let k = 1; k <= ordered.length; k++) {
-      const t = ordered[(at + k + ordered.length) % ordered.length]!;
-      if (unread(t) > 0) return reveal(t);
-    }
-  };
   const markAllRead = () => {
     if (!key) return;
     const next = Object.fromEntries(threads.map((t) => [t.id, Math.max(seen[t.id] ?? 0, t.comments.length)]));
@@ -155,7 +147,7 @@ export function useConversations({ repoRoot, threads, place, show }: Options): C
     [unread, markRead, isFolded, setFolded, revealSeq, peekReveal, takeReveal],
   );
 
-  return { api, current, ordered, placeOf, unreadThreads, open, setOpen, reveal, nextUnread, markAllRead };
+  return { api, current, ordered, placeOf, unreadThreads, open, setOpen, reveal, markAllRead };
 }
 
 function lineLabel(anchor: ThreadAnchor): string {

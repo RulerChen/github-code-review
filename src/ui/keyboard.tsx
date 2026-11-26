@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useRef } from "react";
 import { markActiveFile } from "./active";
-import { pin, topBar } from "./anchor";
+import { pin } from "./anchor";
 import { CloseIcon, KeyboardIcon } from "./icons";
 import "./keyboard.css";
 
@@ -36,43 +36,10 @@ export function useShortcuts(shortcuts: Record<string, () => void>): void {
   }, []);
 }
 
-let cursor: string | null = null;
-
-const sections = () => [...document.querySelectorAll<HTMLElement>(".files > :not([hidden]) > section[id]")];
-
-function topOffset(): number {
-  return topBar() + 8;
-}
-
-function currentIndex(list: HTMLElement[]): number {
-  const top = topOffset();
-  const i = cursor ? list.findIndex((s) => s.id === cursor) : -1;
-  if (i >= 0) {
-    const r = list[i]!.getBoundingClientRect();
-    if (r.bottom > top && r.top < window.innerHeight) return i;
-  }
-  let index = 0;
-  list.forEach((s, k) => {
-    if (s.getBoundingClientRect().top <= top + 1) index = k;
-  });
-  return index;
-}
-
 export function go(el: HTMLElement): void {
   el.scrollIntoView({ block: "start" });
   pin(el);
-  cursor = el.id;
   markActiveFile();
-}
-
-export function stepSection(dir: 1 | -1): void {
-  const list = sections();
-  if (!list.length) return;
-  const i = currentIndex(list);
-  if (dir > 0) return go(list[Math.min(i + 1, list.length - 1)]!);
-  const cur = list[i];
-  const inside = cur !== undefined && cur.getBoundingClientRect().top < topOffset() - 2;
-  go(list[inside ? i : Math.max(i - 1, 0)]!);
 }
 
 export function KeyboardButton({ onClick }: { onClick: () => void }) {
@@ -84,8 +51,6 @@ export function KeyboardButton({ onClick }: { onClick: () => void }) {
 }
 
 const KEYS: [string[], string][] = [
-  [["j", "k"], "Next or previous file or topic"],
-  [["u"], "Next conversation with a new answer"],
   [["Ctrl+Enter"], "Send the comment being written"],
   [["Ctrl+click"], "Go to where the name under the pointer is defined, or list the lines that use it when the pointer is on its definition. On selected text, find the lines with that text (⌘+click on a Mac)"],
   [["Alt+←", "Alt+→"], "Back and forward through the code opened on the right, as the browser's own buttons do (⌘+[ and ⌘+] on a Mac)"],

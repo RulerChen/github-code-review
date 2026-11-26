@@ -36,7 +36,7 @@ import { hasLine } from "./DiffTable";
 import { FileCard, FileLoader, RawUrl, unreadAdded } from "./FileCard";
 import { dirPaths, FileTree, type TreeEntry, withDirsOf } from "./FileTree";
 import { FoldIcon, MatchCaseIcon, WholeWordIcon } from "./icons";
-import { go, KeyboardButton, ShortcutHelp, stepSection, useShortcuts } from "./keyboard";
+import { go, KeyboardButton, ShortcutHelp, useShortcuts } from "./keyboard";
 import { locate } from "./locate";
 import { comparePaths } from "./paths";
 import { EDGES, ResizeHandle } from "./resize";
@@ -670,9 +670,6 @@ export function App({ viewId }: Props) {
   const claude = claudeState(status, connected);
   const [help, setHelp] = useState(false);
   useShortcuts({
-    j: () => stepSection(1),
-    k: () => stepSection(-1),
-    u: conv.nextUnread,
     Escape: () => (lookup ? closeLookup() : help ? setHelp(false) : codeTop ? closeCode() : conv.setOpen(false)),
   });
 
