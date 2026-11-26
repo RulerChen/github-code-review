@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { lstat, readdir, readFile, readlink, realpath, stat } from "node:fs/promises";
+import { lstatSync, readFileSync, readlinkSync } from "node:fs";
+import { lstat, readdir, readFile, realpath, stat } from "node:fs/promises";
 import path from "node:path";
 import { rangeFor, repoFailures } from "../shared/comparison.js";
 import { buildHunks, splitLines, stripCr } from "../shared/hunks.js";
@@ -529,14 +530,14 @@ export function classify(buf: Buffer): Content {
   return { kind: "text", text: buf.toString("utf8") };
 }
 
-export async function readWorkTree(root: string, filePath: string): Promise<Content> {
+export function readWorkTree(root: string, filePath: string): Content {
   const abs = path.join(root, filePath);
   try {
-    const st = await lstat(abs);
-    if (st.isSymbolicLink()) return { kind: "text", text: await readlink(abs) };
+    const st = lstatSync(abs);
+    if (st.isSymbolicLink()) return { kind: "text", text: readlinkSync(abs) };
     if (!st.isFile()) return ABSENT;
     if (st.size > MAX_CONTENT_BYTES) return { kind: "tooLarge", size: st.size };
-    return classify(await readFile(abs));
+    return classify(readFileSync(abs));
   } catch {
     return ABSENT;
   }
@@ -590,7 +591,7 @@ async function trackedFile(ctx: RepoContext, entry: RawEntry, section: string[] 
 
   const oldC = status === "added" || !ctx.oldCommit ? ABSENT : (ctx.blobs.get(entry.oldOid) ?? ABSENT);
   const newC =
-    status === "deleted" ? ABSENT : ctx.headCommit ? (ctx.blobs.get(entry.newOid) ?? ABSENT) : await readWorkTree(ctx.root, entry.path);
+    status === "deleted" ? ABSENT : ctx.headCommit ? (ctx.blobs.get(entry.newOid) ?? ABSENT) : readWorkTree(ctx.root, entry.path);
   const binary = parsed.binary || oldC.kind === "binary" || newC.kind === "binary";
   const file = fileDiff(entry.path, {
     oldPath: status === "renamed" ? entry.oldPath : null,
@@ -616,7 +617,7 @@ async function trackedFile(ctx: RepoContext, entry: RawEntry, section: string[] 
 }
 
 async function untrackedFile(ctx: RepoContext, filePath: string): Promise<FileDiff | null> {
-  const c = await readWorkTree(ctx.root, filePath);
+  const c = readWorkTree(ctx.root, filePath);
   if (c.kind === "absent") return null;
   const file = fileDiff(filePath, { binary: c.kind === "binary", tooLarge: c.kind === "tooLarge", size: c.kind === "tooLarge" ? c.size : null });
   if (c.kind !== "text") return file;

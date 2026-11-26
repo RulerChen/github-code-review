@@ -32,9 +32,10 @@ export function gitLines(
   onLine: (line: string) => boolean,
   okCodes: readonly number[] = [0],
   signal?: AbortSignal,
+  env: NodeJS.ProcessEnv = {},
 ): Promise<void> {
   return new Promise((resolve, reject) => {
-    const child = spawn("git", args, { cwd, env: gitEnv(), stdio: ["ignore", "pipe", "pipe"], signal });
+    const child = spawn("git", args, { cwd, env: { ...gitEnv(), ...env }, stdio: ["ignore", "pipe", "pipe"], signal });
     const decoder = new StringDecoder("utf8");
     let rest = "";
     let stopped = false;

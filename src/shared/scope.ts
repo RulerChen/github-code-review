@@ -328,15 +328,15 @@ function inList(lines: string[], no: number): boolean {
 const NAMES = 2;
 const MACRO = /^\s*#\s*define\s+(\w+)/;
 
-function reader(text: string) {
+export function reader(text: string) {
   const lines = text.split("\n");
   const indents: number[] = [];
   const indentAt = (k: number) => (indents[k] ??= /^(?:#|$)/.test(lines[k - 1]!.trim()) || NO_SCOPE.test(lines[k - 1]!.trim()) ? -1 : indentOf(lines[k - 1]!));
   return { lines, indentAt };
 }
 
-export function insideOf(text: string, filePath: string): (no: number) => string | null {
-  const { lines, indentAt } = reader(text);
+export function insideOf(text: string, filePath: string, read = reader(text)): (no: number) => string | null {
+  const { lines, indentAt } = read;
   const scopes = languageOf(filePath).scopes;
   const header = (k: number, indent: number): string => {
     const l = lines[k - 1]!.trimEnd();
@@ -435,13 +435,13 @@ function afterGroup(rest: string): string | null {
   return null;
 }
 
-export function rolesOf(text: string, filePath: string): (no: number, col: number, name: string) => Role | null {
-  const uses = usesOf(text, filePath);
+export function rolesOf(text: string, filePath: string, read = reader(text)): (no: number, col: number, name: string) => Role | null {
+  const uses = usesOf(text, filePath, read);
   return (no, col, name) => uses(no, col, name).role;
 }
 
-function usesOf(text: string, filePath: string): (no: number, col: number, name: string) => { role: Role | null; key: boolean } {
-  const { lines, indentAt } = reader(text);
+function usesOf(text: string, filePath: string, read = reader(text)): (no: number, col: number, name: string) => { role: Role | null; key: boolean } {
+  const { lines, indentAt } = read;
   const lang = languageOf(filePath);
 
   const jsx = /\.[jt]sx$/.test(filePath);

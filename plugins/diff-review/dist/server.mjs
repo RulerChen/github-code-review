@@ -7256,7 +7256,7 @@ var require_dist = __commonJS({
 });
 
 // src/server/main.ts
-import { readFileSync as readFileSync2 } from "node:fs";
+import { readFileSync as readFileSync3 } from "node:fs";
 import path6 from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -36661,7 +36661,8 @@ var StdioServerTransport = class {
 
 // src/engine/diff.ts
 import { createHash } from "node:crypto";
-import { lstat, readdir, readFile, readlink, realpath, stat } from "node:fs/promises";
+import { lstatSync, readFileSync, readlinkSync } from "node:fs";
+import { lstat, readdir, readFile, realpath, stat } from "node:fs/promises";
 import path from "node:path";
 
 // src/shared/util.ts
@@ -36861,9 +36862,9 @@ function gitStream(cwd, args) {
 async function gitText(cwd, args, okCodes) {
   return (await git(cwd, args, okCodes)).toString("utf8").trim();
 }
-function gitLines(cwd, args, onLine, okCodes = [0], signal) {
+function gitLines(cwd, args, onLine, okCodes = [0], signal, env = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn("git", args, { cwd, env: gitEnv(), stdio: ["ignore", "pipe", "pipe"], signal });
+    const child = spawn("git", args, { cwd, env: { ...gitEnv(), ...env }, stdio: ["ignore", "pipe", "pipe"], signal });
     const decoder = new StringDecoder("utf8");
     let rest = "";
     let stopped = false;
@@ -37279,14 +37280,14 @@ function classify(buf) {
   if (buf.subarray(0, 8e3).includes(0)) return { kind: "binary" };
   return { kind: "text", text: buf.toString("utf8") };
 }
-async function readWorkTree(root, filePath) {
+function readWorkTree(root, filePath) {
   const abs = path.join(root, filePath);
   try {
-    const st = await lstat(abs);
-    if (st.isSymbolicLink()) return { kind: "text", text: await readlink(abs) };
+    const st = lstatSync(abs);
+    if (st.isSymbolicLink()) return { kind: "text", text: readlinkSync(abs) };
     if (!st.isFile()) return ABSENT;
     if (st.size > MAX_CONTENT_BYTES) return { kind: "tooLarge", size: st.size };
-    return classify(await readFile(abs));
+    return classify(readFileSync(abs));
   } catch {
     return ABSENT;
   }
@@ -37334,7 +37335,7 @@ async function trackedFile(ctx, entry, section) {
   const parsed = parseSection(section);
   const blocks = assignIds(ctx.prefix + entry.path, parsed.blocks);
   const oldC = status === "added" || !ctx.oldCommit ? ABSENT : ctx.blobs.get(entry.oldOid) ?? ABSENT;
-  const newC = status === "deleted" ? ABSENT : ctx.headCommit ? ctx.blobs.get(entry.newOid) ?? ABSENT : await readWorkTree(ctx.root, entry.path);
+  const newC = status === "deleted" ? ABSENT : ctx.headCommit ? ctx.blobs.get(entry.newOid) ?? ABSENT : readWorkTree(ctx.root, entry.path);
   const binary = parsed.binary || oldC.kind === "binary" || newC.kind === "binary";
   const file2 = fileDiff(entry.path, {
     oldPath: status === "renamed" ? entry.oldPath : null,
@@ -37358,7 +37359,7 @@ async function trackedFile(ctx, entry, section) {
   };
 }
 async function untrackedFile(ctx, filePath) {
-  const c = await readWorkTree(ctx.root, filePath);
+  const c = readWorkTree(ctx.root, filePath);
   if (c.kind === "absent") return null;
   const file2 = fileDiff(filePath, { binary: c.kind === "binary", tooLarge: c.kind === "tooLarge", size: c.kind === "tooLarge" ? c.size : null });
   if (c.kind !== "text") return file2;
@@ -37822,8 +37823,8 @@ function reader(text) {
   const indentAt = (k) => indents[k] ??= /^(?:#|$)/.test(lines[k - 1].trim()) || NO_SCOPE.test(lines[k - 1].trim()) ? -1 : indentOf(lines[k - 1]);
   return { lines, indentAt };
 }
-function insideOf(text, filePath) {
-  const { lines, indentAt } = reader(text);
+function insideOf(text, filePath, read = reader(text)) {
+  const { lines, indentAt } = read;
   const scopes = languageOf(filePath).scopes;
   const header = (k, indent2) => {
     const l = lines[k - 1].trimEnd();
@@ -37906,12 +37907,12 @@ function afterGroup(rest) {
   }
   return null;
 }
-function rolesOf(text, filePath) {
-  const uses = usesOf(text, filePath);
+function rolesOf(text, filePath, read = reader(text)) {
+  const uses = usesOf(text, filePath, read);
   return (no, col, name) => uses(no, col, name).role;
 }
-function usesOf(text, filePath) {
-  const { lines, indentAt } = reader(text);
+function usesOf(text, filePath, read = reader(text)) {
+  const { lines, indentAt } = read;
   const lang = languageOf(filePath);
   const jsx = /\.[jt]sx$/.test(filePath);
   const yaml = /\.ya?ml$/.test(filePath);
@@ -37996,6 +37997,8 @@ var LEAD_CHARS = 100;
 var NOT_GENERATED = ":(exclude,attr:linguist-generated=true)";
 var IDENTIFIER = /^[\p{L}_$][\p{L}\p{N}_$]{0,199}$/u;
 var SPELLED = /^[\p{L}_$][\p{L}\p{N}_$-]{0,199}$/u;
+var WORD2 = /^\w+$/;
+var ASCII = /^[\x00-\x7f]*$/;
 function isRepoPath(p) {
   return p !== "" && !/[\0\n\r]/.test(p) && p.split("/").every((s) => s !== "" && s !== "." && s !== "..");
 }
@@ -38017,7 +38020,7 @@ async function readRepoFile(diff, filePath) {
   if (!from) return null;
   const local = diff.files.find((f) => f.path === filePath)?.newContent ?? null;
   if (local !== null) return { path: filePath, text: local, binary: false, tooLarge: false, size: null };
-  const c = from.rev ? await readBlobAt(from.root, from.rev, from.rest) : await readWorkTree(from.root, from.rest);
+  const c = from.rev ? await readBlobAt(from.root, from.rev, from.rest) : readWorkTree(from.root, from.rest);
   if (c.kind === "absent") return null;
   const size = c.kind === "tooLarge" ? c.size : null;
   return { path: filePath, text: c.kind === "text" ? c.text : null, binary: c.kind === "binary", tooLarge: c.kind === "tooLarge", size };
@@ -38070,15 +38073,16 @@ async function grepRepo(diff, query, whole, matchCase, signal, withDefs = true) 
   const pattern = wordPattern(query, whole, matchCase);
   const same = matchCase ? pattern : pattern.toLowerCase();
   const defining = withDefs && isIdentifier(query) ? definer(query, matchCase) : null;
-  const plain = plainOf(query, matchCase).filter((p) => defining || p !== same);
-  const either = defining ? ["(", "-e", pattern, ...defining.patterns.flatMap((p) => ["-e", p]), ")"] : ["-e", pattern];
+  const plain = plainOf(query, matchCase).filter((p) => p !== same);
+  const lines = whole && WORD2.test(query) ? ["-w", "-e", wordPattern(query, false, matchCase)] : [...plain.flatMap((p) => ["-e", p, "--and"]), "-e", pattern];
   const changed = new Set(diff.files.map((f) => f.path));
   const busy = searchable(diff).filter((r) => r.dir !== "" && diff.files.some((f) => f.path.startsWith(`${r.dir}/`)));
   const far = (p) => changed.has(p) ? 0 : busy.length === 0 || busy.some((r) => p.startsWith(`${r.dir}/`)) ? 1 : 2;
   const hits = [];
   const defs = [];
-  const match = ["-E", ...ignoreCase(matchCase), ...plain.flatMap((p) => ["-e", p, "--and"]), ...either];
-  await grepLines(diff, searchable(diff), match, ["."], signal, (filePath, no, text) => {
+  const match = ["-E", ...ignoreCase(matchCase), ...lines];
+  const bytes = !matchCase && ASCII.test(query);
+  await grepLines(diff, searchable(diff), match, ["."], signal, bytes, (filePath, no, text) => {
     const at = found?.exec(text)?.index ?? -1;
     const defined = defining?.test(filePath, text) ?? false;
     if (at >= 0 || !defined) hits.push(hitOf(filePath, no, text, at));
@@ -38095,7 +38099,6 @@ function definer(name, matchCase) {
   const sources = (l) => [...l.patterns(spelled), ...l.values(spelled)];
   const tests = new Map([...LANGUAGES, GENERIC].map((l) => [l, sources(l).map((s) => new RegExp(fromPosix(s), matchCase ? "" : "i"))]));
   return {
-    patterns: [...new Set([...LANGUAGES, GENERIC].flatMap(sources))],
     test: (filePath, text) => tests.get(languageOf(filePath)).some((r) => r.test(text)),
     at: (text) => word?.exec(text)?.index ?? -1
   };
@@ -38108,7 +38111,10 @@ async function describe4(diff, hits, found) {
     const text = texts.get(h.path);
     if (text === void 0) continue;
     let file2 = files.get(h.path);
-    if (!file2) files.set(h.path, file2 = { lines: text.split("\n"), inside: insideOf(text, h.path), roles: rolesOf(text, h.path) });
+    if (!file2) {
+      const read = reader(text);
+      files.set(h.path, file2 = { lines: read.lines, inside: insideOf(text, h.path, read), roles: rolesOf(text, h.path, read) });
+    }
     h.inside = file2.inside(h.no);
     const line = file2.lines[h.no - 1] ?? "";
     for (const m of every ? line.matchAll(every) : []) {
@@ -38129,8 +38135,13 @@ async function readTexts(diff, paths) {
       continue;
     }
     const where = repoOf(diff, p);
-    const rev = where && (where.repo.headCommit ?? where.repo.oldCommit);
-    if (!where || !rev) continue;
+    if (!where) continue;
+    const rev = where.repo.headCommit;
+    if (!rev) {
+      const content = readWorkTree(where.root, where.rest);
+      if (content.kind === "text") out.set(p, content.text);
+      continue;
+    }
     const list = wanted.get(where.repo) ?? { root: where.root, rev, rests: [] };
     list.rests.push(where.rest);
     wanted.set(where.repo, list);
@@ -38188,7 +38199,7 @@ async function findDefinitions(diff, name, from, click, signal) {
   const all = searchable(diff);
   const lookUp = (patterns) => nearestFirst(own2 ? [[own2], all.filter((r) => r !== own2)] : [all], async (repos) => {
     const hits = [];
-    await grepLines(diff, repos, defines([escaped], patterns), pathspecs, signal, (filePath, no, text2) => void hits.push(hitOf(filePath, no, text2, text2.indexOf(name))));
+    await grepLines(diff, repos, defines([escaped], patterns), pathspecs, signal, false, (filePath, no, text2) => void hits.push(hitOf(filePath, no, text2, text2.indexOf(name))));
     return { hits: hits.sort(byPlace(() => 0)) };
   });
   const fields = async () => {
@@ -38235,14 +38246,15 @@ function inModule(hits, module, from) {
   }
   return [];
 }
-async function grepLines(diff, repos, match, pathspecs, signal, onLine) {
+async function grepLines(diff, repos, match, pathspecs, signal, bytes, onLine) {
+  const threads = Math.max(1, Math.floor(Math.min(GREP_LIMIT / 2, GREP_LIMIT / repos.length)));
   await mapLimit(repos, GREP_LIMIT, async (repo) => {
     const prefix = repo.dir ? `${repo.dir}/` : "";
     const rev = repo.headCommit;
     const strip = rev ? `${rev}:` : "";
     const added = diff.files.some((f) => f.status === "added" && f.path.startsWith(prefix));
     const where = rev ? [rev] : added ? ["--untracked"] : [];
-    const args = ["grep", "--no-color", "-n", "-z", "-I", ...match, ...where, "--", ...pathspecs, NOT_GENERATED];
+    const args = ["grep", "--no-color", `--threads=${threads}`, "-n", "-z", "-I", ...match, ...where, "--", ...pathspecs, NOT_GENERATED];
     await gitLines(
       path3.join(diff.repoRoot, repo.dir),
       args,
@@ -38255,7 +38267,8 @@ async function grepLines(diff, repos, match, pathspecs, signal, onLine) {
         return true;
       },
       [0, 1],
-      signal
+      signal,
+      bytes ? { LC_ALL: "C" } : {}
     );
   });
 }
@@ -38541,7 +38554,7 @@ function unknownIds(diff, topics) {
 
 // src/server/store.ts
 import { createHash as createHash2 } from "node:crypto";
-import { mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync as readFileSync2, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import path4 from "node:path";
 var DIR = process.env.CLAUDE_PLUGIN_DATA ? path4.join(process.env.CLAUDE_PLUGIN_DATA, "reviews") : null;
 var FORMAT = 1;
@@ -38553,7 +38566,7 @@ function fileFor(session, repo) {
 function loadState(session, repo) {
   if (!DIR) return null;
   try {
-    const saved = JSON.parse(readFileSync(fileFor(session, repo), "utf8"));
+    const saved = JSON.parse(readFileSync2(fileFor(session, repo), "utf8"));
     if (saved.format !== FORMAT) return null;
     const state = saved.state;
     return {
@@ -39303,7 +39316,7 @@ function sendText(res, status, body) {
 // src/server/main.ts
 var DIST_DIR = path6.dirname(fileURLToPath(import.meta.url));
 var UI_DIR = path6.join(DIST_DIR, "ui");
-var VERSION = JSON.parse(readFileSync2(path6.join(DIST_DIR, "..", ".claude-plugin", "plugin.json"), "utf8")).version;
+var VERSION = JSON.parse(readFileSync3(path6.join(DIST_DIR, "..", ".claude-plugin", "plugin.json"), "utf8")).version;
 var serverPromise = null;
 function getServer() {
   serverPromise ??= (async () => {
