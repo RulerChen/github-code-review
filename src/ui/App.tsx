@@ -279,7 +279,7 @@ export function App({ viewId }: Props) {
     [setSidebarOpen],
   );
   const findDefinition = useCallback<FindDefinition>(
-    (text, from, x, y) => {
+    (text, from, x, y, at) => {
       if (!viewId) return;
       const seq = ++lookupSeq.current;
       const current = (update: (l: DefinitionLookup) => DefinitionLookup) =>
@@ -291,7 +291,7 @@ export function App({ viewId }: Props) {
           fail,
         );
 
-      setLookup({ name: text, from, byName: false, x, y, hits: null, lines: false, error: null });
+      setLookup({ name: text, from, byName: false, x, y, at, hits: null, lines: false, error: null });
       if (!isName(text)) return void findLines();
       fetchDefinitions(viewId, requested.current, version.current ?? "", text, from).then((r) => {
         if (seq !== lookupSeq.current) return;

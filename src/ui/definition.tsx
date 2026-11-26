@@ -5,7 +5,7 @@ import type { ClickedAt } from "./api";
 import { useDismiss } from "./hooks";
 import { basename, comparePaths, dirPrefix } from "./paths";
 
-export type FindDefinition = (text: string, from: ClickedAt, x: number, y: number) => void;
+export type FindDefinition = (text: string, from: ClickedAt, x: number, y: number, at: Element) => void;
 
 export const FindDefinitionContext = createContext<FindDefinition | null>(null);
 
@@ -63,6 +63,7 @@ export interface DefinitionLookup {
   byName: boolean;
   x: number;
   y: number;
+  at: Element;
   hits: RepoHit[] | null;
   lines: boolean;
   error: string | null;
@@ -88,6 +89,25 @@ export function DefinitionMenu({ lookup, onPick, onSearch, onClose }: Props) {
     m.style.top = `${fits ? below : Math.max(16, lookup.y - 12 - m.offsetHeight)}px`;
     m.style.transformOrigin = `${lookup.x - left}px ${fits ? "0" : "100%"}`;
   });
+
+  useLayoutEffect(() => {
+    const m = ref.current;
+    const { at } = lookup;
+    if (!m) return;
+    m.style.translate = "";
+    const start = at.getBoundingClientRect();
+    const follow = () => {
+      if (!at.isConnected) return;
+      const r = at.getBoundingClientRect();
+      m.style.translate = `${r.left - start.left}px ${r.top - start.top}px`;
+    };
+    addEventListener("scroll", follow, true);
+    addEventListener("resize", follow);
+    return () => {
+      removeEventListener("scroll", follow, true);
+      removeEventListener("resize", follow);
+    };
+  }, [lookup.at, lookup.x, lookup.y]);
 
   const { name, hits, lines, error } = lookup;
   const named = isName(name);

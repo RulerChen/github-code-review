@@ -158,7 +158,8 @@ export const DiffTable = memo(function DiffTable({ path, hunks, oldTokens, newTo
     if (!text) return;
     e.preventDefault();
     const line = word ? lineAt(e.target, false) : null;
-    findDefinition(text, { path, line: line?.[0] === "new" ? line[1] : null, col: word?.col ?? 0, panel }, e.clientX, e.clientY);
+    const cell = e.target instanceof Element ? (e.target.closest("td") ?? e.target) : e.currentTarget;
+    findDefinition(text, { path, line: line?.[0] === "new" ? line[1] : null, col: word?.col ?? 0, panel }, e.clientX, e.clientY, cell);
   };
 
   const submit = async (body: string) => {
