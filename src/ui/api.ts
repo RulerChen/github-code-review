@@ -51,8 +51,10 @@ const hasThread = (b: Partial<{ thread: Thread }>) => b.thread !== undefined;
 const threadRequest = async (url: string, method: string, payload: unknown) =>
   (await request<{ thread: Thread }>(url, hasThread, method, payload)).thread;
 
-export function fetchView(viewId: string, compare: Comparison | null): Promise<ViewData> {
-  return request<ViewData>(withComparison(viewUrl(viewId, "diff"), compare), (b) => !!b.diff && !!b.opened);
+export function fetchView(viewId: string, compare: Comparison | null, since: string | null = null): Promise<ViewData> {
+  const url = withComparison(viewUrl(viewId, "diff"), compare);
+  const full = since === null ? url : `${url}${url.includes("?") ? "&" : "?"}since=${encodeURIComponent(since)}`;
+  return request<ViewData>(full, (b) => !!b.diff && !!b.opened);
 }
 
 export async function fetchFile(viewId: string, compare: Comparison | null, version: string, path: string): Promise<FileDiff> {

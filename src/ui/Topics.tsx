@@ -65,6 +65,29 @@ export function buildTopics(review: Review, files: FileDiff[], repos: DiffRepo[]
   });
 }
 
+export function keepSameTopics(before: TopicView[], after: TopicView[]): TopicView[] {
+  const old = new Map(before.map((t) => [t.key, t]));
+  return after.map((t) => {
+    const o = old.get(t.key);
+    if (!o) return t;
+    const parts = t.parts.map((p) => {
+      const op = o.parts.find((x) => x.file === p.file);
+      return op && op.anchor === p.anchor && op.blocks.length === p.blocks.length && op.blocks.every((b, i) => b === p.blocks[i]) ? op : p;
+    });
+    const same =
+      parts.length === o.parts.length &&
+      parts.every((p, i) => p === o.parts[i]) &&
+      t.anchor === o.anchor &&
+      t.summary === o.summary &&
+      t.signature === o.signature &&
+      t.edited === o.edited &&
+      t.left === o.left &&
+      t.firstFor.size === o.firstFor.size &&
+      [...t.firstFor].every((f) => o.firstFor.has(f));
+    return same ? o : { ...t, parts };
+  });
+}
+
 export function topicShows(topic: TopicView, thread: Thread, versions: CommentsApi["versions"]): boolean {
   const { anchor } = thread;
   if (anchor.path === null) return anchor.topic === topic.title;

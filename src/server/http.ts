@@ -360,10 +360,20 @@ export class ReviewServer {
 
     switch (`${req.method} ${target}`) {
       case "GET diff": {
+        const since = query.get("since");
+        const before = this.diffs.find((d) => d.key === diffKey(view.repo, compare) && d.version === since);
         const { version, diff } = await this.loadDiff(view.repo, compare);
         const commented = new Set(threads.threads.map((t) => (t.anchor.side === null ? null : t.anchor.path)));
+        const had = new Set(before?.diff.files);
+        const isKept = (f: FileDiff) => had.has(f) && !commented.has(f.path);
         const data: ViewData = {
-          diff: { ...diff, files: diff.files.map((f) => ((f.generated || f.diffTooLarge) && f.hunks.length > 0 && !commented.has(f.path) ? withoutLines(f) : f)) },
+          diff: {
+            ...diff,
+            files: diff.files
+              .filter((f) => !isKept(f))
+              .map((f) => ((f.generated || f.diffTooLarge) && f.hunks.length > 0 && !commented.has(f.path) ? withoutLines(f) : f)),
+          },
+          kept: diff.files.filter(isKept).map((f) => f.path),
           version,
           opened: view.compare,
           reviews: this.reviews,

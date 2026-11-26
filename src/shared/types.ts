@@ -144,6 +144,7 @@ export interface Thread {
 
 export interface ViewData {
   diff: DiffResult;
+  kept?: string[];
   version: string;
   opened: Comparison;
   reviews: Review[];

@@ -36689,6 +36689,14 @@ function imageTypeOf(path8) {
   return IMAGE_TYPES.get(/\.([^./]+)$/.exec(path8)?.[1]?.toLowerCase() ?? "") ?? null;
 }
 var compareText = (a, b) => a < b ? -1 : a > b ? 1 : 0;
+function sameJson(a, b) {
+  if (a === b) return true;
+  if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false;
+  if (Array.isArray(a)) return Array.isArray(b) && a.length === b.length && a.every((x, i) => sameJson(x, b[i]));
+  if (Array.isArray(b)) return false;
+  const keys = Object.keys(a);
+  return keys.length === Object.keys(b).length && keys.every((k) => sameJson(a[k], b[k]));
+}
 function isRecord(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
@@ -36912,6 +36920,7 @@ var COMMIT_RE = /^([0-9a-f]{40,64}) commit /;
 var STATUS = { A: "added", D: "deleted", R: "renamed" };
 var ABSENT = { kind: "absent" };
 var contentHashes = /* @__PURE__ */ new Map();
+var lastParts = /* @__PURE__ */ new Map();
 var byPath = (a, b) => compareText(a.path, b.path);
 var byDate = (a, b) => Date.parse(a.date) - Date.parse(b.date);
 var statusOf = (code) => STATUS[code] ?? "modified";
@@ -36949,11 +36958,11 @@ async function computeDiff(probe) {
   const { root, compare: c, repos, names } = probe;
   checkRepos(root, names, c);
   if (!names) {
-    const { repo, commits, commitCount, files } = await diffRepo(repos[0]);
+    const { repo, commits, commitCount, files } = await diffRepoOnce(repos[0]);
     const { baseCommit, headCommit, oldCommit } = repo;
     return { repoRoot: root, ...c, baseCommit, headCommit, oldCommit, repos: [repo], commits, commitCount, files };
   }
-  const parts2 = await mapLimit(repos, REPO_LIMIT, (r) => diffRepo(r).catch((err) => failedPart(r.dir, r.range, err)));
+  const parts2 = await mapLimit(repos, REPO_LIMIT, (r) => diffRepoOnce(r).catch((err) => failedPart(r.dir, r.range, err)));
   const states = parts2.map((p) => p.repo);
   if (states.length && states.every((r) => r.error !== null)) {
     throw new Error(repoFailures(states).map((f) => `${f.error} (${f.dirs.join(", ")})`).join("; "));
@@ -36979,6 +36988,21 @@ function checkRepos(root, repos, c) {
   if (!unknown2.length) return;
   if (!repos) throw new Error(`${root} is a single repository, so no repository in it can compare a range of its own or be left out.`);
   throw new Error(`No repository named ${unknown2.join(", ")} directly under ${root}.`);
+}
+async function diffRepoOnce(probe) {
+  const key = `${probe.dir}\0${JSON.stringify(probe.range)}`;
+  const last = lastParts.get(probe.root);
+  if (last?.key === key && last.version === probe.version) return last.part;
+  const part = await diffRepo(probe);
+  if (last?.key === key) {
+    const old = new Map(last.part.files.map((f) => [f.path, f]));
+    part.files = part.files.map((f) => {
+      const o = old.get(f.path);
+      return o && sameJson(o, f) ? o : f;
+    });
+  }
+  lastParts.set(probe.root, { key, version: probe.version, part });
+  return part;
 }
 async function diffRepo({ dir, root, range: { base, head, threeDot }, baseCommit, tip, changes, error: error62 }) {
   if (error62 !== null) throw new Error(error62);
@@ -38987,10 +39011,18 @@ var ReviewServer = class {
     const target = commentId ? `${route}/comment` : threadId ? `${route}/thread` : route;
     switch (`${req.method} ${target}`) {
       case "GET diff": {
+        const since = query.get("since");
+        const before = this.diffs.find((d) => d.key === diffKey(view.repo, compare) && d.version === since);
         const { version: version2, diff } = await this.loadDiff(view.repo, compare);
         const commented = new Set(threads.threads.map((t) => t.anchor.side === null ? null : t.anchor.path));
+        const had = new Set(before?.diff.files);
+        const isKept = (f) => had.has(f) && !commented.has(f.path);
         const data = {
-          diff: { ...diff, files: diff.files.map((f) => (f.generated || f.diffTooLarge) && f.hunks.length > 0 && !commented.has(f.path) ? withoutLines(f) : f) },
+          diff: {
+            ...diff,
+            files: diff.files.filter((f) => !isKept(f)).map((f) => (f.generated || f.diffTooLarge) && f.hunks.length > 0 && !commented.has(f.path) ? withoutLines(f) : f)
+          },
+          kept: diff.files.filter(isKept).map((f) => f.path),
           version: version2,
           opened: view.compare,
           reviews: this.reviews,

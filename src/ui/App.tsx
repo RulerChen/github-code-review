@@ -3,7 +3,7 @@ import { contextOf } from "../shared/comments";
 import { comparisonFromQuery, comparisonQuery, isFor, repoFailures, sameComparison } from "../shared/comparison";
 import { changeIds, splitLines } from "../shared/hunks";
 import type { CommitInfo, Comparison, DiffResult, FileDiff, Grouping, Review, SearchHits, SessionStatus, Thread, ThreadAnchor, ViewData } from "../shared/types";
-import { errorMessage } from "../shared/util";
+import { compareText, errorMessage, sameJson } from "../shared/util";
 import { followActiveFile } from "./active";
 import { scrollToTop, startAnchoring } from "./anchor";
 import {
@@ -45,7 +45,7 @@ import { definitionsFound, type Hit, revealLine, searchChanges, SearchResults, s
 import { claudeState, ClaudeStatus } from "./Status";
 import { useStoredState, useViewed } from "./storage";
 import { ChangeStats, RefreshButton, SidebarToggle, type Tab, ThemeToggle, ViewTabs } from "./TopBar";
-import { buildTopics, TopicSection, topicShows, type TopicView } from "./Topics";
+import { buildTopics, keepSameTopics, TopicSection, topicShows, type TopicView } from "./Topics";
 
 interface Props {
   viewId: string | null;
@@ -122,6 +122,7 @@ export function App({ viewId }: Props) {
   const asked = useRef(requested.current);
   const seq = useRef(0);
   const version = useRef<string | null>(null);
+  const shownData = useRef<ViewData | null>(null);
   const scrolls = useRef<Partial<Record<Tab, number>>>({});
   const resetScroll = useRef(false);
 
@@ -134,8 +135,16 @@ export function App({ viewId }: Props) {
     if (other) setSwitching(true);
 
     try {
-      const result = await fetchView(viewId, target);
+      const before = other ? null : shownData.current;
+      let result = await fetchView(viewId, target, before?.version ?? null);
       if (n !== seq.current) return;
+      let files = keepSameFiles(before?.diff.files ?? [], result.diff.files, result.kept ?? []);
+      if (!files) {
+        result = await fetchView(viewId, target);
+        if (n !== seq.current) return;
+        files = result.diff.files;
+      }
+      result = { ...result, diff: { ...result.diff, files } };
 
       const root = result.diff.repoRoot;
       const fresh = other || version.current === null;
@@ -319,6 +328,7 @@ export function App({ viewId }: Props) {
   );
 
   const diff = data?.diff ?? null;
+  shownData.current = data;
   const compareWith = (next: Comparison, nextTab?: Tab, nextRange: CommitRange | null = null) => {
     if (data) void load(sameComparison(next, data.opened) ? null : next, true, nextTab, nextRange);
   };
@@ -370,20 +380,23 @@ export function App({ viewId }: Props) {
     return () => events.close();
   }, [viewId]);
 
+  const comparisonKey = diff && JSON.stringify([diff.base, diff.head, diff.threeDot, diff.overrides, diff.excluded]);
   const current = useMemo<Comparison | null>(
     () => diff && { base: diff.base, head: diff.head, threeDot: diff.threeDot, overrides: diff.overrides, excluded: diff.excluded },
-    [diff?.base, diff?.head, diff?.threeDot, diff?.overrides, diff?.excluded],
+    [comparisonKey],
   );
   const repoCommits = JSON.stringify(diff?.repos.map((r) => [r.dir, r.oldCommit, r.headCommit]) ?? []);
 
+  const linesOf = useRef(new WeakMap<FileDiff, string[]>());
   const newLines = useMemo(() => {
-    const cache = new Map<string, string[] | null>();
+    const files = new Map(diff?.files.map((f) => [f.path, f]));
     return (path: string) => {
-      let lines = cache.get(path);
-      if (lines === undefined) {
-        const text = diff?.files.find((f) => f.path === path)?.newContent ?? null;
-        lines = text === null ? null : splitLines(text);
-        cache.set(path, lines);
+      const file = files.get(path);
+      if (!file || file.newContent === null) return null;
+      let lines = linesOf.current.get(file);
+      if (!lines) {
+        lines = splitLines(file.newContent);
+        linesOf.current.set(file, lines);
       }
       return lines;
     };
@@ -420,21 +433,28 @@ export function App({ viewId }: Props) {
     };
   }, [viewId, repoCommits, current]);
 
-  const placed = useMemo(() => {
-    const cache = new WeakMap<Thread, Thread>();
-    return (t: Thread) => {
-      let p = cache.get(t);
-      if (!p) {
-        const { anchor } = t;
-        const onWorkingTree = anchor.side === "new" && anchor.commit === null && actions.versions(anchor.path).new === null;
-        const lines = onWorkingTree ? newLines(anchor.path) : null;
-        p = lines ? locate(t, lines) : t;
-        cache.set(t, p);
-      }
+  const placements = useRef(new WeakMap<Thread, { lines: string[] | null; placed: Thread }>());
+  const placed = useCallback(
+    (t: Thread) => {
+      const { anchor } = t;
+      const onWorkingTree = anchor.side === "new" && anchor.commit === null && actions.versions(anchor.path).new === null;
+      const lines = onWorkingTree ? newLines(anchor.path) : null;
+      const known = placements.current.get(t);
+      if (known && known.lines === lines) return known.placed;
+      const p = lines ? locate(t, lines) : t;
+      placements.current.set(t, { lines, placed: p });
       return p;
-    };
-  }, [newLines, actions]);
-  const live = useMemo(() => threads.filter((t) => t.comments.length > 0).map(placed), [threads, placed]);
+    },
+    [newLines, actions],
+  );
+  const lastLive = useRef<Thread[]>([]);
+  const live = useMemo(() => {
+    const next = threads.filter((t) => t.comments.length > 0).map(placed);
+    const prev = lastLive.current;
+    if (next.length === prev.length && next.every((t, i) => t === prev[i])) return prev;
+    lastLive.current = next;
+    return next;
+  }, [threads, placed]);
 
   const pathThreads = useRef(new Map<string, Thread[]>());
   const active = ["waiting", "working"].includes(claudeState(status, connected));
@@ -498,10 +518,12 @@ export function App({ viewId }: Props) {
     [diff],
   );
   const shown = useMemo(() => matching(entries, filter), [entries, filter]);
-  const topics = useMemo(
-    () => (review && diff ? buildTopics(review, entries.map((e) => e.file), diff.repos) : []),
-    [review, entries, diff],
-  );
+  const lastTopics = useRef<TopicView[]>([]);
+  const topics = useMemo(() => {
+    const next = review && diff ? buildTopics(review, entries.map((e) => e.file), diff.repos) : [];
+    lastTopics.current = keepSameTopics(lastTopics.current, next);
+    return lastTopics.current;
+  }, [review, entries, diff]);
   const topicFiles = useMemo(
     () =>
       topics
@@ -1008,6 +1030,18 @@ const flip = (path: string) => (dirs: ReadonlySet<string>) => {
 function matching<T extends { file: FileDiff }>(list: T[], filter: string): T[] {
   const q = filter.trim().toLowerCase();
   return q ? list.filter((e) => e.file.path.toLowerCase().includes(q)) : list;
+}
+
+function keepSameFiles(before: FileDiff[], sent: FileDiff[], kept: string[]): FileDiff[] | null {
+  const old = new Map(before.map((f) => [f.path, f]));
+  const fresh = sent.map((f) => {
+    const o = old.get(f.path);
+    return o && sameJson(o, f) ? o : f;
+  });
+  if (!kept.length) return fresh;
+  const reused = kept.map((p) => old.get(p));
+  if (reused.some((f) => !f)) return null;
+  return [...(reused as FileDiff[]), ...fresh].sort((a, b) => compareText(a.path, b.path));
 }
 
 function mergeThreads(base: Thread[], updates: Thread[]): Thread[] {

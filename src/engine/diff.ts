@@ -5,7 +5,7 @@ import path from "node:path";
 import { rangeFor, repoFailures } from "../shared/comparison.js";
 import { buildHunks, splitLines, stripCr } from "../shared/hunks.js";
 import type { Block, CommitInfo, Comparison, DiffRepo, DiffResult, FileDiff, FileStatus, RefList, RefRange } from "../shared/types.js";
-import { compareText, errorMessage, plural, sum } from "../shared/util.js";
+import { compareText, errorMessage, plural, sameJson, sum } from "../shared/util.js";
 import { git, gitText } from "./git.js";
 
 export const MAX_CONTENT_BYTES = 1024 * 1024;
@@ -89,6 +89,7 @@ interface DiffProbe {
 
 export const ABSENT: Content = { kind: "absent" };
 const contentHashes = new Map<string, Map<string, FileHash>>();
+const lastParts = new Map<string, { key: string; version: string; part: RepoPart }>();
 
 const byPath = (a: { path: string }, b: { path: string }) => compareText(a.path, b.path);
 const byDate = (a: CommitInfo, b: CommitInfo) => Date.parse(a.date) - Date.parse(b.date);
@@ -133,12 +134,12 @@ export async function computeDiff(probe: DiffProbe): Promise<DiffResult> {
   checkRepos(root, names, c);
 
   if (!names) {
-    const { repo, commits, commitCount, files } = await diffRepo(repos[0]!);
+    const { repo, commits, commitCount, files } = await diffRepoOnce(repos[0]!);
     const { baseCommit, headCommit, oldCommit } = repo;
     return { repoRoot: root, ...c, baseCommit, headCommit, oldCommit, repos: [repo], commits, commitCount, files };
   }
 
-  const parts = await mapLimit(repos, REPO_LIMIT, (r) => diffRepo(r).catch((err: unknown) => failedPart(r.dir, r.range, err)));
+  const parts = await mapLimit(repos, REPO_LIMIT, (r) => diffRepoOnce(r).catch((err: unknown) => failedPart(r.dir, r.range, err)));
   const states = parts.map((p) => p.repo);
   if (states.length && states.every((r) => r.error !== null)) {
     throw new Error(repoFailures(states).map((f) => `${f.error} (${f.dirs.join(", ")})`).join("; "));
@@ -167,6 +168,22 @@ function checkRepos(root: string, repos: string[] | null, c: Comparison): void {
   if (!unknown.length) return;
   if (!repos) throw new Error(`${root} is a single repository, so no repository in it can compare a range of its own or be left out.`);
   throw new Error(`No repository named ${unknown.join(", ")} directly under ${root}.`);
+}
+
+async function diffRepoOnce(probe: RepoProbe): Promise<RepoPart> {
+  const key = `${probe.dir}\0${JSON.stringify(probe.range)}`;
+  const last = lastParts.get(probe.root);
+  if (last?.key === key && last.version === probe.version) return last.part;
+  const part = await diffRepo(probe);
+  if (last?.key === key) {
+    const old = new Map(last.part.files.map((f) => [f.path, f]));
+    part.files = part.files.map((f) => {
+      const o = old.get(f.path);
+      return o && sameJson(o, f) ? o : f;
+    });
+  }
+  lastParts.set(probe.root, { key, version: probe.version, part });
+  return part;
 }
 
 async function diffRepo({ dir, root, range: { base, head, threeDot }, baseCommit, tip, changes, error }: RepoProbe): Promise<RepoPart> {
