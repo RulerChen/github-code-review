@@ -172,7 +172,7 @@ export interface RepoHit {
   no: number;
   text: string;
   at: number;
-  role?: "field" | "write";
+  role?: "field";
 }
 
 export interface RepoHits {

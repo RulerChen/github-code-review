@@ -37901,59 +37901,64 @@ function usesOf(text, filePath, read = reader(text)) {
     }
     return "";
   };
-  const none = { role: null, key: false };
-  const field = { role: "field", key: true };
   return (no, col, name) => {
     const line = lines[no - 1];
-    if (line === void 0 || line.slice(col, col + name.length) !== name) return none;
-    let lead = line.slice(0, col);
-    let rest = line.slice(col + name.length);
-    const quoted = /["'`]$/.test(lead) && /^["'`]/.test(rest);
-    if (quoted) {
-      if (ANNOTATION.test(lead.slice(0, -1))) return field;
-      if (/^.\]\s*(?:[-+*/%&|^]|\?\?)?=(?![=>])/.test(rest)) return { role: "write", key: true };
-      lead = lead.slice(0, -1);
-      rest = rest.slice(1);
-    }
-    if (/(?:^|[\s(,])[\w$]+\??\s*:(?!:)[^=,;(){}]*$|\btype\s+$/.test(lead)) return none;
-    if (/(?:\+\+|--)\s*(?:[\w$]+(?:\.|->))*$/.test(lead) && !/^(?:\.|->|\[)/.test(rest)) return { role: "write", key: false };
-    const start = ONLY_MODS.test(lead);
-    const key = KEY.test(rest);
-    const short = lang.shorthand === true && /^\s*(?:[,}]|$)/.test(rest);
-    const placed = start || /[{(,;]\s*$/.test(lead);
-    if (!quoted && (ASSIGNED.test(rest) || ANNOTATED.test(rest) || start && ASSIGNED_WITH.test(rest))) {
+    if (line === void 0) return NONE2;
+    const use = lineUse(line, col, name, lang, yaml);
+    if (!("needs" in use)) return use;
+    const { lead, rest, start, key } = use;
+    if (use.needs === "assign") {
       const at = around(no, lead);
-      if (at.open === "(" && (DEFINES.test(at.head) || start && inList(lines, no) && !/^(?:async\s+)?(?:with|class)\b/.test(at.head))) return none;
-      if (start && kindOf(at, "") === "type") return field;
+      if (at.open === "(" && (DEFINES.test(at.head) || start && inList(lines, no) && !/^(?:async\s+)?(?:with|class)\b/.test(at.head))) return NONE2;
+      if (start && kindOf(at, "") === "type") return FIELD;
       return { role: "write", key: jsx && /^=[{"']/.test(rest) };
     }
-    if (yaml && key && /^\s*(?:-\s+)*$/.test(lead)) return { role: "write", key: true };
-    if ((key || short) && placed) {
+    if (use.needs === "keyed") {
       const kind = kindOf(around(no, lead), rest.replace(/^\??\s*:/, ""));
-      if (kind === "type") return key ? field : none;
-      return kind === "literal" && !ARROW_PARAMS.test(closing(no, lead, rest)) ? { role: "write", key } : none;
+      if (kind === "type") return key ? FIELD : NONE2;
+      return kind === "literal" && !ARROW_PARAMS.test(closing(no, lead, rest)) ? { role: "write", key } : NONE2;
     }
-    if (!quoted && !line.includes("(") && kindOf(around(no, lead), "") === "type") {
-      if (C_FIELD_LEAD.test(lead) && !/(?<!:):(?!:)/.test(lead) && C_FIELD_REST.test(rest)) return field;
-      if (start && /^\s+[\w*[\]<.]/.test(rest)) return field;
-    }
-    return none;
+    return kindOf(around(no, lead), "") === "type" ? FIELD : NONE2;
   };
 }
-function mayBeField(line, name) {
-  for (const m of line.matchAll(new RegExp(`(?<![\\w$])${name.replaceAll("$", "\\$")}(?![\\w$])`, "g"))) {
-    let lead = line.slice(0, m.index);
-    let rest = line.slice(m.index + name.length);
-    const quoted = /["'`]$/.test(lead) && /^["'`]/.test(rest);
-    if (quoted) {
-      if (ANNOTATION.test(lead.slice(0, -1))) return true;
-      lead = lead.slice(0, -1);
-      rest = rest.slice(1);
-    }
-    if (ONLY_MODS.test(lead) || KEY.test(rest)) return true;
-    if (!quoted && !line.includes("(") && C_FIELD_LEAD.test(lead) && C_FIELD_REST.test(rest)) return true;
+var NONE2 = { role: null, key: false };
+var FIELD = { role: "field", key: true };
+var QUOTES = "\"'`";
+var BREAKS = "=,;(){}";
+function lastBreak(lead) {
+  let at = lead.length - 1;
+  while (at >= 0 && !BREAKS.includes(lead[at])) at--;
+  return Math.max(at, 0);
+}
+function lineUse(line, col, name, lang, yaml) {
+  if (line.slice(col, col + name.length) !== name) return NONE2;
+  let lead = line.slice(0, col);
+  let rest = line.slice(col + name.length);
+  const quoted = QUOTES.includes(lead.at(-1) ?? "_") && QUOTES.includes(rest[0] ?? "_");
+  if (quoted) {
+    if (ANNOTATION.test(lead.slice(0, -1))) return FIELD;
+    if (/^.\]\s*(?:[-+*/%&|^]|\?\?)?=(?![=>])/.test(rest)) return { role: "write", key: true };
+    lead = lead.slice(0, -1);
+    rest = rest.slice(1);
   }
-  return false;
+  const tail = lead.slice(lastBreak(lead));
+  if (/(?:^|[\s(,])[\w$]+\??\s*:(?!:)[^=,;(){}]*$|\btype\s+$/.test(tail)) return NONE2;
+  if (/(?:\+\+|--)\s*(?:[\w$]+(?:\.|->))*$/.test(tail) && !/^(?:\.|->|\[)/.test(rest)) return { role: "write", key: false };
+  const start = ONLY_MODS.test(lead);
+  const key = KEY.test(rest);
+  const short = lang.shorthand === true && /^\s*(?:[,}]|$)/.test(rest);
+  const placed = start || /[{(,;]\s*$/.test(tail);
+  if (!quoted && (ASSIGNED.test(rest) || ANNOTATED.test(rest) || start && ASSIGNED_WITH.test(rest))) return { needs: "assign", lead, rest, start, key };
+  if (yaml && key && /^\s*(?:-\s+)*$/.test(lead)) return { role: "write", key: true };
+  if ((key || short) && placed) return { needs: "keyed", lead, rest, start, key };
+  if (quoted || line.includes("(")) return NONE2;
+  const typed2 = C_FIELD_LEAD.test(lead) && !/(?<!:):(?!:)/.test(lead) && C_FIELD_REST.test(rest) || start && /^\s+[\w*[\]<.]/.test(rest);
+  return typed2 ? { needs: "typed", lead, rest, start, key } : NONE2;
+}
+function mayBeField(line, col, name, filePath) {
+  const use = lineUse(line, col, name, languageOf(filePath), /\.ya?ml$/.test(filePath));
+  if (!("needs" in use)) return use.role === "field";
+  return use.needs === "typed" || (use.needs === "assign" ? use.start : use.key);
 }
 
 // src/engine/browse.ts
@@ -38034,8 +38039,9 @@ async function readBlobAt(root, rev, rest) {
   if (blob.size > MAX_CONTENT_BYTES) return { kind: "tooLarge", size: blob.size };
   return classify(await git(root, ["cat-file", "blob", blob.oid]));
 }
-async function grepRepo(diff, query, whole, matchCase, signal, withDefs = true, keep) {
+async function grepRepo(diff, query, whole, matchCase, signal, withDefs = true, onlyFields = false) {
   const found = wordRegExp(query, whole, matchCase);
+  const every = globalOf(found);
   const pattern = wordPattern(query, whole, matchCase);
   const same = matchCase ? pattern : pattern.toLowerCase();
   const defining = withDefs && isIdentifier(query) ? definer(query, matchCase) : null;
@@ -38046,18 +38052,24 @@ async function grepRepo(diff, query, whole, matchCase, signal, withDefs = true, 
   const far = (p) => changed.has(p) ? 0 : busy.length === 0 || busy.some((r) => p.startsWith(`${r.dir}/`)) ? 1 : 2;
   const hits = [];
   const defs = [];
+  const fieldish = [];
   const match = ["-E", ...ignoreCase(matchCase), ...lines];
   const scan = { literal: matchCase && WORD2.test(query), bytes: !matchCase && ASCII.test(query) };
-  await grepLines(diff, searchable(diff), match, ["."], signal, scan, (filePath, no, text) => {
-    if (keep && !keep(text)) return;
+  const local = await grepLines(diff, searchable(diff), match, null, signal, scan, (filePath, no, text) => {
+    const may = mayDeclare(filePath, text, every);
+    if (onlyFields && !may) return;
     const at = found?.exec(text)?.index ?? -1;
     const defined = defining?.test(filePath, text) ?? false;
-    if (at >= 0 || !defined) hits.push(hitOf(filePath, no, text, at));
+    if (at >= 0 || !defined) {
+      const hit = hitOf(filePath, no, text, at);
+      hits.push(hit);
+      if (may) fieldish.push(hit);
+    }
     if (defined) defs.push(hitOf(filePath, no, text, defining.at(text)));
   });
   hits.sort(byPlace(far));
   defs.sort(byPlace((p) => changed.has(p) ? 0 : 1));
-  if (!signal.aborted) await describe4(diff, hits, found);
+  if (!signal.aborted) await describe4(diff, fieldish, every, local);
   return { hits, defs };
 }
 function definer(name, matchCase) {
@@ -38070,42 +38082,40 @@ function definer(name, matchCase) {
     at: (text) => word?.exec(text)?.index ?? -1
   };
 }
-async function describe4(diff, hits, found) {
-  const texts = await readTexts(diff, [...new Set(hits.map((h) => h.path))]);
-  const files = /* @__PURE__ */ new Map();
-  const every = found && new RegExp(found.source, `${found.flags.replace("g", "")}g`);
+var globalOf = (found) => found && new RegExp(found.source, `${found.flags.replace("g", "")}g`);
+var namesIn = (line, every) => every ? [...line.matchAll(every)].filter((m) => SPELLED.test(m[0]) && !/[\w$]/.test((line[m.index - 1] ?? "") + (line[m.index + m[0].length] ?? ""))) : [];
+var mayDeclare = (filePath, line, every) => namesIn(line, every).some((m) => mayBeField(line, m.index, m[0], filePath));
+async function describe4(diff, hits, every, local = /* @__PURE__ */ new Map()) {
+  const byPath2 = /* @__PURE__ */ new Map();
   for (const h of hits) {
-    const text = texts.get(h.path);
-    if (text === void 0) continue;
-    let file2 = files.get(h.path);
-    if (!file2) {
-      const read = reader(text);
-      files.set(h.path, file2 = { lines: read.lines, roles: rolesOf(text, h.path, read) });
-    }
-    const line = file2.lines[h.no - 1] ?? "";
-    for (const m of every ? line.matchAll(every) : []) {
-      if (!SPELLED.test(m[0]) || /[\w$]/.test((line[m.index - 1] ?? "") + (line[m.index + m[0].length] ?? ""))) continue;
-      const role = file2.roles(h.no, m.index, m[0]);
-      if (role === "field" || role && !h.role) h.role = role;
-    }
+    const list = byPath2.get(h.path);
+    if (list) list.push(h);
+    else byPath2.set(h.path, [h]);
   }
+  await eachText(diff, [...byPath2.keys()], local, (filePath, text) => {
+    const read = reader(text);
+    const roles = rolesOf(text, filePath, read);
+    for (const h of byPath2.get(filePath)) {
+      const line = read.lines[h.no - 1] ?? "";
+      if (namesIn(line, every).some((m) => mayBeField(line, m.index, m[0], filePath) && roles(h.no, m.index, m[0]) === "field")) h.role = "field";
+    }
+  });
 }
-async function readTexts(diff, paths) {
-  const out = /* @__PURE__ */ new Map();
+async function eachText(diff, paths, local, use) {
   const changed = new Map(diff.files.map((f) => [f.path, f]));
   const wanted = /* @__PURE__ */ new Map();
   for (const p of paths) {
     const file2 = changed.get(p);
     if (file2) {
-      if (file2.newContent !== null) out.set(p, file2.newContent);
+      if (file2.newContent !== null) use(p, file2.newContent);
       continue;
     }
     const where = repoOf(diff, p);
     if (!where) continue;
     const rev = where.repo.headCommit;
-    if (!rev) {
+    if (!rev || local.get(where.repo)?.has(where.rest) === false) {
       const content = readWorkTree(where.root, where.rest);
-      if (content.kind === "text") out.set(p, content.text);
+      if (content.kind === "text") use(p, content.text);
       continue;
     }
     const list = wanted.get(where.repo) ?? { root: where.root, rev, rests: [] };
@@ -38129,10 +38139,9 @@ async function readTexts(diff, paths) {
       const size = Number(buf.toString("utf8", at, eol).split(" ")[2]);
       const content = classify(buf.subarray(eol + 1, eol + 1 + size));
       at = eol + 1 + size + 1;
-      if (content.kind === "text") out.set(repo.dir ? `${repo.dir}/${rest}` : rest, content.text);
+      if (content.kind === "text") use(repo.dir ? `${repo.dir}/${rest}` : rest, content.text);
     }
   });
-  return out;
 }
 var byPlace = (far) => (a, b) => far(a.path) - far(b.path) || compareText(a.path, b.path) || a.no - b.no;
 var searchable = (diff) => diff.repos.filter((r) => r.error === null);
@@ -38159,7 +38168,7 @@ async function findDefinitions(diff, name, from, click, signal) {
   if (scoped.kind === "bound" && scoped.module === null) return only([lineOf(scoped.line)]);
   const language = languageOf(from);
   const escaped = name.replaceAll("$", "\\$");
-  const pathspecs = language.exts.length ? language.exts.map((e) => `*.${e}`) : ["."];
+  const exts = language.exts.length ? language.exts : null;
   const own2 = repoOf(diff, from)?.repo;
   const all = searchable(diff);
   const lookUp = (patterns) => {
@@ -38167,24 +38176,25 @@ async function findDefinitions(diff, name, from, click, signal) {
     const match = ["-E", ...WORD2.test(name) ? ["-w"] : [], "-e", escaped];
     return nearestFirst(own2 ? [[own2], all.filter((r) => r !== own2)] : [all], async (repos) => {
       const hits = [];
-      await grepLines(diff, repos, match, pathspecs, signal, { literal: WORD2.test(name), bytes: false }, (filePath, no, text2) => {
+      await grepLines(diff, repos, match, exts, signal, { literal: WORD2.test(name), bytes: false }, (filePath, no, text2) => {
         if (tests.some((t) => t.test(text2))) hits.push(hitOf(filePath, no, text2, text2.indexOf(name)));
       });
       return { hits: hits.sort(byPlace(() => 0)) };
     });
   };
   const fields = async () => {
-    const lines = await grepRepo(diff, name, true, true, signal, false, (text2) => mayBeField(text2, name));
+    const lines = await grepRepo(diff, name, true, true, signal, false, true);
     return { hits: lines.hits.filter((h) => h.role === "field") };
   };
   const methods = () => lookUp(language.patterns(escaped));
   const fieldsHere = async () => {
     const word = wordRegExp(name, true, true);
+    const every = globalOf(word);
     const hits = text.split("\n").flatMap((line, i) => {
       const at = word.exec(line)?.index ?? -1;
-      return at >= 0 && mayBeField(line, name) ? [hitOf(from, i + 1, line, at)] : [];
+      return at >= 0 && mayDeclare(from, line, every) ? [hitOf(from, i + 1, line, at)] : [];
     });
-    await describe4(diff, hits, word);
+    await describe4(diff, hits, every);
     return hits.filter((h) => h.role === "field");
   };
   let found;
@@ -38230,19 +38240,18 @@ function inModule(hits, module, from) {
   }
   return [];
 }
-async function grepLines(diff, repos, match, pathspecs, signal, scan, onLine) {
+async function grepLines(diff, repos, match, exts, signal, scan, onLine) {
+  const local = /* @__PURE__ */ new Map();
+  const pathspecs = exts ? exts.map((e) => `*.${e}`) : ["."];
+  const wanted = (p) => !exts || exts.some((e) => p.endsWith(`.${e}`));
   const most = !scan.literal ? GREP_LIMIT / 2 : repos.length === 1 ? 1 : 2;
   const threads = Math.max(1, Math.floor(Math.min(most, GREP_LIMIT / repos.length)));
   await mapLimit(repos, GREP_LIMIT, async (repo) => {
     const prefix = repo.dir ? `${repo.dir}/` : "";
-    const rev = repo.headCommit;
-    const strip = rev ? `${rev}:` : "";
-    const added = diff.files.some((f) => f.status === "added" && f.path.startsWith(prefix));
-    const where = rev ? [rev] : added ? ["--untracked"] : [];
-    const args = ["grep", "--no-color", `--threads=${threads}`, "-n", "-z", "-I", ...match, ...where, "--", ...pathspecs, NOT_GENERATED];
-    await gitLines(
-      path3.join(diff.repoRoot, repo.dir),
-      args,
+    const root = path3.join(diff.repoRoot, repo.dir);
+    const run = (where, specs, strip) => gitLines(
+      root,
+      ["grep", "--no-color", `--threads=${threads}`, "-n", "-z", "-I", ...match, ...where, "--", ...specs, NOT_GENERATED],
       (line) => {
         const a = line.indexOf("\0");
         const b = line.indexOf("\0", a + 1);
@@ -38255,7 +38264,26 @@ async function grepLines(diff, repos, match, pathspecs, signal, scan, onLine) {
       signal,
       scan.bytes ? { LC_ALL: "C" } : {}
     );
+    const rev = repo.headCommit;
+    if (!rev) {
+      const added = diff.files.some((f) => f.status === "added" && f.path.startsWith(prefix));
+      return run(added ? ["--untracked"] : [], pathspecs, "");
+    }
+    const changed = await changedFrom(root, rev);
+    if (!changed) return run([rev], pathspecs, `${rev}:`);
+    local.set(repo, changed);
+    const stale = [...changed].filter(wanted);
+    await Promise.all([
+      run([], [...pathspecs, ...[...changed].map((p) => `:(exclude,literal)${p}`)], ""),
+      stale.length ? run([rev], stale.map((p) => `:(literal)${p}`), `${rev}:`) : null
+    ]);
   });
+  return local;
+}
+async function changedFrom(root, rev) {
+  const [flags, names] = await Promise.all([git(root, ["ls-files", "-v", "-z"]), git(root, ["diff-index", "--name-only", "-z", "--no-renames", rev, "--"])]);
+  if (/(?:^|\0)[a-zS] /.test(flags.toString("utf8"))) return null;
+  return new Set(names.toString("utf8").split("\0").filter(Boolean));
 }
 function hitOf(filePath, no, text, at) {
   if (text.length <= MAX_HIT_CHARS) return { path: filePath, no, text, at };

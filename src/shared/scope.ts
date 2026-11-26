@@ -405,59 +405,70 @@ function usesOf(text: string, filePath: string, read = reader(text)): (no: numbe
     return "";
   };
 
-  const none = { role: null, key: false };
-  const field = { role: "field" as const, key: true };
   return (no, col, name) => {
     const line = lines[no - 1];
-    if (line === undefined || line.slice(col, col + name.length) !== name) return none;
-    let lead = line.slice(0, col);
-    let rest = line.slice(col + name.length);
-    const quoted = /["'`]$/.test(lead) && /^["'`]/.test(rest);
-    if (quoted) {
-      if (ANNOTATION.test(lead.slice(0, -1))) return field;
-      if (/^.\]\s*(?:[-+*/%&|^]|\?\?)?=(?![=>])/.test(rest)) return { role: "write", key: true };
-      lead = lead.slice(0, -1);
-      rest = rest.slice(1);
-    }
-    if (/(?:^|[\s(,])[\w$]+\??\s*:(?!:)[^=,;(){}]*$|\btype\s+$/.test(lead)) return none;
-    if (/(?:\+\+|--)\s*(?:[\w$]+(?:\.|->))*$/.test(lead) && !/^(?:\.|->|\[)/.test(rest)) return { role: "write", key: false };
-    const start = ONLY_MODS.test(lead);
-    const key = KEY.test(rest);
-    const short = lang.shorthand === true && /^\s*(?:[,}]|$)/.test(rest);
-    const placed = start || /[{(,;]\s*$/.test(lead);
-
-    if (!quoted && (ASSIGNED.test(rest) || ANNOTATED.test(rest) || (start && ASSIGNED_WITH.test(rest)))) {
+    if (line === undefined) return NONE;
+    const use = lineUse(line, col, name, lang, yaml);
+    if (!("needs" in use)) return use;
+    const { lead, rest, start, key } = use;
+    if (use.needs === "assign") {
       const at = around(no, lead);
-      if (at.open === "(" && (DEFINES.test(at.head) || (start && inList(lines, no) && !/^(?:async\s+)?(?:with|class)\b/.test(at.head)))) return none;
-      if (start && kindOf(at, "") === "type") return field;
+      if (at.open === "(" && (DEFINES.test(at.head) || (start && inList(lines, no) && !/^(?:async\s+)?(?:with|class)\b/.test(at.head)))) return NONE;
+      if (start && kindOf(at, "") === "type") return FIELD;
       return { role: "write", key: jsx && /^=[{"']/.test(rest) };
     }
-    if (yaml && key && /^\s*(?:-\s+)*$/.test(lead)) return { role: "write", key: true };
-    if ((key || short) && placed) {
+    if (use.needs === "keyed") {
       const kind = kindOf(around(no, lead), rest.replace(/^\??\s*:/, ""));
-      if (kind === "type") return key ? field : none;
-      return kind === "literal" && !ARROW_PARAMS.test(closing(no, lead, rest)) ? { role: "write", key } : none;
+      if (kind === "type") return key ? FIELD : NONE;
+      return kind === "literal" && !ARROW_PARAMS.test(closing(no, lead, rest)) ? { role: "write", key } : NONE;
     }
-    if (!quoted && !line.includes("(") && kindOf(around(no, lead), "") === "type") {
-      if (C_FIELD_LEAD.test(lead) && !/(?<!:):(?!:)/.test(lead) && C_FIELD_REST.test(rest)) return field;
-      if (start && /^\s+[\w*[\]<.]/.test(rest)) return field;
-    }
-    return none;
+    return kindOf(around(no, lead), "") === "type" ? FIELD : NONE;
   };
 }
 
-export function mayBeField(line: string, name: string): boolean {
-  for (const m of line.matchAll(new RegExp(`(?<![\\w$])${name.replaceAll("$", "\\$")}(?![\\w$])`, "g"))) {
-    let lead = line.slice(0, m.index);
-    let rest = line.slice(m.index + name.length);
-    const quoted = /["'`]$/.test(lead) && /^["'`]/.test(rest);
-    if (quoted) {
-      if (ANNOTATION.test(lead.slice(0, -1))) return true;
-      lead = lead.slice(0, -1);
-      rest = rest.slice(1);
-    }
-    if (ONLY_MODS.test(lead) || KEY.test(rest)) return true;
-    if (!quoted && !line.includes("(") && C_FIELD_LEAD.test(lead) && C_FIELD_REST.test(rest)) return true;
+type Use = { role: Role | null; key: boolean };
+type Pending = { needs: "assign" | "keyed" | "typed"; lead: string; rest: string; start: boolean; key: boolean };
+
+const NONE: Use = { role: null, key: false };
+const FIELD: Use = { role: "field", key: true };
+
+const QUOTES = "\"'`";
+const BREAKS = "=,;(){}";
+
+function lastBreak(lead: string): number {
+  let at = lead.length - 1;
+  while (at >= 0 && !BREAKS.includes(lead[at]!)) at--;
+  return Math.max(at, 0);
+}
+
+function lineUse(line: string, col: number, name: string, lang: Language, yaml: boolean): Use | Pending {
+  if (line.slice(col, col + name.length) !== name) return NONE;
+  let lead = line.slice(0, col);
+  let rest = line.slice(col + name.length);
+  const quoted = QUOTES.includes(lead.at(-1) ?? "_") && QUOTES.includes(rest[0] ?? "_");
+  if (quoted) {
+    if (ANNOTATION.test(lead.slice(0, -1))) return FIELD;
+    if (/^.\]\s*(?:[-+*/%&|^]|\?\?)?=(?![=>])/.test(rest)) return { role: "write", key: true };
+    lead = lead.slice(0, -1);
+    rest = rest.slice(1);
   }
-  return false;
+  const tail = lead.slice(lastBreak(lead));
+  if (/(?:^|[\s(,])[\w$]+\??\s*:(?!:)[^=,;(){}]*$|\btype\s+$/.test(tail)) return NONE;
+  if (/(?:\+\+|--)\s*(?:[\w$]+(?:\.|->))*$/.test(tail) && !/^(?:\.|->|\[)/.test(rest)) return { role: "write", key: false };
+  const start = ONLY_MODS.test(lead);
+  const key = KEY.test(rest);
+  const short = lang.shorthand === true && /^\s*(?:[,}]|$)/.test(rest);
+  const placed = start || /[{(,;]\s*$/.test(tail);
+  if (!quoted && (ASSIGNED.test(rest) || ANNOTATED.test(rest) || (start && ASSIGNED_WITH.test(rest)))) return { needs: "assign", lead, rest, start, key };
+  if (yaml && key && /^\s*(?:-\s+)*$/.test(lead)) return { role: "write", key: true };
+  if ((key || short) && placed) return { needs: "keyed", lead, rest, start, key };
+  if (quoted || line.includes("(")) return NONE;
+  const typed = (C_FIELD_LEAD.test(lead) && !/(?<!:):(?!:)/.test(lead) && C_FIELD_REST.test(rest)) || (start && /^\s+[\w*[\]<.]/.test(rest));
+  return typed ? { needs: "typed", lead, rest, start, key } : NONE;
+}
+
+export function mayBeField(line: string, col: number, name: string, filePath: string): boolean {
+  const use = lineUse(line, col, name, languageOf(filePath), /\.ya?ml$/.test(filePath));
+  if (!("needs" in use)) return use.role === "field";
+  return use.needs === "typed" || (use.needs === "assign" ? use.start : use.key);
 }

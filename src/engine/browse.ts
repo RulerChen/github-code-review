@@ -104,9 +104,10 @@ export async function grepRepo(
   matchCase: boolean,
   signal: AbortSignal,
   withDefs = true,
-  keep?: (text: string) => boolean,
+  onlyFields = false,
 ): Promise<Searched> {
   const found = wordRegExp(query, whole, matchCase);
+  const every = globalOf(found);
   const pattern = wordPattern(query, whole, matchCase);
   const same = matchCase ? pattern : pattern.toLowerCase();
   const defining = withDefs && isIdentifier(query) ? definer(query, matchCase) : null;
@@ -117,18 +118,24 @@ export async function grepRepo(
   const far = (p: string) => (changed.has(p) ? 0 : busy.length === 0 || busy.some((r) => p.startsWith(`${r.dir}/`)) ? 1 : 2);
   const hits: RepoHit[] = [];
   const defs: RepoHit[] = [];
+  const fieldish: RepoHit[] = [];
   const match = ["-E", ...ignoreCase(matchCase), ...lines];
   const scan = { literal: matchCase && WORD.test(query), bytes: !matchCase && ASCII.test(query) };
-  await grepLines(diff, searchable(diff), match, ["."], signal, scan, (filePath, no, text) => {
-    if (keep && !keep(text)) return;
+  const local = await grepLines(diff, searchable(diff), match, null, signal, scan, (filePath, no, text) => {
+    const may = mayDeclare(filePath, text, every);
+    if (onlyFields && !may) return;
     const at = found?.exec(text)?.index ?? -1;
     const defined = defining?.test(filePath, text) ?? false;
-    if (at >= 0 || !defined) hits.push(hitOf(filePath, no, text, at));
+    if (at >= 0 || !defined) {
+      const hit = hitOf(filePath, no, text, at);
+      hits.push(hit);
+      if (may) fieldish.push(hit);
+    }
     if (defined) defs.push(hitOf(filePath, no, text, defining!.at(text)));
   });
   hits.sort(byPlace(far));
   defs.sort(byPlace((p) => (changed.has(p) ? 0 : 1)));
-  if (!signal.aborted) await describe(diff, hits, found);
+  if (!signal.aborted) await describe(diff, fieldish, every, local);
   return { hits, defs };
 }
 
@@ -143,43 +150,45 @@ function definer(name: string, matchCase: boolean) {
   };
 }
 
-async function describe(diff: DiffResult, hits: RepoHit[], found: RegExp | null): Promise<void> {
-  const texts = await readTexts(diff, [...new Set(hits.map((h) => h.path))]);
-  const files = new Map<string, { lines: string[]; roles: ReturnType<typeof rolesOf> }>();
-  const every = found && new RegExp(found.source, `${found.flags.replace("g", "")}g`);
+const globalOf = (found: RegExp | null) => found && new RegExp(found.source, `${found.flags.replace("g", "")}g`);
+
+const namesIn = (line: string, every: RegExp | null) =>
+  every ? [...line.matchAll(every)].filter((m) => SPELLED.test(m[0]) && !/[\w$]/.test((line[m.index - 1] ?? "") + (line[m.index + m[0].length] ?? ""))) : [];
+
+const mayDeclare = (filePath: string, line: string, every: RegExp | null) => namesIn(line, every).some((m) => mayBeField(line, m.index, m[0], filePath));
+
+async function describe(diff: DiffResult, hits: RepoHit[], every: RegExp | null, local = new Map<DiffRepo, Set<string>>()): Promise<void> {
+  const byPath = new Map<string, RepoHit[]>();
   for (const h of hits) {
-    const text = texts.get(h.path);
-    if (text === undefined) continue;
-    let file = files.get(h.path);
-    if (!file) {
-      const read = reader(text);
-      files.set(h.path, (file = { lines: read.lines, roles: rolesOf(text, h.path, read) }));
-    }
-    const line = file.lines[h.no - 1] ?? "";
-    for (const m of every ? line.matchAll(every) : []) {
-      if (!SPELLED.test(m[0]) || /[\w$]/.test((line[m.index - 1] ?? "") + (line[m.index + m[0].length] ?? ""))) continue;
-      const role = file.roles(h.no, m.index, m[0]);
-      if (role === "field" || (role && !h.role)) h.role = role;
-    }
+    const list = byPath.get(h.path);
+    if (list) list.push(h);
+    else byPath.set(h.path, [h]);
   }
+  await eachText(diff, [...byPath.keys()], local, (filePath, text) => {
+    const read = reader(text);
+    const roles = rolesOf(text, filePath, read);
+    for (const h of byPath.get(filePath)!) {
+      const line = read.lines[h.no - 1] ?? "";
+      if (namesIn(line, every).some((m) => mayBeField(line, m.index, m[0], filePath) && roles(h.no, m.index, m[0]) === "field")) h.role = "field";
+    }
+  });
 }
 
-async function readTexts(diff: DiffResult, paths: string[]): Promise<Map<string, string>> {
-  const out = new Map<string, string>();
+async function eachText(diff: DiffResult, paths: string[], local: Map<DiffRepo, Set<string>>, use: (filePath: string, text: string) => void): Promise<void> {
   const changed = new Map(diff.files.map((f) => [f.path, f]));
   const wanted = new Map<DiffRepo, { root: string; rev: string; rests: string[] }>();
   for (const p of paths) {
     const file = changed.get(p);
     if (file) {
-      if (file.newContent !== null) out.set(p, file.newContent);
+      if (file.newContent !== null) use(p, file.newContent);
       continue;
     }
     const where = repoOf(diff, p);
     if (!where) continue;
     const rev = where.repo.headCommit;
-    if (!rev) {
+    if (!rev || local.get(where.repo)?.has(where.rest) === false) {
       const content = readWorkTree(where.root, where.rest);
-      if (content.kind === "text") out.set(p, content.text);
+      if (content.kind === "text") use(p, content.text);
       continue;
     }
     const list = wanted.get(where.repo) ?? { root: where.root, rev, rests: [] };
@@ -204,10 +213,9 @@ async function readTexts(diff: DiffResult, paths: string[]): Promise<Map<string,
       const size = Number(buf.toString("utf8", at, eol).split(" ")[2]);
       const content = classify(buf.subarray(eol + 1, eol + 1 + size));
       at = eol + 1 + size + 1;
-      if (content.kind === "text") out.set(repo.dir ? `${repo.dir}/${rest}` : rest, content.text);
+      if (content.kind === "text") use(repo.dir ? `${repo.dir}/${rest}` : rest, content.text);
     }
   });
-  return out;
 }
 
 type Found = { hits: RepoHit[] };
@@ -252,7 +260,7 @@ export async function findDefinitions(diff: DiffResult, name: string, from: stri
 
   const language = languageOf(from);
   const escaped = name.replaceAll("$", "\\$");
-  const pathspecs = language.exts.length ? language.exts.map((e) => `*.${e}`) : ["."];
+  const exts = language.exts.length ? language.exts : null;
   const own = repoOf(diff, from)?.repo;
   const all = searchable(diff);
   const lookUp = (patterns: string[]) => {
@@ -260,24 +268,25 @@ export async function findDefinitions(diff: DiffResult, name: string, from: stri
     const match = ["-E", ...(WORD.test(name) ? ["-w"] : []), "-e", escaped];
     return nearestFirst(own ? [[own], all.filter((r) => r !== own)] : [all], async (repos) => {
       const hits: RepoHit[] = [];
-      await grepLines(diff, repos, match, pathspecs, signal, { literal: WORD.test(name), bytes: false }, (filePath, no, text) => {
+      await grepLines(diff, repos, match, exts, signal, { literal: WORD.test(name), bytes: false }, (filePath, no, text) => {
         if (tests.some((t) => t.test(text))) hits.push(hitOf(filePath, no, text, text.indexOf(name)));
       });
       return { hits: hits.sort(byPlace(() => 0)) };
     });
   };
   const fields = async (): Promise<Found> => {
-    const lines = await grepRepo(diff, name, true, true, signal, false, (text) => mayBeField(text, name));
+    const lines = await grepRepo(diff, name, true, true, signal, false, true);
     return { hits: lines.hits.filter((h) => h.role === "field") };
   };
   const methods = () => lookUp(language.patterns(escaped));
   const fieldsHere = async (): Promise<RepoHit[]> => {
     const word = wordRegExp(name, true, true)!;
+    const every = globalOf(word);
     const hits = text!.split("\n").flatMap((line, i) => {
       const at = word.exec(line)?.index ?? -1;
-      return at >= 0 && mayBeField(line, name) ? [hitOf(from, i + 1, line, at)] : [];
+      return at >= 0 && mayDeclare(from, line, every) ? [hitOf(from, i + 1, line, at)] : [];
     });
-    await describe(diff, hits, word);
+    await describe(diff, hits, every);
     return hits.filter((h) => h.role === "field");
   };
   let found: Found;
@@ -330,36 +339,56 @@ async function grepLines(
   diff: DiffResult,
   repos: DiffRepo[],
   match: string[],
-  pathspecs: string[],
+  exts: string[] | null,
   signal: AbortSignal,
   scan: { literal: boolean; bytes: boolean },
   onLine: (filePath: string, no: number, text: string) => void,
-): Promise<void> {
+): Promise<Map<DiffRepo, Set<string>>> {
+  const local = new Map<DiffRepo, Set<string>>();
+  const pathspecs = exts ? exts.map((e) => `*.${e}`) : ["."];
+  const wanted = (p: string) => !exts || exts.some((e) => p.endsWith(`.${e}`));
   const most = !scan.literal ? GREP_LIMIT / 2 : repos.length === 1 ? 1 : 2;
   const threads = Math.max(1, Math.floor(Math.min(most, GREP_LIMIT / repos.length)));
   await mapLimit(repos, GREP_LIMIT, async (repo) => {
     const prefix = repo.dir ? `${repo.dir}/` : "";
+    const root = path.join(diff.repoRoot, repo.dir);
+    const run = (where: string[], specs: string[], strip: string) =>
+      gitLines(
+        root,
+        ["grep", "--no-color", `--threads=${threads}`, "-n", "-z", "-I", ...match, ...where, "--", ...specs, NOT_GENERATED],
+        (line) => {
+          const a = line.indexOf("\0");
+          const b = line.indexOf("\0", a + 1);
+          if (a < 0 || b < 0) return true;
+          const file = line.slice(0, a);
+          onLine(prefix + (file.startsWith(strip) ? file.slice(strip.length) : file), Number(line.slice(a + 1, b)), line.slice(b + 1));
+          return true;
+        },
+        [0, 1],
+        signal,
+        scan.bytes ? { LC_ALL: "C" } : {},
+      );
     const rev = repo.headCommit;
-    const strip = rev ? `${rev}:` : "";
-    const added = diff.files.some((f) => f.status === "added" && f.path.startsWith(prefix));
-    const where = rev ? [rev] : added ? ["--untracked"] : [];
-    const args = ["grep", "--no-color", `--threads=${threads}`, "-n", "-z", "-I", ...match, ...where, "--", ...pathspecs, NOT_GENERATED];
-    await gitLines(
-      path.join(diff.repoRoot, repo.dir),
-      args,
-      (line) => {
-        const a = line.indexOf("\0");
-        const b = line.indexOf("\0", a + 1);
-        if (a < 0 || b < 0) return true;
-        const file = line.slice(0, a);
-        onLine(prefix + (file.startsWith(strip) ? file.slice(strip.length) : file), Number(line.slice(a + 1, b)), line.slice(b + 1));
-        return true;
-      },
-      [0, 1],
-      signal,
-      scan.bytes ? { LC_ALL: "C" } : {},
-    );
+    if (!rev) {
+      const added = diff.files.some((f) => f.status === "added" && f.path.startsWith(prefix));
+      return run(added ? ["--untracked"] : [], pathspecs, "");
+    }
+    const changed = await changedFrom(root, rev);
+    if (!changed) return run([rev], pathspecs, `${rev}:`);
+    local.set(repo, changed);
+    const stale = [...changed].filter(wanted);
+    await Promise.all([
+      run([], [...pathspecs, ...[...changed].map((p) => `:(exclude,literal)${p}`)], ""),
+      stale.length ? run([rev], stale.map((p) => `:(literal)${p}`), `${rev}:`) : null,
+    ]);
   });
+  return local;
+}
+
+async function changedFrom(root: string, rev: string): Promise<Set<string> | null> {
+  const [flags, names] = await Promise.all([git(root, ["ls-files", "-v", "-z"]), git(root, ["diff-index", "--name-only", "-z", "--no-renames", rev, "--"])]);
+  if (/(?:^|\0)[a-zS] /.test(flags.toString("utf8"))) return null;
+  return new Set(names.toString("utf8").split("\0").filter(Boolean));
 }
 
 function hitOf(filePath: string, no: number, text: string, at: number): RepoHit {
