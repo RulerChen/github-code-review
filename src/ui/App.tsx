@@ -725,18 +725,10 @@ export function App({ viewId }: Props) {
     return allEntries && (filterText ? allEntries.filter((e) => e.path.toLowerCase().includes(filterText)) : allEntries);
   }, [allFiles, allEntries, filterText, treeEntries]);
 
-  const changedKey = diff?.files.map((f) => f.path).join("\0") ?? "";
   const codePath = codeFile?.path ?? null;
-  const changedDirs = useCallback(
-    (dirs: ReadonlySet<string>) => withDirsOf(dirs, changedKey ? changedKey.split("\0") : []),
-    [changedKey],
-  );
   useEffect(() => {
-    if (allFiles) setOpenDirs(changedDirs);
-  }, [allFiles, changedDirs]);
-  useEffect(() => {
-    if (allFiles && codePath !== null) setOpenDirs((dirs) => withDirsOf(dirs, [codePath]));
-  }, [allFiles, codePath]);
+    if (codePath !== null) setOpenDirs((dirs) => withDirsOf(dirs, [codePath]));
+  }, [codePath]);
 
   const toggleDir = useCallback((path: string) => setFoldedDirs(flip(path)), []);
   const toggleOpen = useCallback((path: string) => setOpenDirs(flip(path)), []);
@@ -746,7 +738,7 @@ export function App({ viewId }: Props) {
   const canFold = browsing ? allEntries !== null && allEntries.length > 0 : shownDirs.length > 0;
   const foldAll = () => {
     if (!browsing) setFoldedDirs(anyDirOpen && treeList ? new Set(dirPaths(treeList)) : new Set());
-    else setOpenDirs(anyDirOpen ? new Set() : withDirsOf(changedDirs(new Set()), codePath === null ? [] : [codePath]));
+    else setOpenDirs(anyDirOpen ? new Set() : withDirsOf(new Set(), [...(diff?.files.map((f) => f.path) ?? []), ...(codePath === null ? [] : [codePath])]));
   };
   const unfoldLabel = browsing ? "Open the folders with changes" : "Expand all folders";
 
