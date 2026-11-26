@@ -24,7 +24,6 @@ import {
   rawFileUrl,
   replyToThread,
   searchRepo,
-  submitReview,
   type TopicRequest,
   viewUrl,
 } from "./api";
@@ -45,7 +44,6 @@ import { ReviewBar } from "./ReviewBar";
 import { definitionsFound, type Hit, revealLine, searchChanges, SearchResults, searchSections } from "./Search";
 import { claudeState, ClaudeStatus } from "./Status";
 import { useStoredState, useViewed } from "./storage";
-import { SubmitReview } from "./SubmitReview";
 import { ChangeStats, RefreshButton, SidebarToggle, type Tab, ThemeToggle, ViewTabs } from "./TopBar";
 import { buildTopics, TopicSection, topicShows, type TopicView } from "./Topics";
 
@@ -398,15 +396,15 @@ export function App({ viewId }: Props) {
 
     return {
       versions,
-      create: async (anchor, snippet, body, single) => {
+      create: async (anchor, snippet, body) => {
         if (!viewId || !current) return;
         const full: ThreadAnchor = anchor.path === null ? { ...anchor, compare: current } : { ...anchor, commit: versions(anchor.path)[anchor.side ?? "new"] };
         const lines = full.side === "new" && full.commit === null ? latestLines.current(full.path) : null;
         const context = lines && full.side !== null ? contextOf(lines, full.start, full.end) : null;
-        update(await createThread(viewId, full, snippet, context, body, single));
+        update(await createThread(viewId, full, snippet, context, body));
       },
-      reply: async (threadId, body, single) => {
-        if (viewId) update(await replyToThread(viewId, threadId, body, single));
+      reply: async (threadId, body) => {
+        if (viewId) update(await replyToThread(viewId, threadId, body));
       },
       edit: async (threadId, commentId, body) => {
         if (viewId) update(await editComment(viewId, threadId, commentId, body));
@@ -434,7 +432,7 @@ export function App({ viewId }: Props) {
   const live = useMemo(() => threads.filter((t) => t.comments.length > 0).map(placed), [threads, placed]);
 
   const pathThreads = useRef(new Map<string, Thread[]>());
-  const comments = useMemo<Pick<CommentsApi, keyof CommentActions | "threadsFor" | "threadsForTopic" | "pending" | "read">>(() => {
+  const comments = useMemo<Pick<CommentsApi, keyof CommentActions | "threadsFor" | "threadsForTopic" | "read">>(() => {
     const byPath = new Map<string, Thread[]>();
     const byTopic = new Map<string, Thread[]>();
     const add = (map: Map<string, Thread[]>, key: string, t: Thread) => {
@@ -458,17 +456,9 @@ export function App({ viewId }: Props) {
       ...actions,
       threadsFor: (path) => byPath.get(path) ?? NO_THREADS,
       threadsForTopic: (title) => byTopic.get(title) ?? NO_THREADS,
-      pending: live.some((t) => t.comments.some((c) => c.draft)),
       read: status?.read ?? 0,
     };
   }, [live, actions, current, status?.read]);
-
-  const submit = async (body: string) => {
-    if (!viewId) return false;
-    const result = await submitReview(viewId, body);
-    setThreads((prev) => mergeThreads(prev, result.threads));
-    return result.delivered;
-  };
 
   const review = useMemo(() => {
     if (!diff) return null;
@@ -647,10 +637,6 @@ export function App({ viewId }: Props) {
     },
   });
   const commentsValue = useMemo(() => ({ ...comments, ...conv.api }), [comments, conv.api]);
-  const pendingComments = useMemo(
-    () => conv.ordered.flatMap((thread) => thread.comments.filter((c) => c.draft).map((comment) => ({ thread, comment }))),
-    [conv.ordered],
-  );
 
   const claude = claudeState(status, connected);
   const [help, setHelp] = useState(false);
@@ -807,7 +793,6 @@ export function App({ viewId }: Props) {
                   <KeyboardButton onClick={() => setHelp(true)} />
                   <ThemeToggle />
                   <ClaudeStatus state={claude} since={status?.workingSince ?? null} />
-                  <SubmitReview pending={pendingComments} state={claude} onSubmit={submit} onOpen={conv.reveal} />
                 </header>
 
                 {error && <div className="banner">{error.message}</div>}

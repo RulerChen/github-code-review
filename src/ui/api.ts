@@ -23,12 +23,6 @@ export class ApiError extends Error {
   }
 }
 
-interface SubmitResult {
-  review: number;
-  delivered: boolean;
-  threads: Thread[];
-}
-
 export const UNREACHABLE = "Could not reach the viewer. It stops when the Claude Code session ends: ask Claude to open it again.";
 
 export const viewUrl =(viewId: string, ...parts: string[]) => `/api/views/${[viewId, ...parts].map(encodeURIComponent).join("/")}`;
@@ -151,12 +145,12 @@ export function fetchRefs(viewId: string, repo: string | null = null): Promise<R
   return request<RefList>(url, (b) => Array.isArray(b.branches));
 }
 
-export function createThread(viewId: string, anchor: ThreadAnchor, snippet: string, context: ThreadContext | null, body: string, single: boolean): Promise<Thread> {
-  return threadRequest(viewUrl(viewId, "threads"), "POST", { anchor, snippet, context, body, single });
+export function createThread(viewId: string, anchor: ThreadAnchor, snippet: string, context: ThreadContext | null, body: string): Promise<Thread> {
+  return threadRequest(viewUrl(viewId, "threads"), "POST", { anchor, snippet, context, body });
 }
 
-export function replyToThread(viewId: string, threadId: string, body: string, single: boolean): Promise<Thread> {
-  return threadRequest(viewUrl(viewId, "threads", threadId, "comments"), "POST", { body, single });
+export function replyToThread(viewId: string, threadId: string, body: string): Promise<Thread> {
+  return threadRequest(viewUrl(viewId, "threads", threadId, "comments"), "POST", { body });
 }
 
 export function editComment(viewId: string, threadId: string, commentId: string, body: string): Promise<Thread> {
@@ -181,8 +175,4 @@ export interface TopicRequest {
 export async function groupTopics(viewId: string, compare: Comparison, ask: TopicRequest | { sync: string }): Promise<Grouping[]> {
   const url = withComparison(viewUrl(viewId, "topics"), compare);
   return (await request<{ groupings: Grouping[] }>(url, (b) => Array.isArray(b.groupings), "POST", ask)).groupings;
-}
-
-export function submitReview(viewId: string, body: string): Promise<SubmitResult> {
-  return request<SubmitResult>(viewUrl(viewId, "review"), (b) => Array.isArray(b.threads), "POST", { body });
 }

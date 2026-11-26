@@ -165,10 +165,10 @@ export function TopicSection({ topic, viewed, opening, onToggleViewed }: Section
             threads={threads}
             commenting={commenting}
             placeholder="Comment on this topic"
-            onCreate={(body, single) => {
+            onCreate={(body) => {
               const anchor = { topic: topic.title, path: null, side: null, start: null, end: null, commit: null };
               const snippet = [`Files: ${files.join(", ")}`, topic.summary].filter(Boolean).join("\n\n");
-              return create(anchor, snippet, body, single);
+              return create(anchor, snippet, body);
             }}
             onClose={() => setCommenting(false)}
           />

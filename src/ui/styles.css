@@ -1804,17 +1804,6 @@ body.is-resizing .file {
   fill: none;
 }
 
-.pending-label {
-  flex: none;
-  padding: 0 7px;
-  border: 1px solid var(--attention);
-  border-radius: 2em;
-  color: var(--attention);
-  font-size: 11px;
-  font-weight: 500;
-  line-height: 18px;
-}
-
 .unread-label {
   flex: none;
   padding: 0 7px;
@@ -1943,10 +1932,6 @@ body.is-resizing .file {
   min-width: 104px;
 }
 
-.review-menu > .button.primary .counter {
-  background: #ffffff33;
-}
-
 .review-popover {
   position: absolute;
   top: calc(100% + 4px);
@@ -1960,10 +1945,6 @@ body.is-resizing .file {
   background: var(--bg);
   box-shadow: var(--overlay-shadow);
   transform-origin: top right;
-}
-
-.review-popover .comment-form {
-  padding: 12px;
 }
 
 .status-dot {
@@ -2026,36 +2007,6 @@ body.is-resizing .file {
 
 .status-popover {
   width: 360px;
-}
-
-.review-drafts {
-  max-height: min(240px, 30vh);
-  margin: -12px -12px 10px;
-  padding: 0;
-  overflow-y: auto;
-  border-bottom: 1px solid var(--border-muted);
-  list-style: none;
-}
-
-.review-drafts > li + li {
-  border-top: 1px solid var(--border-muted);
-}
-
-.review-draft {
-  display: grid;
-  gap: 2px;
-  width: 100%;
-  padding: 6px 12px;
-  border: 0;
-  background: none;
-  color: var(--fg);
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-
-.review-draft:hover {
-  background: var(--bg-subtle);
 }
 
 .review-sent {
@@ -2221,18 +2172,6 @@ body.is-resizing .file {
 
 .comment-form-buttons > .button {
   flex: 1 0 auto;
-}
-
-.either {
-  display: inline-grid;
-}
-
-.either > * {
-  grid-area: 1 / 1;
-}
-
-.either > [aria-hidden="true"] {
-  visibility: hidden;
 }
 
 .notice {

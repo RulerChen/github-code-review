@@ -161,10 +161,10 @@ export const DiffTable = memo(function DiffTable({ path, hunks, oldTokens, newTo
     findDefinition(text, { path, line: line?.[0] === "new" ? line[1] : null, col: word?.col ?? 0, panel }, e.clientX, e.clientY);
   };
 
-  const submit = async (body: string, single: boolean) => {
+  const submit = async (body: string) => {
     if (!selection) return;
     const { side, start, end } = selection;
-    await create({ path, side, start, end }, snippetOf(hunks, side, start, end), body, single);
+    await create({ path, side, start, end }, snippetOf(hunks, side, start, end), body);
     setSelection(null);
   };
 

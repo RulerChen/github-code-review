@@ -6,7 +6,6 @@ const now = () => new Date().toISOString();
 
 export interface Submission {
   n: number;
-  body: string;
   submittedAt: string;
 }
 
@@ -52,16 +51,16 @@ export class RepoThreads {
     this.emitStatus();
   }
 
-  create(anchor: ThreadAnchor, snippet: string, context: ThreadContext | null, body: string, single: boolean): Thread {
+  create(anchor: ThreadAnchor, snippet: string, context: ThreadContext | null, body: string): Thread {
     const thread: Thread = { id: newId(), rev: 0, anchor, snippet, context, comments: [] };
     this.threads.push(thread);
-    this.addComment(thread, body, single);
+    this.addComment(thread, body);
     return thread;
   }
 
-  reply(threadId: string, body: string, single: boolean): Thread | null {
+  reply(threadId: string, body: string): Thread | null {
     const thread = this.find(threadId);
-    if (thread) this.addComment(thread, body, single);
+    if (thread) this.addComment(thread, body);
     return thread;
   }
 
@@ -96,21 +95,6 @@ export class RepoThreads {
     this.emit(thread);
   }
 
-  submit(body: string): { submission: Submission; delivered: boolean; threads: Thread[] } | null {
-    const changed = this.threads.filter((t) => t.comments.some((c) => c.draft));
-    if (!changed.length && !body) return null;
-    const submission = this.newSubmission(body);
-    for (const t of changed) {
-      for (const c of t.comments) {
-        if (!c.draft) continue;
-        c.draft = false;
-        c.review = submission.n;
-      }
-      this.emit(t);
-    }
-    return { submission, delivered: this.wake(submission), threads: changed };
-  }
-
   waitForReview(after: number, onReview: (s: Submission) => void): () => void {
     const latest = this.submissions.at(-1);
     if (latest && latest.n > after) {
@@ -132,22 +116,19 @@ export class RepoThreads {
     return this.threads.find((t) => t.id === threadId) ?? null;
   }
 
-  private newSubmission(body: string): Submission {
-    const submission: Submission = { n: this.submissions.length + 1, body, submittedAt: now() };
+  private newSubmission(): Submission {
+    const submission: Submission = { n: this.submissions.length + 1, submittedAt: now() };
     this.submissions.push(submission);
     this.onChange();
     return submission;
   }
 
-  private wake(submission: Submission): boolean {
-    const delivered = this.waiters.size > 0;
+  private wake(submission: Submission): void {
+    if (!this.waiters.size) return;
     for (const wake of this.waiters) wake(submission);
     this.waiters.clear();
-    if (delivered) {
-      this.workingSince = now();
-      this.emitStatus();
-    }
-    return delivered;
+    this.workingSince = now();
+    this.emitStatus();
   }
 
   private emitStatus(): void {
@@ -161,17 +142,14 @@ export class RepoThreads {
     this.onChange();
   }
 
-  private addComment(thread: Thread, body: string, single: boolean): void {
-    const c = comment("user", body);
-    thread.comments.push(c);
-    const submission = single ? this.newSubmission("") : null;
-    c.draft = !single;
-    c.review = submission?.n ?? null;
+  private addComment(thread: Thread, body: string): void {
+    const submission = this.newSubmission();
+    thread.comments.push({ ...comment("user", body), review: submission.n });
     this.emit(thread);
-    if (submission) this.wake(submission);
+    this.wake(submission);
   }
 }
 
 function comment(author: ThreadComment["author"], body: string): ThreadComment {
-  return { id: newId(), author, body, createdAt: now(), draft: false, review: null, editedAt: null };
+  return { id: newId(), author, body, createdAt: now(), review: null, editedAt: null };
 }

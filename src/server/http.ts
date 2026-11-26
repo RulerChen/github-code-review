@@ -66,7 +66,7 @@ const MAX_CACHED_CHARS = 64 * 1024 * 1024;
 const PING_MS = 25_000;
 const SAVE_DELAY_MS = 500;
 const PAGE = /^\/v\/[\w-]+$/;
-const API = /^\/api\/views\/([\w-]+)\/(diff|file|blob|raw|tree|grep|defs|events|refs|threads|review|reviews|wait|version|topics)(?:\/([\w-]+)\/comments(?:\/([\w-]+))?)?$/;
+const API = /^\/api\/views\/([\w-]+)\/(diff|file|blob|raw|tree|grep|defs|events|refs|threads|reviews|wait|version|topics)(?:\/([\w-]+)\/comments(?:\/([\w-]+))?)?$/;
 const SHA = /^[0-9a-f]{40,64}$/;
 
 const sshAddress = process.env.SSH_CONNECTION?.split(" ")[2] ?? "";
@@ -455,31 +455,24 @@ export class ReviewServer {
         return sendJson(res, 200, { reviews: this.reviews });
       }
       case "POST threads": {
-        const { anchor, snippet, context, body, single } = await readJson(req);
-        if (!isComment(body, single) || !isAnchor(anchor) || !isText(snippet, MAX_SNIPPET) || !isContext(context)) {
+        const { anchor, snippet, context, body } = await readJson(req);
+        if (!isComment(body) || !isAnchor(anchor) || !isText(snippet, MAX_SNIPPET) || !isContext(context)) {
           return sendJson(res, 400, { error: "Invalid comment" });
         }
-        return sendJson(res, 201, { thread: threads.create(anchor, snippet, context, body.trim(), single === true) });
+        return sendJson(res, 201, { thread: threads.create(anchor, snippet, context, body.trim()) });
       }
       case "POST threads/thread": {
-        const { body, single } = await readJson(req);
-        if (!isComment(body, single)) return sendJson(res, 400, { error: "Invalid comment" });
-        return sendThread(res, threads.reply(threadId!, body.trim(), single === true), "Unknown thread");
+        const { body } = await readJson(req);
+        if (!isComment(body)) return sendJson(res, 400, { error: "Invalid comment" });
+        return sendThread(res, threads.reply(threadId!, body.trim()), "Unknown thread");
       }
       case "PATCH threads/comment": {
         const { body } = await readJson(req);
-        if (!isComment(body, undefined)) return sendJson(res, 400, { error: "Invalid comment" });
+        if (!isComment(body)) return sendJson(res, 400, { error: "Invalid comment" });
         return sendThread(res, threads.edit(threadId!, commentId!, body.trim()), "Unknown comment");
       }
       case "DELETE threads/comment":
         return sendThread(res, threads.remove(threadId!, commentId!), "Unknown comment");
-      case "POST review": {
-        const { body } = await readJson(req);
-        if (!isText(body, MAX_COMMENT)) return sendJson(res, 400, { error: "Invalid review" });
-        const result = threads.submit(body.trim());
-        if (!result) return sendJson(res, 400, { error: "Nothing to submit. Leave a comment first." });
-        return sendJson(res, 200, { review: result.submission.n, delivered: result.delivered, threads: result.threads });
-      }
       default:
         return sendText(res, 405, "Method not allowed");
     }
@@ -597,8 +590,8 @@ function isText(value: unknown, max: number, nonEmpty = false): value is string 
   return typeof value === "string" && value.length <= max && (!nonEmpty || value.trim() !== "");
 }
 
-function isComment(body: unknown, single: unknown): body is string {
-  return isText(body, MAX_COMMENT, true) && (single === undefined || typeof single === "boolean");
+function isComment(body: unknown): body is string {
+  return isText(body, MAX_COMMENT, true);
 }
 
 function isAnchor(a: unknown): a is ThreadAnchor {

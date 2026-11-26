@@ -212,7 +212,7 @@ export const FileCard = memo(function FileCard({ file: given, blocks: givenBlock
             threads={fileThreads}
             commenting={commenting}
             placeholder="Comment on this file"
-            onCreate={(body, single) => create({ path: file.path, side: null, start: null, end: null }, "", body, single)}
+            onCreate={(body) => create({ path: file.path, side: null, start: null, end: null }, "", body)}
             onClose={() => setCommenting(false)}
           />
           <FileBody

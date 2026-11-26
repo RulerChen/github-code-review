@@ -165,7 +165,7 @@ function lineLabel(anchor: ThreadAnchor): string {
   return anchor.side === "old" ? `old ${lines}` : lines;
 }
 
-export function ThreadWhere({ anchor }: { anchor: ThreadAnchor }) {
+function ThreadWhere({ anchor }: { anchor: ThreadAnchor }) {
   if (anchor.path === null) {
     return (
       <span className="conv-where" title={anchorLabel(anchor)}>
@@ -276,7 +276,6 @@ function ConversationItem({ thread, inDiff, current, unread, onOpen }: ItemProps
     <span className="conv-row">
       <ThreadWhere anchor={anchor} />
       {isOutdated(thread) && <span className="outdated-label">Outdated</span>}
-      {thread.comments.some((c) => c.draft) && <span className="pending-label">Pending</span>}
       {unread > 0 && <span className="conv-badge">{unread} new</span>}
     </span>
   );

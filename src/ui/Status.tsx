@@ -33,7 +33,7 @@ function useMinutes(since: string | null): number {
   return since ? Math.max(0, Math.floor((now - Date.parse(since)) / 60_000)) : 0;
 }
 
-export function AskInTerminal() {
+function AskInTerminal() {
   return (
     <p className="review-ask">
       <code>{ASK}</code>
@@ -44,13 +44,13 @@ export function AskInTerminal() {
 
 function Explain({ state, minutes }: { state: Claude; minutes: number }) {
   if (state === "waiting") {
-    return <p>Claude is waiting for your review and starts on it as soon as you submit. Send now on a comment sends just that one.</p>;
+    return <p>Claude is waiting and starts on each comment as soon as you send it.</p>;
   }
   if (state === "working") {
     return (
       <p>
         Claude {minutes > 0 ? `has been working for ${minutes} min` : "is working"} on what you sent. Its replies show on the threads,
-        and Load new changes shows its edits. What you submit meanwhile is picked up when it is done.
+        and Load new changes shows its edits. What you send meanwhile is picked up when it is done.
       </p>
     );
   }
@@ -58,7 +58,7 @@ function Explain({ state, minutes }: { state: Claude; minutes: number }) {
     return (
       <>
         <p>
-          Claude isn't waiting for a review. What you send is saved and marked Not read yet until Claude reads it. To start, tell
+          Claude isn't waiting for comments. What you send is saved and marked Not read yet until Claude reads it. To start, tell
           Claude in the terminal:
         </p>
         <AskInTerminal />

@@ -15,15 +15,14 @@ export interface CommentsApi {
   versions: (path: string) => Record<LineAnchor["side"], string | null>;
   threadsFor: (path: string) => Thread[];
   threadsForTopic: (title: string) => Thread[];
-  create: (anchor: NewAnchor, snippet: string, body: string, single: boolean) => Promise<void>;
-  reply: (threadId: string, body: string, single: boolean) => Promise<void>;
+  create: (anchor: NewAnchor, snippet: string, body: string) => Promise<void>;
+  reply: (threadId: string, body: string) => Promise<void>;
   edit: (threadId: string, commentId: string, body: string) => Promise<void>;
   remove: (threadId: string, commentId: string) => Promise<void>;
   unread: (thread: Thread) => number;
   markRead: (thread: Thread) => void;
   isFolded: (threadId: string, byDefault: boolean) => boolean;
   setFolded: (threadId: string, folded: boolean, byDefault: boolean) => void;
-  pending: boolean;
   read: number;
   revealSeq: number;
   peekReveal: () => Thread | null;
@@ -40,7 +39,7 @@ export const useCommentActions = () => useContext(CommentActionsContext)!;
 
 export const authorName = (c: ThreadComment) => (c.author === "claude" ? "Claude" : "You");
 
-const unreadBy = (read: number) => (c: ThreadComment) => c.author === "user" && !c.draft && c.review !== null && c.review > read;
+const unreadBy = (read: number) => (c: ThreadComment) => c.author === "user" && c.review !== null && c.review > read;
 
 function NotRead() {
   return (
@@ -90,7 +89,7 @@ interface FormProps {
   initial?: string;
   editing?: boolean;
   lines?: string;
-  onSubmit: (body: string, single: boolean) => Promise<void>;
+  onSubmit: (body: string) => Promise<void>;
   onCancel: () => void;
 }
 
@@ -126,7 +125,6 @@ const FORMAT_KEYS: Record<string, Format> = { b: "bold", i: "italic", e: "code",
 const SHIFT_FORMAT_KEYS: Record<string, Format> = { Digit7: "ordered", Digit8: "unordered", Period: "quote" };
 
 function CommentForm({ placeholder, initial = "", editing = false, lines, onSubmit, onCancel }: FormProps) {
-  const { pending } = useComments();
   const [text, setText] = useState(initial);
   const [preview, setPreview] = useState<number | null>(null);
 
@@ -136,8 +134,8 @@ function CommentForm({ placeholder, initial = "", editing = false, lines, onSubm
   const tabs = useRef<HTMLDivElement>(null);
   const previewBox = useRef<HTMLDivElement>(null);
 
-  const { busy, error, run } = useAction(async (single: boolean) => {
-    await onSubmit(text.trim(), single);
+  const { busy, error, run } = useAction(async () => {
+    await onSubmit(text.trim());
     setText("");
   });
 
@@ -156,8 +154,8 @@ function CommentForm({ placeholder, initial = "", editing = false, lines, onSubm
   }, [preview]);
 
   const ready = !busy && text.trim() !== "" && !(editing && text.trim() === initial);
-  const submit = (single: boolean) => {
-    if (ready) void run(single);
+  const submit = () => {
+    if (ready) void run();
   };
 
   const apply = (edit: TextEdit) => {
@@ -189,7 +187,7 @@ function CommentForm({ placeholder, initial = "", editing = false, lines, onSubm
     if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
 
     let action: (() => void) | null = null;
-    if (e.key === "Enter" && !e.shiftKey) action = () => submit(false);
+    if (e.key === "Enter" && !e.shiftKey) action = submit;
     else if (e.shiftKey && e.code === "KeyP") action = togglePreview;
     else if (e.target === input.current) {
       const kind = e.shiftKey ? SHIFT_FORMAT_KEYS[e.code] : FORMAT_KEYS[e.key.toLowerCase()];
@@ -202,10 +200,6 @@ function CommentForm({ placeholder, initial = "", editing = false, lines, onSubm
     action();
   };
 
-  const otherTitle = pending
-    ? "Send only this comment to Claude now, without the pending review."
-    : "Send this comment to Claude now instead of starting a review.";
-
   return (
     <form
       className="comment-form"
@@ -213,7 +207,7 @@ function CommentForm({ placeholder, initial = "", editing = false, lines, onSubm
       onKeyDown={onKeyDown}
       onSubmit={(e: FormEvent) => {
         e.preventDefault();
-        submit(false);
+        submit();
       }}
     >
       <div className="comment-box" ref={box}>
@@ -280,30 +274,13 @@ function CommentForm({ placeholder, initial = "", editing = false, lines, onSubm
           <button type="button" className="button" onClick={onCancel}>
             Cancel
           </button>
-          {!editing && (
-            <button type="button" className="button" onClick={() => submit(true)} disabled={!ready} title={otherTitle}>
-              Send now
-            </button>
-          )}
           <button type="submit" className="button primary" disabled={!ready}>
-            {editing ? "Save" : <Either show={pending ? 1 : 0} texts={["Start a review", "Add review comment"]} />}
+            {editing ? "Save" : "Comment"}
           </button>
         </span>
       </div>
       {error && <p className="comment-error">{error}</p>}
     </form>
-  );
-}
-
-function Either({ show, texts }: { show: number; texts: string[] }) {
-  return (
-    <span className="either">
-      {texts.map((t, i) => (
-        <span key={i} aria-hidden={i !== show}>
-          {t}
-        </span>
-      ))}
-    </span>
   );
 }
 
@@ -325,7 +302,7 @@ interface ThreadListProps {
   threads: Thread[];
   commenting: boolean;
   placeholder: string;
-  onCreate: (body: string, single: boolean) => Promise<void>;
+  onCreate: (body: string) => Promise<void>;
   onClose: () => void;
 }
 
@@ -339,8 +316,8 @@ export function ThreadList({ className, threads, commenting, placeholder, onCrea
       {commenting && (
         <NewThread
           placeholder={placeholder}
-          onSubmit={async (body, single) => {
-            await onCreate(body, single);
+          onSubmit={async (body) => {
+            await onCreate(body);
             onClose();
           }}
           onCancel={onClose}
@@ -426,7 +403,6 @@ export function ThreadView({ thread, withVersion = false }: { thread: Thread; wi
         </button>
         <span className={`comment-author comment-author-${first.author}`}>{authorName(first)}</span>
         {gone && <span className="outdated-label">Outdated</span>}
-        {(folded ? thread.comments.some((c) => c.draft) : first.draft) && <span className="pending-label">Pending</span>}
         {(folded ? thread.comments.some(notRead) : notRead(first)) && <NotRead />}
         {folded ? (
           <>
@@ -453,8 +429,8 @@ export function ThreadView({ thread, withVersion = false }: { thread: Thread; wi
               <CommentForm
                 placeholder="Reply…"
                 lines={suggestionLines(thread)}
-                onSubmit={async (body, single) => {
-                  await reply(thread.id, body, single);
+                onSubmit={async (body) => {
+                  await reply(thread.id, body);
                   setReplying(false);
                 }}
                 onCancel={() => setReplying(false)}
@@ -505,7 +481,6 @@ const CommentView = memo(function CommentView({ thread, comment: c, first, notRe
       {!first && (
         <div className="comment-head">
           <span className="comment-author">{authorName(c)}</span>
-          {c.draft && <span className="pending-label">Pending</span>}
           {notRead && <NotRead />}
           {c.editedAt && <span className="comment-edited">edited</span>}
           {c.author === "user" && !editing && <CommentTools thread={thread} comment={c} onEdit={() => setEditing(c.id)} />}

@@ -38342,28 +38342,21 @@ function changesOf(diff) {
   return out;
 }
 function formatReviewComments(threads, submissions, after, read) {
-  const withDrafts = after === null;
   const unread = submissions.filter((s) => s.n > (after ?? read));
-  const reviews = withDrafts && !unread.length ? submissions.slice(-1) : unread;
+  const reviews = after === null && !unread.length ? submissions.slice(-1) : unread;
+  if (!reviews.length) return null;
   const numbers = new Set(reviews.map((s) => s.n));
   const submitted = threads.filter((t) => t.comments.some((c) => c.review !== null && numbers.has(c.review)));
-  const drafts = withDrafts ? threads.filter((t) => !submitted.includes(t) && t.comments.some((c) => c.draft)) : [];
-  if (!reviews.length && !drafts.length) return null;
-  const out = [];
-  const section = (title, list, showDrafts) => out.push(title, ...list.flatMap((t) => ["", formatThread(t, showDrafts)]));
-  for (const s of reviews) {
-    out.push(`Review ${s.n}, submitted at ${new Date(s.submittedAt).toLocaleTimeString("en-GB")}.`);
-    if (s.body) out.push("  Comment on the whole review:", indent(s.body, "    "));
-  }
-  if (reviews.length) section(`Comments in ${plural2(submitted.length, "thread")}:`, submitted, withDrafts);
-  if (drafts.length) section(`
-Draft comments the user has not submitted yet, in ${plural2(drafts.length, "thread")}:`, drafts, true);
-  return out.join("\n");
+  return [
+    ...reviews.map((s) => `Review ${s.n}, submitted at ${new Date(s.submittedAt).toLocaleTimeString("en-GB")}.`),
+    `Comments in ${plural2(submitted.length, "thread")}:`,
+    ...submitted.flatMap((t) => ["", formatThread(t)])
+  ].join("\n");
 }
-function formatThread(t, withDrafts) {
+function formatThread(t) {
   const { anchor: anchor2 } = t;
-  const comments = t.comments.filter((c) => withDrafts || !c.draft).map((c) => {
-    const who = c.author === "claude" ? "Claude" : c.draft ? "User (draft)" : c.review ? `User (review ${c.review})` : "User";
+  const comments = t.comments.map((c) => {
+    const who = c.author === "claude" ? "Claude" : c.review ? `User (review ${c.review})` : "User";
     return `  ${who}: ${indent(c.body, "    ").trimStart()}`;
   });
   if (anchor2.path === null) {
@@ -38642,15 +38635,15 @@ var RepoThreads = class {
     this.onChange();
     this.emitStatus();
   }
-  create(anchor2, snippet, context, body, single) {
+  create(anchor2, snippet, context, body) {
     const thread = { id: newId(), rev: 0, anchor: anchor2, snippet, context, comments: [] };
     this.threads.push(thread);
-    this.addComment(thread, body, single);
+    this.addComment(thread, body);
     return thread;
   }
-  reply(threadId, body, single) {
+  reply(threadId, body) {
     const thread = this.find(threadId);
-    if (thread) this.addComment(thread, body, single);
+    if (thread) this.addComment(thread, body);
     return thread;
   }
   edit(threadId, commentId, body) {
@@ -38681,20 +38674,6 @@ var RepoThreads = class {
     thread.comments.push(comment("claude", body));
     this.emit(thread);
   }
-  submit(body) {
-    const changed = this.threads.filter((t) => t.comments.some((c) => c.draft));
-    if (!changed.length && !body) return null;
-    const submission = this.newSubmission(body);
-    for (const t of changed) {
-      for (const c of t.comments) {
-        if (!c.draft) continue;
-        c.draft = false;
-        c.review = submission.n;
-      }
-      this.emit(t);
-    }
-    return { submission, delivered: this.wake(submission), threads: changed };
-  }
   waitForReview(after, onReview) {
     const latest = this.submissions.at(-1);
     if (latest && latest.n > after) {
@@ -38714,21 +38693,18 @@ var RepoThreads = class {
   find(threadId) {
     return this.threads.find((t) => t.id === threadId) ?? null;
   }
-  newSubmission(body) {
-    const submission = { n: this.submissions.length + 1, body, submittedAt: now() };
+  newSubmission() {
+    const submission = { n: this.submissions.length + 1, submittedAt: now() };
     this.submissions.push(submission);
     this.onChange();
     return submission;
   }
   wake(submission) {
-    const delivered = this.waiters.size > 0;
+    if (!this.waiters.size) return;
     for (const wake of this.waiters) wake(submission);
     this.waiters.clear();
-    if (delivered) {
-      this.workingSince = now();
-      this.emitStatus();
-    }
-    return delivered;
+    this.workingSince = now();
+    this.emitStatus();
   }
   emitStatus() {
     const status = this.status;
@@ -38739,18 +38715,15 @@ var RepoThreads = class {
     for (const fn of this.listeners) fn(thread);
     this.onChange();
   }
-  addComment(thread, body, single) {
-    const c = comment("user", body);
-    thread.comments.push(c);
-    const submission = single ? this.newSubmission("") : null;
-    c.draft = !single;
-    c.review = submission?.n ?? null;
+  addComment(thread, body) {
+    const submission = this.newSubmission();
+    thread.comments.push({ ...comment("user", body), review: submission.n });
     this.emit(thread);
-    if (submission) this.wake(submission);
+    this.wake(submission);
   }
 };
 function comment(author, body) {
-  return { id: newId(), author, body, createdAt: now(), draft: false, review: null, editedAt: null };
+  return { id: newId(), author, body, createdAt: now(), review: null, editedAt: null };
 }
 
 // src/server/http.ts
@@ -38780,7 +38753,7 @@ var MAX_CACHED_CHARS = 64 * 1024 * 1024;
 var PING_MS = 25e3;
 var SAVE_DELAY_MS = 500;
 var PAGE = /^\/v\/[\w-]+$/;
-var API = /^\/api\/views\/([\w-]+)\/(diff|file|blob|raw|tree|grep|defs|events|refs|threads|review|reviews|wait|version|topics)(?:\/([\w-]+)\/comments(?:\/([\w-]+))?)?$/;
+var API = /^\/api\/views\/([\w-]+)\/(diff|file|blob|raw|tree|grep|defs|events|refs|threads|reviews|wait|version|topics)(?:\/([\w-]+)\/comments(?:\/([\w-]+))?)?$/;
 var SHA = /^[0-9a-f]{40,64}$/;
 var sshAddress = process.env.SSH_CONNECTION?.split(" ")[2] ?? "";
 var SSH_HOST = isIP(sshAddress) ? sshAddress : null;
@@ -39123,31 +39096,24 @@ var ReviewServer = class {
         return sendJson(res, 200, { reviews: this.reviews });
       }
       case "POST threads": {
-        const { anchor: anchor2, snippet, context, body, single } = await readJson(req);
-        if (!isComment(body, single) || !isAnchor(anchor2) || !isText(snippet, MAX_SNIPPET) || !isContext(context)) {
+        const { anchor: anchor2, snippet, context, body } = await readJson(req);
+        if (!isComment(body) || !isAnchor(anchor2) || !isText(snippet, MAX_SNIPPET) || !isContext(context)) {
           return sendJson(res, 400, { error: "Invalid comment" });
         }
-        return sendJson(res, 201, { thread: threads.create(anchor2, snippet, context, body.trim(), single === true) });
+        return sendJson(res, 201, { thread: threads.create(anchor2, snippet, context, body.trim()) });
       }
       case "POST threads/thread": {
-        const { body, single } = await readJson(req);
-        if (!isComment(body, single)) return sendJson(res, 400, { error: "Invalid comment" });
-        return sendThread(res, threads.reply(threadId, body.trim(), single === true), "Unknown thread");
+        const { body } = await readJson(req);
+        if (!isComment(body)) return sendJson(res, 400, { error: "Invalid comment" });
+        return sendThread(res, threads.reply(threadId, body.trim()), "Unknown thread");
       }
       case "PATCH threads/comment": {
         const { body } = await readJson(req);
-        if (!isComment(body, void 0)) return sendJson(res, 400, { error: "Invalid comment" });
+        if (!isComment(body)) return sendJson(res, 400, { error: "Invalid comment" });
         return sendThread(res, threads.edit(threadId, commentId, body.trim()), "Unknown comment");
       }
       case "DELETE threads/comment":
         return sendThread(res, threads.remove(threadId, commentId), "Unknown comment");
-      case "POST review": {
-        const { body } = await readJson(req);
-        if (!isText(body, MAX_COMMENT)) return sendJson(res, 400, { error: "Invalid review" });
-        const result2 = threads.submit(body.trim());
-        if (!result2) return sendJson(res, 400, { error: "Nothing to submit. Leave a comment first." });
-        return sendJson(res, 200, { review: result2.submission.n, delivered: result2.delivered, threads: result2.threads });
-      }
       default:
         return sendText(res, 405, "Method not allowed");
     }
@@ -39255,8 +39221,8 @@ async function readJson(req) {
 function isText(value, max, nonEmpty = false) {
   return typeof value === "string" && value.length <= max && (!nonEmpty || value.trim() !== "");
 }
-function isComment(body, single) {
-  return isText(body, MAX_COMMENT, true) && (single === void 0 || typeof single === "boolean");
+function isComment(body) {
+  return isText(body, MAX_COMMENT, true);
 }
 function isAnchor(a) {
   if (!isRecord(a)) return false;
@@ -39452,11 +39418,11 @@ async function runMcp() {
     "get_review_comments",
     {
       title: "Get review comments",
-      description: "Read the review the user submitted in the diff viewer: their comment on the whole review and each comment thread with its id, the selected lines (or the whole file or topic) and the earlier comments. Without after it also lists draft comments they have not submitted yet. A ```suggestion block in a comment holds the lines the user wants in place of the thread's selected lines. Use it when the wait command from open_diff_viewer finishes, or when the user asks you to address their review comments.",
+      description: "Read the review the user submitted in the diff viewer: each comment thread with its id, the selected lines (or the whole file or topic) and the earlier comments. A ```suggestion block in a comment holds the lines the user wants in place of the thread's selected lines. Use it when the wait command from open_diff_viewer finishes, or when the user asks you to address their review comments.",
       inputSchema: {
         repo: external_exports.string().optional().describe("The repository the wait command names. Omit it to read every repository with a viewer open."),
         after: external_exports.number().int().min(0).optional().describe(
-          "Read every review of that repository numbered above this one, as the wait command says. Omit it for the reviews this tool has not returned yet, or the latest one if it returned them all, and the drafts."
+          "Read every review of that repository numbered above this one, as the wait command says. Omit it for the reviews this tool has not returned yet, or the latest one if it returned them all."
         )
       },
       annotations: { readOnlyHint: true, openWorldHint: false }

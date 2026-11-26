@@ -74,36 +74,25 @@ export function changesOf(diff: DiffResult): Record<string, BaseRange | null> {
 }
 
 export function formatReviewComments(threads: Thread[], submissions: Submission[], after: number | null, read: number): string | null {
-  const withDrafts = after === null;
   const unread = submissions.filter((s) => s.n > (after ?? read));
-  const reviews = withDrafts && !unread.length ? submissions.slice(-1) : unread;
+  const reviews = after === null && !unread.length ? submissions.slice(-1) : unread;
+  if (!reviews.length) return null;
   const numbers = new Set(reviews.map((s) => s.n));
   const submitted = threads.filter((t) => t.comments.some((c) => c.review !== null && numbers.has(c.review)));
-  const drafts = withDrafts ? threads.filter((t) => !submitted.includes(t) && t.comments.some((c) => c.draft)) : [];
-  if (!reviews.length && !drafts.length) return null;
 
-  const out: string[] = [];
-  const section = (title: string, list: Thread[], showDrafts: boolean) =>
-    out.push(title, ...list.flatMap((t) => ["", formatThread(t, showDrafts)]));
-
-  for (const s of reviews) {
-    out.push(`Review ${s.n}, submitted at ${new Date(s.submittedAt).toLocaleTimeString("en-GB")}.`);
-    if (s.body) out.push("  Comment on the whole review:", indent(s.body, "    "));
-  }
-
-  if (reviews.length) section(`Comments in ${plural(submitted.length, "thread")}:`, submitted, withDrafts);
-  if (drafts.length) section(`\nDraft comments the user has not submitted yet, in ${plural(drafts.length, "thread")}:`, drafts, true);
-  return out.join("\n");
+  return [
+    ...reviews.map((s) => `Review ${s.n}, submitted at ${new Date(s.submittedAt).toLocaleTimeString("en-GB")}.`),
+    `Comments in ${plural(submitted.length, "thread")}:`,
+    ...submitted.flatMap((t) => ["", formatThread(t)]),
+  ].join("\n");
 }
 
-function formatThread(t: Thread, withDrafts: boolean): string {
+function formatThread(t: Thread): string {
   const { anchor } = t;
-  const comments = t.comments
-    .filter((c) => withDrafts || !c.draft)
-    .map((c) => {
-      const who = c.author === "claude" ? "Claude" : c.draft ? "User (draft)" : c.review ? `User (review ${c.review})` : "User";
-      return `  ${who}: ${indent(c.body, "    ").trimStart()}`;
-    });
+  const comments = t.comments.map((c) => {
+    const who = c.author === "claude" ? "Claude" : c.review ? `User (review ${c.review})` : "User";
+    return `  ${who}: ${indent(c.body, "    ").trimStart()}`;
+  });
 
   if (anchor.path === null) {
     const files = t.snippet.split("\n", 1)[0] ?? "";

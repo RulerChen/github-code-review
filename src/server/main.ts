@@ -203,10 +203,8 @@ async function runMcp(): Promise<void> {
     {
       title: "Get review comments",
       description:
-        "Read the review the user submitted in the diff viewer: their comment on the whole review and each comment " +
-        "thread with its id, the selected lines (or the whole file or topic) and the earlier comments. Without after it also " +
-        "lists draft comments they have not submitted yet. A ```suggestion block in a comment " +
-        "holds the lines the user wants in place of the thread's selected lines. Use it when the wait command from " +
+        "Read the review the user submitted in the diff viewer: each comment thread with its id, the selected lines " +
+        "(or the whole file or topic) and the earlier comments. A ```suggestion block in a comment holds the lines the user wants in place of the thread's selected lines. Use it when the wait command from " +
         "open_diff_viewer finishes, or when the user asks you to address their review comments.",
       inputSchema: {
         repo: z
@@ -220,7 +218,7 @@ async function runMcp(): Promise<void> {
           .optional()
           .describe(
             "Read every review of that repository numbered above this one, as the wait command says. Omit it for the " +
-              "reviews this tool has not returned yet, or the latest one if it returned them all, and the drafts.",
+              "reviews this tool has not returned yet, or the latest one if it returned them all.",
           ),
       },
       annotations: { readOnlyHint: true, openWorldHint: false },

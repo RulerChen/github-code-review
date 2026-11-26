@@ -124,7 +124,6 @@ export interface ThreadComment {
   author: "user" | "claude";
   body: string;
   createdAt: string;
-  draft: boolean;
   review: number | null;
   editedAt: string | null;
 }
