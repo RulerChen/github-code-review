@@ -3262,8 +3262,8 @@ var require_utils = __commonJS({
       }
       return ind;
     }
-    function removeDotSegments(path7) {
-      let input2 = path7;
+    function removeDotSegments(path8) {
+      let input2 = path8;
       const output2 = [];
       let nextSlash = -1;
       let len = 0;
@@ -3337,11 +3337,11 @@ var require_utils = __commonJS({
       }
       return output2.join("");
     }
-    function removeDotSegmentsRelative(path7) {
-      if (path7 === "" || path7[0] === "/") {
-        return removeDotSegments(path7);
+    function removeDotSegmentsRelative(path8) {
+      if (path8 === "" || path8[0] === "/") {
+        return removeDotSegments(path8);
       }
-      const segments = path7.split("/");
+      const segments = path8.split("/");
       const last = segments.length - 1;
       const output2 = [];
       let trailingDirectory = false;
@@ -3704,8 +3704,8 @@ var require_schemes = __commonJS({
       }
       if (wsComponent.resourceName) {
         const queryIndex = wsComponent.resourceName.indexOf("?");
-        const path7 = queryIndex === -1 ? wsComponent.resourceName : wsComponent.resourceName.slice(0, queryIndex);
-        wsComponent.path = path7 && path7 !== "/" ? path7 : void 0;
+        const path8 = queryIndex === -1 ? wsComponent.resourceName : wsComponent.resourceName.slice(0, queryIndex);
+        wsComponent.path = path8 && path8 !== "/" ? path8 : void 0;
         wsComponent.query = queryIndex === -1 ? void 0 : wsComponent.resourceName.slice(queryIndex + 1);
         wsComponent.resourceName = void 0;
       }
@@ -7257,7 +7257,7 @@ var require_dist = __commonJS({
 
 // src/server/main.ts
 import { readFileSync as readFileSync3 } from "node:fs";
-import path6 from "node:path";
+import path7 from "node:path";
 import { fileURLToPath } from "node:url";
 
 // node_modules/zod/v3/helpers/util.js
@@ -7634,8 +7634,8 @@ function getErrorMap() {
 
 // node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
-  const { data, path: path7, errorMaps, issueData } = params;
-  const fullPath = [...path7, ...issueData.path || []];
+  const { data, path: path8, errorMaps, issueData } = params;
+  const fullPath = [...path8, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -7750,11 +7750,11 @@ var errorUtil;
 
 // node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
-  constructor(parent, value, path7, key) {
+  constructor(parent, value, path8, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path7;
+    this._path = path8;
     this._key = key;
   }
   get path() {
@@ -11709,10 +11709,10 @@ function mergeDefs(...defs) {
 function cloneDef(schema) {
   return mergeDefs(schema._zod.def);
 }
-function getElementAtPath(obj, path7) {
-  if (!path7)
+function getElementAtPath(obj, path8) {
+  if (!path8)
     return obj;
-  return path7.reduce((acc, key) => acc?.[key], obj);
+  return path8.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -12052,11 +12052,11 @@ function explicitlyAborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path7, issues) {
+function prefixIssues(path8, issues) {
   return issues.map((iss) => {
     var _a3;
     (_a3 = iss).path ?? (_a3.path = []);
-    iss.path.unshift(path7);
+    iss.path.unshift(path8);
     return iss;
   });
 }
@@ -12518,16 +12518,16 @@ function flattenError(error62, mapper = (issue2) => issue2.message) {
 }
 function formatError(error62, mapper = (issue2) => issue2.message) {
   const fieldErrors = { _errors: [] };
-  const processError = (error63, path7 = []) => {
+  const processError = (error63, path8 = []) => {
     for (const issue2 of error63.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path7, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path8, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path7, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path8, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path7, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path8, ...issue2.path]);
       } else {
-        const fullpath = [...path7, ...issue2.path];
+        const fullpath = [...path8, ...issue2.path];
         if (fullpath.length === 0) {
           fieldErrors._errors.push(mapper(issue2));
         } else {
@@ -12566,17 +12566,17 @@ function formatError(error62, mapper = (issue2) => issue2.message) {
 }
 function treeifyError(error62, mapper = (issue2) => issue2.message) {
   const result2 = { errors: [] };
-  const processError = (error63, path7 = []) => {
+  const processError = (error63, path8 = []) => {
     var _a3;
     for (const issue2 of error63.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path7, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path8, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path7, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path8, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path7, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path8, ...issue2.path]);
       } else {
-        const fullpath = [...path7, ...issue2.path];
+        const fullpath = [...path8, ...issue2.path];
         if (fullpath.length === 0) {
           result2.errors.push(mapper(issue2));
           continue;
@@ -12615,8 +12615,8 @@ function treeifyError(error62, mapper = (issue2) => issue2.message) {
 }
 function toDotPath(_path) {
   const segs = [];
-  const path7 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
-  for (const seg of path7) {
+  const path8 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
+  for (const seg of path8) {
     if (typeof seg === "number")
       segs.push(`[${seg}]`);
     else if (typeof seg === "symbol")
@@ -28167,11 +28167,11 @@ function normalizeObjectSchema(schema) {
   }
   return void 0;
 }
-function getDotPath(path7) {
-  if (path7.length === 0) {
+function getDotPath(path8) {
+  if (path8.length === 0) {
     return "object root";
   }
-  return path7.reduce((acc, seg, index) => {
+  return path8.reduce((acc, seg, index) => {
     if (index === 0) {
       return String(seg);
     }
@@ -30398,13 +30398,13 @@ function resolveRef(ref, ctx) {
   if (!ref.startsWith("#")) {
     throw new Error("External $ref is not supported, only local refs (#/...) are allowed");
   }
-  const path7 = ref.slice(1).split("/").filter(Boolean);
-  if (path7.length === 0) {
+  const path8 = ref.slice(1).split("/").filter(Boolean);
+  if (path8.length === 0) {
     return ctx.rootSchema;
   }
   const defsKey = ctx.version === "draft-2020-12" ? "$defs" : "definitions";
-  if (path7[0] === defsKey) {
-    const key = path7[1] === void 0 ? void 0 : decodeJSONPointerSegment(path7[1]);
+  if (path8[0] === defsKey) {
+    const key = path8[1] === void 0 ? void 0 : decodeJSONPointerSegment(path8[1]);
     if (!key || !ctx.defs[key]) {
       throw new Error(`Reference not found: ${ref}`);
     }
@@ -36685,8 +36685,8 @@ var IMAGE_TYPES = /* @__PURE__ */ new Map([
   ["bmp", "image/bmp"],
   ["ico", "image/x-icon"]
 ]);
-function imageTypeOf(path7) {
-  return IMAGE_TYPES.get(/\.([^./]+)$/.exec(path7)?.[1]?.toLowerCase() ?? "") ?? null;
+function imageTypeOf(path8) {
+  return IMAGE_TYPES.get(/\.([^./]+)$/.exec(path8)?.[1]?.toLowerCase() ?? "") ?? null;
 }
 var compareText = (a, b) => a < b ? -1 : a > b ? 1 : 0;
 function isRecord(value) {
@@ -36753,7 +36753,7 @@ function changeIds(file2) {
   return file2.blocks.length ? file2.blocks.map((b) => b.id) : [`file:${file2.path}`];
 }
 function oldCommitOf(repos) {
-  return (path7) => repos.find((r) => r.dir === "" || path7.startsWith(`${r.dir}/`))?.oldCommit ?? null;
+  return (path8) => repos.find((r) => r.dir === "" || path8.startsWith(`${r.dir}/`))?.oldCommit ?? null;
 }
 function editedInto(range, files, commitOf, taken) {
   if (!range || commitOf(range.path) !== range.commit) return [];
@@ -37495,7 +37495,7 @@ import { randomBytes as randomBytes2, randomInt, timingSafeEqual } from "node:cr
 import { readFile as readFile2 } from "node:fs/promises";
 import { createServer } from "node:http";
 import { isIP } from "node:net";
-import path5 from "node:path";
+import path6 from "node:path";
 import { pipeline } from "node:stream/promises";
 import { promisify } from "node:util";
 import { gzip } from "node:zlib";
@@ -38278,6 +38278,9 @@ function hitOf(filePath, no, text, at) {
   return { path: filePath, no, text: text.slice(from, from + MAX_HIT_CHARS), at: at < 0 ? -1 : at - from };
 }
 
+// src/server/review.ts
+import path4 from "node:path";
+
 // src/shared/comments.ts
 var lineNumbers = ({ start, end }) => start === end ? `${start}` : `${start}\u2013${end}`;
 var lineRange = (lines) => `${lines.start === lines.end ? "line" : "lines"} ${lineNumbers(lines)}`;
@@ -38287,17 +38290,40 @@ var MAX_CHARS = 6e4;
 var MAX_LINES_PER_CHANGE = 40;
 var MAX_LINE_CHARS = 300;
 var MAX_COMMITS_LISTED = 100;
+var MAX_MESSAGE_CHARS = 2e4;
 var MAX_SNIPPET_LINES = 8;
 var indent = (text, prefix) => text.replace(/^/gm, prefix);
-function formatChanges(diff) {
+function formatChanges(diff, messages = /* @__PURE__ */ new Map()) {
   const count = sum(diff.files, (f) => changeIds(f).length);
   const out = [`${summarize(diff)}, ${plural2(count, "change")}. Each change starts with its id.`, ...describeFailures(diff)];
   if (diff.commits.length) {
     const shown = diff.commits.slice(-MAX_COMMITS_LISTED);
     out.push("", diff.commitCount > shown.length ? `Commits (newest ${shown.length} of ${diff.commitCount}, oldest first):` : "Commits, oldest first:");
-    for (const c of shown) out.push(`  ${c.sha.slice(0, 7)} ${c.repo ? `${c.repo}: ` : ""}${c.subject}`);
+    let size = 0;
+    for (const c of shown) {
+      out.push(`  ${c.sha.slice(0, 7)} ${c.repo ? `${c.repo}: ` : ""}${c.subject}`);
+      const body = messages.get(c.sha);
+      if (!body || size + body.length > MAX_MESSAGE_CHARS) continue;
+      out.push(indent(body, "      "));
+      size += body.length;
+    }
   }
   return [...out, ...formatFiles(diff.files)].join("\n");
+}
+async function commitMessages(diff) {
+  const byRepo = /* @__PURE__ */ new Map();
+  for (const c of diff.commits.slice(-MAX_COMMITS_LISTED)) byRepo.set(c.repo ?? "", [...byRepo.get(c.repo ?? "") ?? [], c.sha]);
+  const messages = /* @__PURE__ */ new Map();
+  await Promise.all(
+    [...byRepo].map(async ([dir, shas]) => {
+      const log = await gitText(path4.join(diff.repoRoot, dir), ["log", "-z", "--no-walk=unsorted", "--format=%H%x1f%b", ...shas, "--"]);
+      for (const rec of log.split("\0")) {
+        const [sha = "", body = ""] = rec.split("");
+        if (body.trim()) messages.set(sha.trim(), body.trim());
+      }
+    })
+  );
+  return messages;
 }
 function formatFiles(files, only = null, labels = /* @__PURE__ */ new Map()) {
   const out = [];
@@ -38379,7 +38405,7 @@ function checkTopics(diff, topics) {
 }
 
 // src/server/group.ts
-var SUMMARY_RULES = "Add why in one sentence when you know it. Describe the end result of the changes as listed: no commit hashes, no account of which commit did what, nothing about code these changes leave alone, and no advice to the reviewer.";
+var SUMMARY = "an outline in three parts, in this order, each starting with its name in bold in the language you write in: Why, How, What changed. Why is the problem or goal behind the changes, taken from the commit messages or from what you know of the work. Leave this part out when neither says it, rather than guessing. How is the approach, in a sentence or two. What changed is the behavior that differs now, and in which cases. Describe behavior without naming files or functions, and without listing fields, options or steps one by one. Leave out changes that only follow from another one (types, imports, build output, dependencies, and docs or tests that repeat the change), what stays the same, commit hashes and which commit did what, code these changes leave alone, and advice to the reviewer.";
 var REPLY = 'Reply with only a JSON object and no other text: {"topics": [{"title": "...", "summary": "...", "ids": ["..."]}]}';
 async function askTopics(o, prompt, allowEmpty, check2) {
   const run = (resume, fork, prompt2) => ask({ cwd: o.cwd, resume, fork, prompt: prompt2, onText: () => {
@@ -38403,7 +38429,7 @@ async function askTopics(o, prompt, allowEmpty, check2) {
 }
 async function groupChanges(o) {
   const focused = o.focus !== null || o.names !== null;
-  const topics = await askTopics(o, buildPrompt(o.diff, o.focus, o.names), focused, (t) => unknownIds(o.diff, t));
+  const topics = await askTopics(o, buildPrompt(o.diff, o.focus, o.names, await commitMessages(o.diff)), focused, (t) => unknownIds(o.diff, t));
   const known = new Set(o.diff.files.flatMap(changeIds));
   const kept = topics.map((t) => ({ ...t, ids: t.ids.filter((id) => known.has(id)) })).filter((t) => t.ids.length > 0);
   if (!kept.length) {
@@ -38413,7 +38439,7 @@ async function groupChanges(o) {
   }
   return kept;
 }
-function buildPrompt(diff, focus, names) {
+function buildPrompt(diff, focus, names, messages) {
   const empty = ' If no change fits, reply with {"topics": []}.';
   const scope = names ? `Use exactly these topics, in this order and with these titles: ${names.map((n) => JSON.stringify(n)).join(", ")}. Do not add topics of your own. Put each change in the topic it belongs to, leave out the changes that fit none of them, and leave out a topic that no change belongs to.${empty}` : focus ? `Make topics only for the changes the focus asks for. Leave every other change out of your answer, and do not make a topic for changes that have nothing to do with the focus. The reviewer still finds those in the list of all files.${empty}` : "Put every id in a topic.";
   return [
@@ -38421,13 +38447,13 @@ function buildPrompt(diff, focus, names) {
     "A topic is one feature, fix or purpose, and can span files. Use what you know about why the changes were made, and the commit messages, to tell which changes belong together. You can read files to check details, but do not change anything.",
     "For each topic give:",
     '- "title": a few words.',
-    `- "summary": Markdown on what behaves differently after these changes: name each function or file involved and say what it did before, what it does now, and in which cases. ${SUMMARY_RULES}`,
+    `- "summary": Markdown, ${SUMMARY}`,
     '- "ids": the ids of all changes in the topic, exactly as listed below.',
     scope,
     "Order the topics the way a reviewer should read them. Write titles and summaries in the language the user writes in.",
     REPLY,
     "",
-    formatChanges(diff)
+    formatChanges(diff, messages)
   ].join("\n");
 }
 function topicDelta(review, diff) {
@@ -38497,7 +38523,7 @@ function buildSyncPrompt(review, diff, delta) {
     "",
     "Give each topic that gains or loses changes, and each new topic:",
     '- "title": the title exactly as above, or a few words for a new topic.',
-    `- "summary": Markdown on what behaves differently after the topic's changes as they are now: name each function or file involved and say what it did before, what it does now, and in which cases. ${SUMMARY_RULES}`,
+    `- "summary": Markdown on the topic's changes as they are now, ${SUMMARY}`,
     '- "ids": the ids of the new and edited changes that belong in the topic. Leave out the ids it already has.',
     `${scope} Leave out the topics that neither gain nor lose changes. Write in the language of the summaries above.`,
     REPLY
@@ -38548,13 +38574,13 @@ function unknownIds(diff, topics) {
 // src/server/store.ts
 import { createHash as createHash2 } from "node:crypto";
 import { mkdirSync, readdirSync, readFileSync as readFileSync2, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
-import path4 from "node:path";
-var DIR = process.env.CLAUDE_PLUGIN_DATA ? path4.join(process.env.CLAUDE_PLUGIN_DATA, "reviews") : null;
+import path5 from "node:path";
+var DIR = process.env.CLAUDE_PLUGIN_DATA ? path5.join(process.env.CLAUDE_PLUGIN_DATA, "reviews") : null;
 var FORMAT = 1;
 var KEEP_MS = 3 * 24 * 60 * 60 * 1e3;
 var filled = (c) => ({ ...c, excluded: c.excluded ?? [] });
 function fileFor(session, repo) {
-  return path4.join(DIR, `${session}-${createHash2("sha256").update(repo).digest("hex").slice(0, 16)}.json`);
+  return path5.join(DIR, `${session}-${createHash2("sha256").update(repo).digest("hex").slice(0, 16)}.json`);
 }
 function loadState(session, repo) {
   if (!DIR) return null;
@@ -38586,7 +38612,7 @@ function dropOldStates() {
   if (!DIR) return;
   try {
     for (const name of readdirSync(DIR)) {
-      const file2 = path4.join(DIR, name);
+      const file2 = path5.join(DIR, name);
       if (Date.now() - statSync(file2).mtimeMs > KEEP_MS) unlinkSync(file2);
     }
   } catch {
@@ -38772,7 +38798,7 @@ var ReviewServer = class {
   server = null;
   port = 0;
   constructor(uiDir) {
-    this.uiDir = path5.resolve(uiDir);
+    this.uiDir = path6.resolve(uiDir);
   }
   async start() {
     dropOldStates();
@@ -39155,8 +39181,8 @@ data: ${JSON.stringify(data)}
     });
   }
   async sendFile(res, rel, cacheControl) {
-    const abs = path5.resolve(this.uiDir, rel);
-    if (!abs.startsWith(this.uiDir + path5.sep)) return sendText(res, 404, "Not found");
+    const abs = path6.resolve(this.uiDir, rel);
+    if (!abs.startsWith(this.uiDir + path6.sep)) return sendText(res, 404, "Not found");
     let body;
     try {
       body = await readFile2(abs);
@@ -39164,7 +39190,7 @@ data: ${JSON.stringify(data)}
       return sendText(res, 404, "Not found");
     }
     res.writeHead(200, {
-      "Content-Type": MIME[path5.extname(abs)] ?? "application/octet-stream",
+      "Content-Type": MIME[path6.extname(abs)] ?? "application/octet-stream",
       "Cache-Control": cacheControl,
       "Content-Security-Policy": CSP,
       "Referrer-Policy": "no-referrer",
@@ -39280,9 +39306,9 @@ function sendText(res, status, body) {
 }
 
 // src/server/main.ts
-var DIST_DIR = path6.dirname(fileURLToPath(import.meta.url));
-var UI_DIR = path6.join(DIST_DIR, "ui");
-var VERSION = JSON.parse(readFileSync3(path6.join(DIST_DIR, "..", ".claude-plugin", "plugin.json"), "utf8")).version;
+var DIST_DIR = path7.dirname(fileURLToPath(import.meta.url));
+var UI_DIR = path7.join(DIST_DIR, "ui");
+var VERSION = JSON.parse(readFileSync3(path7.join(DIST_DIR, "..", ".claude-plugin", "plugin.json"), "utf8")).version;
 var serverPromise = null;
 function getServer() {
   serverPromise ??= (async () => {
@@ -39430,8 +39456,8 @@ async function runMcp() {
     async (args) => {
       const server = serverPromise ? await serverPromise : null;
       const all = server?.repoThreads() ?? [];
-      const wanted = args.repo ? path6.resolve(args.repo) : null;
-      const containing = wanted ? all.filter((r) => wanted === r.repo || wanted.startsWith(r.repo + path6.sep)) : all;
+      const wanted = args.repo ? path7.resolve(args.repo) : null;
+      const containing = wanted ? all.filter((r) => wanted === r.repo || wanted.startsWith(r.repo + path7.sep)) : all;
       const repos = wanted ? containing.filter((r) => !containing.some((o) => o.repo.length > r.repo.length)) : all;
       if (args.after !== void 0 && !wanted && repos.filter((r) => r.threads.submissions.length).length > 1) {
         return result("Several repositories have reviews, numbered separately. Set repo to the one the wait command named.", true);
@@ -39464,7 +39490,7 @@ When you have addressed it, reply on each thread with reply_to_review. Then wait
           external_exports.object({
             thread: external_exports.string().describe("A thread id from get_review_comments."),
             body: external_exports.string().min(1).describe(
-              "Markdown: what you changed or your answer first, then only what is needed to follow it, in a short paragraph of plain sentences. No commit history, no account of how you found it, no closing offer."
+              "Markdown: what you changed or your answer first, then only what is needed to follow it, in a short paragraph of plain sentences. No commit history, no account of how you found it, no points the comment did not ask about except a bug in these lines, no closing offer."
             )
           })
         ).min(1)

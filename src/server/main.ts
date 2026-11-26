@@ -266,7 +266,7 @@ async function runMcp(): Promise<void> {
                 .string()
                 .min(1)
                 .describe(
-                  "Markdown: what you changed or your answer first, then only what is needed to follow it, in a short paragraph of plain sentences. No commit history, no account of how you found it, no closing offer.",
+                  "Markdown: what you changed or your answer first, then only what is needed to follow it, in a short paragraph of plain sentences. No commit history, no account of how you found it, no points the comment did not ask about except a bug in these lines, no closing offer.",
                 ),
             }),
           )

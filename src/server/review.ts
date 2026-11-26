@@ -1,4 +1,6 @@
+import path from "node:path";
 import { describeFailures, summarize } from "../engine/diff.js";
+import { gitText } from "../engine/git.js";
 import { lineRange } from "../shared/comments.js";
 import { describeComparison } from "../shared/comparison.js";
 import { changeIds, hunkHeader, oldCommitOf } from "../shared/hunks.js";
@@ -10,21 +12,45 @@ const MAX_CHARS = 60_000;
 const MAX_LINES_PER_CHANGE = 40;
 const MAX_LINE_CHARS = 300;
 const MAX_COMMITS_LISTED = 100;
+const MAX_MESSAGE_CHARS = 20_000;
 const MAX_SNIPPET_LINES = 8;
 
 const indent = (text: string, prefix: string) => text.replace(/^/gm, prefix);
 
-export function formatChanges(diff: DiffResult): string {
+export function formatChanges(diff: DiffResult, messages = new Map<string, string>()): string {
   const count = sum(diff.files, (f) => changeIds(f).length);
   const out = [`${summarize(diff)}, ${plural(count, "change")}. Each change starts with its id.`, ...describeFailures(diff)];
 
   if (diff.commits.length) {
     const shown = diff.commits.slice(-MAX_COMMITS_LISTED);
     out.push("", diff.commitCount > shown.length ? `Commits (newest ${shown.length} of ${diff.commitCount}, oldest first):` : "Commits, oldest first:");
-    for (const c of shown) out.push(`  ${c.sha.slice(0, 7)} ${c.repo ? `${c.repo}: ` : ""}${c.subject}`);
+    let size = 0;
+    for (const c of shown) {
+      out.push(`  ${c.sha.slice(0, 7)} ${c.repo ? `${c.repo}: ` : ""}${c.subject}`);
+      const body = messages.get(c.sha);
+      if (!body || size + body.length > MAX_MESSAGE_CHARS) continue;
+      out.push(indent(body, "      "));
+      size += body.length;
+    }
   }
 
   return [...out, ...formatFiles(diff.files)].join("\n");
+}
+
+export async function commitMessages(diff: DiffResult): Promise<Map<string, string>> {
+  const byRepo = new Map<string, string[]>();
+  for (const c of diff.commits.slice(-MAX_COMMITS_LISTED)) byRepo.set(c.repo ?? "", [...(byRepo.get(c.repo ?? "") ?? []), c.sha]);
+  const messages = new Map<string, string>();
+  await Promise.all(
+    [...byRepo].map(async ([dir, shas]) => {
+      const log = await gitText(path.join(diff.repoRoot, dir), ["log", "-z", "--no-walk=unsorted", "--format=%H%x1f%b", ...shas, "--"]);
+      for (const rec of log.split("\0")) {
+        const [sha = "", body = ""] = rec.split("\x1f");
+        if (body.trim()) messages.set(sha.trim(), body.trim());
+      }
+    }),
+  );
+  return messages;
 }
 
 export function formatFiles(files: FileDiff[], only: Set<string> | null = null, labels = new Map<string, string>()): string[] {

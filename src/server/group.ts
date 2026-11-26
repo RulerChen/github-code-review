@@ -2,7 +2,7 @@ import { changeIds, editedInto, oldCommitOf } from "../shared/hunks.js";
 import type { DiffResult, Review, Topic } from "../shared/types.js";
 import { isRecord, plural } from "../shared/util.js";
 import { ask } from "./claude.js";
-import { checkTopics, formatChanges, formatFiles } from "./review.js";
+import { checkTopics, commitMessages, formatChanges, formatFiles } from "./review.js";
 
 interface AskOptions {
   cwd: string;
@@ -16,7 +16,7 @@ interface GroupOptions extends AskOptions {
   names: string[] | null;
 }
 
-const SUMMARY_RULES = "Add why in one sentence when you know it. Describe the end result of the changes as listed: no commit hashes, no account of which commit did what, nothing about code these changes leave alone, and no advice to the reviewer.";
+const SUMMARY = "an outline in three parts, in this order, each starting with its name in bold in the language you write in: Why, How, What changed. Why is the problem or goal behind the changes, taken from the commit messages or from what you know of the work. Leave this part out when neither says it, rather than guessing. How is the approach, in a sentence or two. What changed is the behavior that differs now, and in which cases. Describe behavior without naming files or functions, and without listing fields, options or steps one by one. Leave out changes that only follow from another one (types, imports, build output, dependencies, and docs or tests that repeat the change), what stays the same, commit hashes and which commit did what, code these changes leave alone, and advice to the reviewer.";
 
 const REPLY = 'Reply with only a JSON object and no other text: {"topics": [{"title": "...", "summary": "...", "ids": ["..."]}]}';
 
@@ -45,7 +45,7 @@ async function askTopics(o: AskOptions, prompt: string, allowEmpty: boolean, che
 
 export async function groupChanges(o: GroupOptions): Promise<Topic[]> {
   const focused = o.focus !== null || o.names !== null;
-  const topics = await askTopics(o, buildPrompt(o.diff, o.focus, o.names), focused, (t) => unknownIds(o.diff, t));
+  const topics = await askTopics(o, buildPrompt(o.diff, o.focus, o.names, await commitMessages(o.diff)), focused, (t) => unknownIds(o.diff, t));
 
   const known = new Set(o.diff.files.flatMap(changeIds));
   const kept = topics.map((t) => ({ ...t, ids: t.ids.filter((id) => known.has(id)) })).filter((t) => t.ids.length > 0);
@@ -57,7 +57,7 @@ export async function groupChanges(o: GroupOptions): Promise<Topic[]> {
   return kept;
 }
 
-function buildPrompt(diff: DiffResult, focus: string | null, names: string[] | null): string {
+function buildPrompt(diff: DiffResult, focus: string | null, names: string[] | null, messages: Map<string, string>): string {
   const empty = ' If no change fits, reply with {"topics": []}.';
   const scope = names
     ? `Use exactly these topics, in this order and with these titles: ${names.map((n) => JSON.stringify(n)).join(", ")}. Do not add topics of your own. Put each change in the topic it belongs to, leave out the changes that fit none of them, and leave out a topic that no change belongs to.${empty}`
@@ -69,13 +69,13 @@ function buildPrompt(diff: DiffResult, focus: string | null, names: string[] | n
     "A topic is one feature, fix or purpose, and can span files. Use what you know about why the changes were made, and the commit messages, to tell which changes belong together. You can read files to check details, but do not change anything.",
     "For each topic give:",
     '- "title": a few words.',
-    `- "summary": Markdown on what behaves differently after these changes: name each function or file involved and say what it did before, what it does now, and in which cases. ${SUMMARY_RULES}`,
+    `- "summary": Markdown, ${SUMMARY}`,
     '- "ids": the ids of all changes in the topic, exactly as listed below.',
     scope,
     "Order the topics the way a reviewer should read them. Write titles and summaries in the language the user writes in.",
     REPLY,
     "",
-    formatChanges(diff),
+    formatChanges(diff, messages),
   ].join("\n");
 }
 
@@ -166,7 +166,7 @@ function buildSyncPrompt(review: Review, diff: DiffResult, delta: TopicDelta): s
     "",
     "Give each topic that gains or loses changes, and each new topic:",
     '- "title": the title exactly as above, or a few words for a new topic.',
-    `- "summary": Markdown on what behaves differently after the topic's changes as they are now: name each function or file involved and say what it did before, what it does now, and in which cases. ${SUMMARY_RULES}`,
+    `- "summary": Markdown on the topic's changes as they are now, ${SUMMARY}`,
     '- "ids": the ids of the new and edited changes that belong in the topic. Leave out the ids it already has.',
     `${scope} Leave out the topics that neither gain nor lose changes. Write in the language of the summaries above.`,
     REPLY,
