@@ -228,10 +228,7 @@ export function ConversationsPanel({ conv }: { conv: Conversations }) {
         </button>
       </header>
       {ordered.length === 0 ? (
-        <p className="conversations-empty">
-          No conversations yet. Click a line number to comment on lines, or the comment button in a file's or topic's
-          header to comment on all of it. Comments go to Claude, which answers them and changes the code the way they ask.
-        </p>
+        <p className="conversations-empty">No comments yet.</p>
       ) : (
         <ul className="conversations-list">
           {ordered.map((t) => (
@@ -246,9 +243,11 @@ export function ConversationsPanel({ conv }: { conv: Conversations }) {
           ))}
         </ul>
       )}
-      <footer className="conversations-foot">
-        <kbd>u</kbd> jumps to the next new answer
-      </footer>
+      {ordered.length > 0 && (
+        <footer className="conversations-foot">
+          <kbd>u</kbd> jumps to the next new answer
+        </footer>
+      )}
     </aside>
   );
 }
