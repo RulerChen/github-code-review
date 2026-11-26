@@ -1996,11 +1996,33 @@ body.is-resizing .file {
 }
 
 .status-light {
+  position: relative;
   display: inline-grid;
   flex: none;
   place-items: center;
   width: 28px;
   height: 28px;
+}
+
+.status-tip {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  box-shadow: var(--overlay-shadow);
+  color: var(--fg);
+  font-size: 12px;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 150ms var(--ease-out);
+}
+
+.status-light:hover > .status-tip {
+  opacity: 1;
 }
 
 .status-dot {

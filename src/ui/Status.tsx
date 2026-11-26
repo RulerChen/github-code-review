@@ -18,8 +18,9 @@ export function claudeState(status: SessionStatus | null, connected: boolean): C
 export function ClaudeStatus({ state }: { state: Claude }) {
   const label = LABELS[state];
   return (
-    <span className={`status-light is-${state}`} role="img" aria-label={label} title={label}>
+    <span className={`status-light is-${state}`} role="img" aria-label={label}>
       <span className="status-dot" />
+      <span className="status-tip">{label}</span>
     </span>
   );
 }
