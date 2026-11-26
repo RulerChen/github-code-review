@@ -7,7 +7,6 @@ export interface Language {
   params: (name: string) => string[];
   module?: RegExp;
   shorthand?: boolean;
-  scopes: RegExp[];
 }
 
 export type Scoped =
@@ -65,7 +64,6 @@ export const LANGUAGES: Language[] = [
     ],
     params: (n) => [`^\\s*\\*{0,2}${n}${E}\\s*(?:[,:)]|=(?!=)|$)`],
     module: /^\s*from\s+([\w.]+)\s+import\b|^\s*import\s+([\w.]+)/,
-    scopes: [/^\s*(?:async\s+)?def\s+(?<n>\w+)/, /^\s*class\s+(?<n>\w+)/, /^(?<n>\w+)\s*(?::[^=]*)?=(?!=)/],
   },
   {
     exts: ["js", "jsx", "mjs", "cjs", "ts", "tsx", "mts", "cts"],
@@ -96,14 +94,6 @@ export const LANGUAGES: Language[] = [
       `^\\s*[{\\[](?:[^=()]*?[,{\\[\\s:])?${n}${E}\\s*(?:=[^,}\\]]*)?[,}\\]]`,
     ],
     module: /\bfrom\s*["']([^"']+)["']|\brequire\s*\(\s*["']([^"']+)["']/,
-    scopes: [
-      /\bfunction\s*\*?\s*(?<n>[\w$]+)\s*[(<]/,
-      /^\s*(?:(?:export|default|declare|abstract)\s+)*(?:class|interface|type|enum|namespace)\s+(?<n>[\w$]+)/,
-      new RegExp(`^(?:export\\s+)?(?:declare\\s+)?${JS_VAR}`),
-      new RegExp(`^\\s+${JS_VAR}\\s*(?::[^=]*)?=\\s*(?:${JS_FUNCTION}|(?:React\\.)?use[A-Z]\\w*\\s*(?:<.*>)?\\()`),
-      new RegExp(`^\\s*${JS_HEAD}\\*?(?<n>(?!${JS_CONTROL}\\b)[\\w$#]+)\\s*(?:<[^>()]*>)?${ARGS}(?:\\s*:.+?)?\\s*\\{\\s*$`),
-      new RegExp(`^\\s*${JS_MODS}(?:static\\s+)?(?<n>[\\w$#]+)\\s*(?:(?::[^=]*)?=|:)\\s*${JS_FUNCTION}`),
-    ],
   },
   {
     exts: ["go"],
@@ -121,7 +111,6 @@ export const LANGUAGES: Language[] = [
     ],
     params: (n) => [`^\\s*${n}${E}(?:\\s*,|\\s+[\\w*\\[\\]<.(])`],
     module: /^\s*(?:import\s+)?[\w.]*\s*"([^"]+)"\s*$/,
-    scopes: [/^func\s*(?:\(\s*(?:\w+\s+)?\*?(?<o>\w+)[^)]*\)\s*)?(?<n>\w+)\s*[(\[]/, /^type\s+(?<n>\w+)/, /^(?:var|const)\s+(?<n>\w+)/],
   },
   {
     exts: ["rs"],
@@ -147,13 +136,6 @@ export const LANGUAGES: Language[] = [
     ],
     params: (n) => [`^\\s*(?:mut\\s+)?${n}${E}\\s*:`],
     module: /^\s*(?:pub(?:\([^)]*\))?\s+)?use\s+([\w:]+)/,
-    scopes: [
-      /\bfn\s+(?<n>\w+)\s*[(<]/,
-      /^\s*(?:pub(?:\([^)]*\))?\s+)?(?:unsafe\s+)?(?:struct|enum|trait|union|mod)\s+(?<n>\w+)/,
-      /^\s*(?:unsafe\s+)?impl\b(?:\s*<.*?>)?\s+(?:.*?\s+for\s+)?(?<n>[\w:]+)/,
-      /^\s*macro_rules!\s*(?<n>\w+)/,
-      /^(?:pub(?:\([^)]*\))?\s+)?(?:const|static)\s+(?:mut\s+)?(?<n>\w+)/,
-    ],
   },
   {
     exts: ["c", "h", "cc", "cpp", "cxx", "c++", "hpp", "hh", "hxx", "h++", "ipp", "inl", "cu", "cuh", "m", "mm", "java", "cs"],
@@ -179,12 +161,6 @@ export const LANGUAGES: Language[] = [
       `\\((?:[^()]*?,)?\\s*(?:${C_TYPE}(?:\\s*[*&]+\\s*|\\s+))?${n}${E}\\s*(?:,[^()]*)?\\)(?:\\s+->|\\s*=>)`,
     ],
     params: (n) => [`(?:^|[(,])\\s*${typed(n)}\\s*(?:\\[[^\\]]*\\])?\\s*(?:[,)=]|$)`],
-    scopes: [
-      new RegExp(`^(?![\\s#/}])(?:[^;=(]*?[^\\w$:~])?${C_NAME}\\s*${C_OPENS}`),
-      new RegExp(`^\\s+(?!${C_KEYWORD}\\b)(?:[\\w@<][\\w:<>,.?*&\\[\\]]*\\s+)+[*&]*${C_NAME}\\s*${C_OPENS}`),
-      /^\s*(?:(?:typedef|public|private|protected|internal|static|final|abstract|sealed|partial|export)\s+)*(?:struct|class|union|enum(?:\s+(?:class|struct))?|interface|record|namespace)\s+(?:[A-Z][A-Z0-9_]*(?:\([^)]*\))?\s+)?(?<n>\w+(?:::\w+)*)\s*(?:[{:<]|$|(?:final|extends|implements|permits|where)\b)/,
-      /^(?![\s#/}])[^;=(]*?[^\w$](?<n>\w+)\s*(?:\[[^\]]*\]\s*)*=\s*\{?\s*$/,
-    ],
   },
 ];
 
@@ -205,12 +181,6 @@ export const GENERIC: Language = {
     `\\bfor(?:each)?\\s+\\(?(?:\\w+\\s*,\\s*)*[$]?${n}${E}(?:\\s*,\\s*\\w+)*\\s+in\\b`,
   ],
   params: (n) => [`^\\s*(?:\\w+\\s+)?[$@%&*]*${n}${E}\\s*(?:[,:)]|=(?!=)|$)`],
-  scopes: [
-    new RegExp(
-      `^\\s*(?:(?:export|pub|public|private|protected|internal|open|override|static|final|abstract|async|local|suspend|inline|data|sealed)\\s+)*(?:${KEYWORDS})\\s+(?:self\\.)?(?<n>[\\w$.:]*[\\w$][?!]?)`,
-    ),
-    /^\s*(?:function\s+)?(?<n>[\w-]+)\s*\(\s*\)\s*\{?\s*$/,
-  ],
 };
 
 export function languageOf(filePath: string): Language {
@@ -325,59 +295,11 @@ function inList(lines: string[], no: number): boolean {
   return false;
 }
 
-const NAMES = 2;
-const MACRO = /^\s*#\s*define\s+(\w+)/;
-
 export function reader(text: string) {
   const lines = text.split("\n");
   const indents: number[] = [];
   const indentAt = (k: number) => (indents[k] ??= /^(?:#|$)/.test(lines[k - 1]!.trim()) || NO_SCOPE.test(lines[k - 1]!.trim()) ? -1 : indentOf(lines[k - 1]!));
   return { lines, indentAt };
-}
-
-export function insideOf(text: string, filePath: string, read = reader(text)): (no: number) => string | null {
-  const { lines, indentAt } = read;
-  const scopes = languageOf(filePath).scopes;
-  const header = (k: number, indent: number): string => {
-    const l = lines[k - 1]!.trimEnd();
-    if (!l.endsWith("(")) return l;
-    for (let d = k + 1; d <= lines.length; d++) {
-      const i = indentAt(d);
-      if (i >= 0 && i <= indent) return lines[d - 1]!.trim().startsWith(")") ? l + lines[d - 1]!.trim() : l;
-    }
-    return l;
-  };
-
-  return (no) => {
-    const line = lines[no - 1];
-    if (line === undefined) return null;
-    let top = no;
-    while (top > 1 && lines[top - 2]!.trimEnd().endsWith("\\")) top--;
-    const macro = top < no ? MACRO.exec(lines[top - 1]!)?.[1] : undefined;
-    if (macro) return macro;
-    let next = no;
-    while (next <= lines.length && indentAt(next) < 0) next++;
-    let min = Math.max(indentOf(line), next <= lines.length ? indentAt(next) : 0);
-    let opened = closesList(line.trim());
-
-    const names: string[] = [];
-    for (let k = no - 1; k >= 1 && (min > 0 || opened) && names.length < NAMES; k--) {
-      const i = indentAt(k);
-      if (i < 0 || i > min) continue;
-      const encloses = i < min || opened;
-      const under = opened;
-      opened = false;
-      min = i;
-      if (!encloses) continue;
-
-      const l = header(k, i);
-      let found: Record<string, string | undefined> | undefined;
-      for (const r of scopes) if ((found = r.exec(l)?.groups)) break;
-      if (found?.n) names.unshift((found.o ? `${found.o}.${found.n}` : found.n).replace(/<[^<>]*>/g, ""));
-      else opened = closesList(l.trim()) || (under && /^(?:[)\]]|where\b)/.test(l.trim()));
-    }
-    return names.length ? names.join(" \u203a ") : null;
-  };
 }
 
 export type Role = "field" | "write";
@@ -400,6 +322,7 @@ const TYPE_VALUE = /^\s*(?:readonly\s+)?(?:string|number|boolean|bigint|symbol|u
 const ANNOTATION = /`[^`]*\b\w+:$|@(?:JsonProperty|JsonAlias|JsonKey|SerializedName|SerialName)\s*\((?:[^)]*=\s*)?$|\b(?:\w*alias|rename)\s*=\s*$/;
 const DEFINES = /\b(?:def|function|fn|func|fun|sub|lambda)\b[^()]*$/;
 const ARROW_PARAMS = /^\s*(?::[^=()]*)?(?:,[^()]*)?\)\s*(?::[^=]+)?=>/;
+const KEY = /^\??\s*:(?![:=])/;
 
 const STRING = /(["'`])(?:\\.|(?!\1).)*\1/g;
 
@@ -499,7 +422,7 @@ function usesOf(text: string, filePath: string, read = reader(text)): (no: numbe
     if (/(?:^|[\s(,])[\w$]+\??\s*:(?!:)[^=,;(){}]*$|\btype\s+$/.test(lead)) return none;
     if (/(?:\+\+|--)\s*(?:[\w$]+(?:\.|->))*$/.test(lead) && !/^(?:\.|->|\[)/.test(rest)) return { role: "write", key: false };
     const start = ONLY_MODS.test(lead);
-    const key = /^\??\s*:(?![:=])/.test(rest);
+    const key = KEY.test(rest);
     const short = lang.shorthand === true && /^\s*(?:[,}]|$)/.test(rest);
     const placed = start || /[{(,;]\s*$/.test(lead);
 
@@ -521,4 +444,20 @@ function usesOf(text: string, filePath: string, read = reader(text)): (no: numbe
     }
     return none;
   };
+}
+
+export function mayBeField(line: string, name: string): boolean {
+  for (const m of line.matchAll(new RegExp(`(?<![\\w$])${name.replaceAll("$", "\\$")}(?![\\w$])`, "g"))) {
+    let lead = line.slice(0, m.index);
+    let rest = line.slice(m.index + name.length);
+    const quoted = /["'`]$/.test(lead) && /^["'`]/.test(rest);
+    if (quoted) {
+      if (ANNOTATION.test(lead.slice(0, -1))) return true;
+      lead = lead.slice(0, -1);
+      rest = rest.slice(1);
+    }
+    if (ONLY_MODS.test(lead) || KEY.test(rest)) return true;
+    if (!quoted && !line.includes("(") && C_FIELD_LEAD.test(lead) && C_FIELD_REST.test(rest)) return true;
+  }
+  return false;
 }

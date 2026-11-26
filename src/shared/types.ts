@@ -171,7 +171,6 @@ export interface RepoHit {
   no: number;
   text: string;
   at: number;
-  inside?: string | null;
   role?: "field" | "write";
 }
 

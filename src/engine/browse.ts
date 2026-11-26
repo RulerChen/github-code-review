@@ -8,7 +8,7 @@ import type { DiffRepo, DiffResult, RepoFile, RepoHit } from "../shared/types.js
 import { compareText } from "../shared/util.js";
 import { ABSENT, classify, type Content, MAX_CONTENT_BYTES, mapLimit, readWorkTree, REPO_LIMIT } from "./diff.js";
 import { git, gitLines, gitStream } from "./git.js";
-import { fromPosix, GENERIC, insideOf, type Language, LANGUAGES, languageOf, reader, rolesOf, type Scoped, scopeOf } from "../shared/scope.js";
+import { fromPosix, GENERIC, type Language, LANGUAGES, languageOf, mayBeField, reader, rolesOf, type Scoped, scopeOf } from "../shared/scope.js";
 
 const MAX_HIT_CHARS = 400;
 const GREP_LIMIT = availableParallelism();
@@ -97,7 +97,15 @@ async function readBlobAt(root: string, rev: string, rest: string): Promise<Cont
   return classify(await git(root, ["cat-file", "blob", blob.oid]));
 }
 
-export async function grepRepo(diff: DiffResult, query: string, whole: boolean, matchCase: boolean, signal: AbortSignal, withDefs = true): Promise<Searched> {
+export async function grepRepo(
+  diff: DiffResult,
+  query: string,
+  whole: boolean,
+  matchCase: boolean,
+  signal: AbortSignal,
+  withDefs = true,
+  keep?: (text: string) => boolean,
+): Promise<Searched> {
   const found = wordRegExp(query, whole, matchCase);
   const pattern = wordPattern(query, whole, matchCase);
   const same = matchCase ? pattern : pattern.toLowerCase();
@@ -110,8 +118,9 @@ export async function grepRepo(diff: DiffResult, query: string, whole: boolean, 
   const hits: RepoHit[] = [];
   const defs: RepoHit[] = [];
   const match = ["-E", ...ignoreCase(matchCase), ...lines];
-  const bytes = !matchCase && ASCII.test(query);
-  await grepLines(diff, searchable(diff), match, ["."], signal, bytes, (filePath, no, text) => {
+  const scan = { literal: matchCase && WORD.test(query), bytes: !matchCase && ASCII.test(query) };
+  await grepLines(diff, searchable(diff), match, ["."], signal, scan, (filePath, no, text) => {
+    if (keep && !keep(text)) return;
     const at = found?.exec(text)?.index ?? -1;
     const defined = defining?.test(filePath, text) ?? false;
     if (at >= 0 || !defined) hits.push(hitOf(filePath, no, text, at));
@@ -136,7 +145,7 @@ function definer(name: string, matchCase: boolean) {
 
 async function describe(diff: DiffResult, hits: RepoHit[], found: RegExp | null): Promise<void> {
   const texts = await readTexts(diff, [...new Set(hits.map((h) => h.path))]);
-  const files = new Map<string, { lines: string[]; inside: ReturnType<typeof insideOf>; roles: ReturnType<typeof rolesOf> }>();
+  const files = new Map<string, { lines: string[]; roles: ReturnType<typeof rolesOf> }>();
   const every = found && new RegExp(found.source, `${found.flags.replace("g", "")}g`);
   for (const h of hits) {
     const text = texts.get(h.path);
@@ -144,9 +153,8 @@ async function describe(diff: DiffResult, hits: RepoHit[], found: RegExp | null)
     let file = files.get(h.path);
     if (!file) {
       const read = reader(text);
-      files.set(h.path, (file = { lines: read.lines, inside: insideOf(text, h.path, read), roles: rolesOf(text, h.path, read) }));
+      files.set(h.path, (file = { lines: read.lines, roles: rolesOf(text, h.path, read) }));
     }
-    h.inside = file.inside(h.no);
     const line = file.lines[h.no - 1] ?? "";
     for (const m of every ? line.matchAll(every) : []) {
       if (!SPELLED.test(m[0]) || /[\w$]/.test((line[m.index - 1] ?? "") + (line[m.index + m[0].length] ?? ""))) continue;
@@ -220,8 +228,6 @@ async function nearestFirst(groups: DiffRepo[][], find: (repos: DiffRepo[]) => P
 
 const ignoreCase = (matchCase: boolean) => (matchCase ? [] : ["-i"]);
 
-const defines = (plain: string[], patterns: string[]) => ["-E", ...plain.flatMap((p) => ["-e", p, "--and"]), "(", ...patterns.flatMap((p) => ["-e", p]), ")"];
-
 export const isIdentifier = (name: string) => IDENTIFIER.test(name);
 
 export interface Click {
@@ -249,17 +255,31 @@ export async function findDefinitions(diff: DiffResult, name: string, from: stri
   const pathspecs = language.exts.length ? language.exts.map((e) => `*.${e}`) : ["."];
   const own = repoOf(diff, from)?.repo;
   const all = searchable(diff);
-  const lookUp = (patterns: string[]) =>
-    nearestFirst(own ? [[own], all.filter((r) => r !== own)] : [all], async (repos) => {
+  const lookUp = (patterns: string[]) => {
+    const tests = patterns.map((p) => new RegExp(fromPosix(p)));
+    const match = ["-E", ...(WORD.test(name) ? ["-w"] : []), "-e", escaped];
+    return nearestFirst(own ? [[own], all.filter((r) => r !== own)] : [all], async (repos) => {
       const hits: RepoHit[] = [];
-      await grepLines(diff, repos, defines([escaped], patterns), pathspecs, signal, false, (filePath, no, text) => void hits.push(hitOf(filePath, no, text, text.indexOf(name))));
+      await grepLines(diff, repos, match, pathspecs, signal, { literal: WORD.test(name), bytes: false }, (filePath, no, text) => {
+        if (tests.some((t) => t.test(text))) hits.push(hitOf(filePath, no, text, text.indexOf(name)));
+      });
       return { hits: hits.sort(byPlace(() => 0)) };
     });
+  };
   const fields = async (): Promise<Found> => {
-    const lines = await grepRepo(diff, name, true, true, signal, false);
+    const lines = await grepRepo(diff, name, true, true, signal, false, (text) => mayBeField(text, name));
     return { hits: lines.hits.filter((h) => h.role === "field") };
   };
   const methods = () => lookUp(language.patterns(escaped));
+  const fieldsHere = async (): Promise<RepoHit[]> => {
+    const word = wordRegExp(name, true, true)!;
+    const hits = text!.split("\n").flatMap((line, i) => {
+      const at = word.exec(line)?.index ?? -1;
+      return at >= 0 && mayBeField(line, name) ? [hitOf(from, i + 1, line, at)] : [];
+    });
+    await describe(diff, hits, word);
+    return hits.filter((h) => h.role === "field");
+  };
   let found: Found;
   let byName = false;
   if (scoped.kind !== "member") found = await lookUp([...language.patterns(escaped), ...language.values(escaped)]);
@@ -270,9 +290,13 @@ export async function findDefinitions(diff: DiffResult, name: string, from: stri
       byName = found.hits.length > 0;
     }
   } else {
-    const [declared, defined] = await Promise.all([fields(), methods()]);
-    byName = declared.hits.length > 0;
-    found = byName ? declared : defined;
+    const mine = scoped.own ? await fieldsHere() : [];
+    if (mine.length === 1) found = { hits: mine };
+    else {
+      const [declared, defined] = await Promise.all([fields(), methods()]);
+      byName = declared.hits.length > 0;
+      found = byName ? declared : defined;
+    }
   }
   const clicked = click && text !== null ? (text.split("\n")[click.line - 1] ?? "") : "";
   if (click && clicked.indexOf(name) === click.col && found.hits.some((h) => h.path === from && h.no === click.line)) return itself;
@@ -308,10 +332,11 @@ async function grepLines(
   match: string[],
   pathspecs: string[],
   signal: AbortSignal,
-  bytes: boolean,
+  scan: { literal: boolean; bytes: boolean },
   onLine: (filePath: string, no: number, text: string) => void,
 ): Promise<void> {
-  const threads = Math.max(1, Math.floor(Math.min(GREP_LIMIT / 2, GREP_LIMIT / repos.length)));
+  const most = !scan.literal ? GREP_LIMIT / 2 : repos.length === 1 ? 1 : 2;
+  const threads = Math.max(1, Math.floor(Math.min(most, GREP_LIMIT / repos.length)));
   await mapLimit(repos, GREP_LIMIT, async (repo) => {
     const prefix = repo.dir ? `${repo.dir}/` : "";
     const rev = repo.headCommit;
@@ -332,7 +357,7 @@ async function grepLines(
       },
       [0, 1],
       signal,
-      bytes ? { LC_ALL: "C" } : {},
+      scan.bytes ? { LC_ALL: "C" } : {},
     );
   });
 }

@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { insideOf } from "../shared/scope";
 import { wordRegExp } from "../shared/search";
 import type { FileDiff, RepoHit } from "../shared/types";
 import { plural } from "../shared/util";
@@ -19,7 +18,6 @@ export interface Hit {
   at: number;
   length: number;
   inDiff: boolean;
-  inside: string | null;
 }
 
 interface Found {
@@ -41,15 +39,13 @@ export function searchChanges(files: FileDiff[], query: string, whole: boolean, 
 
   for (const file of files) {
     const hits: Hit[] = [];
-    let place: ((no: number) => string | null) | undefined;
     for (const hunk of file.hunks) {
       for (const line of hunk.lines) {
         const match = line.kind === "add" ? word.exec(line.text) : null;
         if (!match) continue;
 
         const no = line.newNo!;
-        const inside = file.newContent === null ? null : (place ??= insideOf(file.newContent, file.path))(no);
-        const hit: Hit = { path: file.path, no, kind: "add", text: line.text, at: match.index, length: match[0].length, inDiff: true, inside };
+        const hit: Hit = { path: file.path, no, kind: "add", text: line.text, at: match.index, length: match[0].length, inDiff: true };
         if (!hits.length) found.groups.push({ path: file.path, hits });
         hits.push(hit);
         found.hits.push(hit);
@@ -92,7 +88,7 @@ export function searchSections(
     const match = word?.exec(h.text);
     const kind = lines.has(h.no) ? "add" : "context";
     const at = match?.index ?? -1;
-    put({ path: h.path, no: h.no, kind, text: h.text, at, length: match?.[0].length ?? 0, inDiff: false, inside: h.inside ?? null });
+    put({ path: h.path, no: h.no, kind, text: h.text, at, length: match?.[0].length ?? 0, inDiff: false });
   }
 
   const groups = [...byFile]
@@ -111,7 +107,7 @@ export function definitionsFound(hits: RepoHit[], files: FileDiff[], name: strin
     const kind = addedLines(changed.get(h.path)).has(h.no) ? "add" : "context";
     const match = word?.exec(h.text);
     const length = h.at < 0 ? 0 : match?.index === h.at ? match[0].length : name.length;
-    const hit: Hit = { path: h.path, no: h.no, kind, text: h.text, at: h.at, length, inDiff: false, inside: null };
+    const hit: Hit = { path: h.path, no: h.no, kind, text: h.text, at: h.at, length, inDiff: false };
     const last = groups[groups.length - 1];
     if (last?.path === h.path) last.hits.push(hit);
     else groups.push({ path: h.path, hits: [hit] });
@@ -299,19 +295,11 @@ function HitGroups({ groups, current, onOpen, onToggle }: GroupsProps) {
       </button>
       {g.open && (
         <ul>
-          {g.hits.map((h, n) => {
-            const starts = h.inside !== (g.hits[n - 1]?.inside ?? null);
-            return (
-              <li key={h.no} className={starts && h.inside === null ? "search-outside" : undefined}>
-                {starts && h.inside !== null && (
-                  <span className="search-inside" title={`These lines are in ${h.inside}`}>
-                    {h.inside}
-                  </span>
-                )}
-                <HitButton hit={h} current={h === current} onOpen={onOpen} />
-              </li>
-            );
-          })}
+          {g.hits.map((h) => (
+            <li key={h.no}>
+              <HitButton hit={h} current={h === current} onOpen={onOpen} />
+            </li>
+          ))}
         </ul>
       )}
     </section>

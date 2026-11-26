@@ -615,21 +615,6 @@ body.is-resizing .file {
   text-overflow: ellipsis;
 }
 
-.search-inside {
-  display: block;
-  overflow: hidden;
-  padding: 2px 8px 0 16px;
-  color: var(--fg-muted);
-  font: 11px/18px var(--mono);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.search-outside {
-  margin-top: 2px;
-  border-top: 1px dashed var(--border);
-}
-
 .search-hit {
   display: flex;
   gap: 8px;

@@ -109,7 +109,6 @@ export function DefinitionMenu({ lookup, onPick, onSearch, onClose }: Props) {
                 <button onClick={() => onPick(h)} title={`${h.path}:${h.no}`}>
                   <span className="picker-item-label definition-code">{h.text.trim()}</span>
                   <span className="picker-item-detail">
-                    {h.inside ? `${h.inside} · ` : ""}
                     {basename(h.path)}:{h.no}
                   </span>
                 </button>
