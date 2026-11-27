@@ -1798,6 +1798,7 @@ body.is-resizing .file {
 }
 
 .thread-body-inner {
+  min-width: 0;
   min-height: 0;
 }
 
