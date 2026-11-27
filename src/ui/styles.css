@@ -1716,10 +1716,11 @@ body.is-resizing .file {
 
 .thread-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   min-height: 36px;
-  padding: 0 12px;
+  padding: 6px 12px;
   border-radius: 5px;
   font-size: 12px;
 }
